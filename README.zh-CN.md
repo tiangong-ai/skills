@@ -54,3 +54,11 @@ npm i skills -g
   ```bash
   npx skills update
   ```
+
+## 环境变量
+- `sci-journals-hybrid-search`
+  - `TIANGONG_AI_APIKEY`: 必填。用于 Supabase edge function 的 `x-api-key`。
+- `dify-knowledge-base-search`
+  - `DIFY_API_BASE_URL`: 必填。示例 `https://api.dify.ai/v1`。
+  - `DIFY_DATASET_ID`: 必填。Dify 数据集（知识库）ID。
+  - `DIFY_API_KEY`: 必填。用于 `Authorization: Bearer <DIFY_API_KEY>`。

@@ -54,3 +54,11 @@ npm i skills -g
   ```bash
   npx skills update
   ```
+
+## Environment variables
+- `sci-journals-hybrid-search`
+  - `TIANGONG_AI_APIKEY`: required. Used as `x-api-key` for the Supabase edge function.
+- `dify-knowledge-base-search`
+  - `DIFY_API_BASE_URL`: required. Example `https://api.dify.ai/v1`.
+  - `DIFY_DATASET_ID`: required. Dify dataset (knowledge base) ID.
+  - `DIFY_API_KEY`: required. Used as `Authorization: Bearer <DIFY_API_KEY>`.
