@@ -1,0 +1,25 @@
+{
+  "report_type": "daily",
+  "date": "2026-02-10",
+  "date_range": {
+    "start": "2026-02-10",
+    "end": "2026-02-10"
+  },
+  "week": "2026-W07",
+  "timezone": "Asia/Shanghai",
+  "output_style": "concise",
+  "output_format": "markdown",
+  "include_stats": true,
+  "include_charts": false,
+  "include_links": true,
+  "include_keywords": [
+    "ai",
+    "llm",
+    "release",
+    "benchmark"
+  ],
+  "exclude_keywords": [
+    "job posting",
+    "sponsored"
+  ]
+}
