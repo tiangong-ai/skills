@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sustainability RSS Summary"
+  short_description: "Fetch paper abstracts via OpenAlex+S2 with retries"
+  default_prompt: "Use $sustainability-rss-summary to ingest RSS DOI events, fetch abstracts via OpenAlex with Semantic Scholar fallback, and operate delayed retries before LLM summarization."
