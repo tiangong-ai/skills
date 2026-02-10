@@ -1,4 +1,0 @@
-interface:
-  display_name: "AI Tech RSS Summary"
-  short_description: "Generate daily/weekly AI tech reports from mixed inputs"
-  default_prompt: "Use this skill to generate daily or weekly AI/tech reports from logs, events, task status, and RSS summaries with configurable filters, style, and output format."

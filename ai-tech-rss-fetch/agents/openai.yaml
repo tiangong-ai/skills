@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Tech RSS Fetch"
+  short_description: "Fetch RSS full text with fallback"
+  default_prompt: "Use $ai-tech-rss-fetch to fetch AI/tech RSS item text with full-text-first extraction and summary fallback, returning plain text only."

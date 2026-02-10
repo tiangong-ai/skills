@@ -1,0 +1,30 @@
+{
+  "input_type": "opml",
+  "opml_path": "assets/hn-popular-blogs-2025.opml",
+  "date": "2026-02-10",
+  "date_range": {
+    "start": "2026-02-03",
+    "end": "2026-02-10"
+  },
+  "timezone": "Asia/Shanghai",
+  "lookback_hours": 24,
+  "seen_store_path": ".state/ai-tech-rss-fetch-seen.sqlite",
+  "seen_ttl_days": 30,
+  "enable_conditional_get": true,
+  "emit_no_new_items": true,
+  "max_items": 20,
+  "dedupe": true,
+  "min_fulltext_chars": 400,
+  "fallback_to_summary": true,
+  "include_metadata": true,
+  "output_format": "text",
+  "include_keywords": [
+    "ai",
+    "llm",
+    "model"
+  ],
+  "exclude_keywords": [
+    "job posting",
+    "sponsored"
+  ]
+}
