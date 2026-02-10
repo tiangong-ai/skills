@@ -3,56 +3,45 @@
 ## Accepted Input Sources
 - RSS XML feed URLs
 - OPML feed lists (`.opml`)
-- Pre-collected RSS item files (`.json`, `.jsonl`, `.csv`, `.md`, `.txt`)
 
 ## Normalized Record Schema
-Normalize every input item to the following fields before filtering and output:
+Persist feed-level and entry-level metadata in SQLite.
 
 ```json
 {
-  "item_id": "optional stable id",
-  "guid": "optional feed guid/id",
-  "published_at": "2026-02-10T09:30:00+08:00",
-  "source_type": "rss",
-  "source_name": "feed title or source name",
-  "title": "short title",
-  "link": "https://example.com/item",
-  "canonical_url": "normalized url for dedupe",
-  "content": "rss content/description/summary if provided",
-  "full_text": "extracted full article text if available",
-  "final_text": "selected output text after fallback",
-  "text_source": "fulltext|rss_content|rss_summary|none",
-  "dedupe_key": "stable dedupe key",
-  "content_hash": "sha256(final_text)",
-  "tags": ["ai", "release"],
-  "author": "optional author"
+  "feed": {
+    "feed_url": "https://example.com/feed.xml",
+    "feed_title": "Example Feed",
+    "site_url": "https://example.com/",
+    "etag": "optional etag",
+    "last_modified": "optional HTTP last-modified header",
+    "last_checked_at": "2026-02-10T09:30:00Z",
+    "last_status": 200
+  },
+  "entry": {
+    "dedupe_key": "guid:<id> | url:<canonical_url> | hash:<sha256>",
+    "guid": "optional guid/id",
+    "url": "https://example.com/post",
+    "canonical_url": "https://example.com/post",
+    "title": "entry title",
+    "author": "optional author",
+    "published_at": "2026-02-10T09:30:00Z",
+    "updated_at": "2026-02-10T10:00:00Z",
+    "summary": "feed summary/description",
+    "categories": ["ai", "llm"],
+    "content_hash": "sha256(title+summary+timestamps+url)",
+    "first_seen_at": "2026-02-10T10:05:00Z",
+    "last_seen_at": "2026-02-10T10:05:00Z"
+  }
 }
 ```
 
-## Minimal Parsing Rules by File Type
+## Parsing Rules
 - RSS XML/Atom:
-  - Parse `title`, `link`, `pubDate`/`updated`, `content:encoded`, `description`, `summary`.
-  - Keep raw content fields for fallback use.
+  - Parse feed metadata: `title`, `link`, HTTP caching headers, status.
+  - Parse entry metadata: `id/guid`, `link`, `title`, `author`, `published`, `updated`, `summary`, tags.
 - OPML:
-  - Parse each `<outline>` `xmlUrl` as feed source.
-  - Fetch and parse each feed URL as RSS XML/Atom.
-- `json` / `jsonl`:
-  - Accept arrays or line-delimited objects.
-  - Common aliases:
-    - time: `published_at`, `pub_date`, `date`, `timestamp`
-    - title: `title`, `headline`
-    - url: `link`, `url`
-    - content: `content`, `description`, `summary`, `full_text`
-- `csv`:
-  - Map columns by aliases same as JSON aliases.
-- `md` / `txt`:
-  - Parse list-like entries with title, link, and optional text blocks.
-
-## Text Source Selection Model
-- `fulltext`: extracted from article URL and passes length/quality checks.
-- `rss_content`: RSS `content:encoded` or `content`.
-- `rss_summary`: RSS `description` or `summary`.
-- `none`: no usable text fields found.
+  - Parse every `<outline xmlUrl="...">` as a feed URL and insert into subscriptions.
 
 ## RSS Source Asset
 - Use `assets/hn-popular-blogs-2025.opml` as the default feed source list.

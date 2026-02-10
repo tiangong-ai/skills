@@ -1,4 +1,4 @@
 interface:
-  display_name: "AI Tech RSS Fetch"
-  short_description: "Fetch and archive RSS text with dedupe"
-  default_prompt: "Use $ai-tech-rss-fetch to fetch latest AI/tech RSS items, prefer web_fetch for full text, dedupe by canonical URL, and archive markdown files with deterministic filenames."
+  display_name: "AI Tech RSS Subscribe"
+  short_description: "Subscribe RSS and store metadata"
+  default_prompt: "Use $ai-tech-rss-fetch to subscribe RSS feeds from URLs or OPML and persist deduplicated metadata into SQLite with incremental sync."

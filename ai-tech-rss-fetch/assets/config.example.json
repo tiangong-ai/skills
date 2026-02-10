@@ -1,35 +1,14 @@
 {
-  "input_type": "opml",
+  "db_path": "rss_metadata.db",
   "opml_path": "assets/hn-popular-blogs-2025.opml",
-  "date": "2026-02-10",
-  "date_range": {
-    "start": "2026-02-03",
-    "end": "2026-02-10"
-  },
-  "timezone": "Asia/Shanghai",
-  "lookback_hours": 24,
-  "seen_store_path": ".state/ai-tech-rss-fetch-seen.sqlite",
-  "archived_urls_store": "ai_rss_inbox/archived_urls.txt",
+  "feed_urls": [
+    "https://openai.com/news/rss.xml"
+  ],
+  "max_feeds_per_run": 20,
+  "max_items_per_feed": 100,
+  "user_agent": "ai-tech-rss-fetch/1.0 (+https://github.com/tiangong-ai/skills)",
+  "active_only": true,
   "seen_ttl_days": 30,
   "enable_conditional_get": true,
-  "emit_no_new_items": true,
-  "max_items": 20,
-  "output_mode": "archive",
-  "archive_dir": "ai_rss_inbox",
-  "archive_max_items": 8,
-  "archive_filename_pattern": "YYYYMMDD-HHmm-{slug}.md",
-  "dedupe": true,
-  "min_fulltext_chars": 400,
-  "fallback_to_summary": true,
-  "include_metadata": true,
-  "output_format": "text",
-  "include_keywords": [
-    "ai",
-    "llm",
-    "model"
-  ],
-  "exclude_keywords": [
-    "job posting",
-    "sponsored"
-  ]
+  "cleanup_enabled": true
 }

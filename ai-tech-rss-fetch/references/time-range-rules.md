@@ -1,24 +1,24 @@
 # Time Range Rules
 
-## Supported Time Inputs
-- Single date (`YYYY-MM-DD`)
-- Explicit range (`start`, `end`)
-- Relative expressions (`today`, `yesterday`, `last 7 days`, `this week`)
+## Sync Frequency
+- The workflow is frequency-agnostic. Run manually or on any scheduler cadence.
+- Recommended baseline for active feeds: every 15-60 minutes.
 
-## Timezone Handling
-- Prefer user-specified timezone.
-- If missing, use runtime/local timezone and state the assumption.
-- Convert all timestamps to one timezone before filtering/sorting.
+## Timestamp Normalization
+- Normalize parsed `published` / `updated` timestamps to UTC ISO-8601.
+- Persist original ordering with feed publish time when available.
+- Keep `first_seen_at` and `last_seen_at` in UTC.
 
-## Default Behavior
-- If no date/range is provided, select the most recent items by publish time.
-- Use `max_items` as the default cap for no-range requests.
+## Incremental Sync Rules
+- Use feed caching state (`etag`, `last_modified`) to reduce bandwidth.
+- If response status is `304`, do not parse entries for that feed.
+- If `etag`/`last_modified` are missing, perform normal fetch and rely on dedupe key.
 
-## Range Validation
-- If `start > end`, return a format error and request corrected input.
-- Range boundaries are inclusive.
-- If range is valid but no records match, return `no rss items in selected range`.
+## Windowing and Retention
+- `max_items_per_feed` controls per-run ingestion cap from each feed.
+- `seen_ttl_days` controls cleanup of stale metadata records.
+- Cleanup should remove records not seen for more than `seen_ttl_days`.
 
 ## Missing Publish Time
-- If an item has no `published_at` and a strict date/range filter is applied, drop the item by default.
-- If no date/range filter is applied, keep undated items after dated items.
+- If feed item has no publish time, persist record with `published_at=NULL`.
+- Use `first_seen_at` as operational fallback for recency ordering.
