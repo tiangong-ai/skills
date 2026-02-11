@@ -42,6 +42,12 @@ description: Run a zero-scraper sustainability intelligence pipeline that uses o
 
 ## Commands
 
+Pin queue DB to an absolute path in multi-agent runtimes:
+
+```bash
+export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability-rss-summary.db"
+```
+
 ### Single DOI fetch
 ```bash
 python3 scripts/abstract_pipeline.py fetch \
@@ -53,7 +59,7 @@ python3 scripts/abstract_pipeline.py fetch \
 ### Queue ingest from JSONL
 ```bash
 python3 scripts/abstract_pipeline.py queue-add \
-  --db sustainability-rss-summary.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --jsonl assets/rss-events.example.jsonl \
   --max-retries 3
 ```
@@ -61,7 +67,7 @@ python3 scripts/abstract_pipeline.py queue-add \
 ### Queue run (with retries)
 ```bash
 python3 scripts/abstract_pipeline.py queue-run \
-  --db sustainability-rss-summary.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --backoff-hours "24,24,48"
 ```
 
@@ -76,14 +82,14 @@ Manual emergency rerun (ignore `next_retry_at`):
 
 ```bash
 python3 scripts/abstract_pipeline.py queue-run \
-  --db sustainability-rss-summary.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --force
 ```
 
 ### Inspect queue state
 ```bash
 python3 scripts/abstract_pipeline.py queue-list \
-  --db sustainability-rss-summary.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --pretty
 ```
 

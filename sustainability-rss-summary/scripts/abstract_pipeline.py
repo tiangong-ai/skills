@@ -23,7 +23,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-DEFAULT_DB_PATH = "sustainability-rss-summary.db"
+DEFAULT_DB_FILENAME = "sustainability-rss-summary.db"
+DEFAULT_DB_PATH = os.environ.get("SUSTAIN_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_TIMEOUT_SECONDS = 12.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_HOURS = [24, 24, 48]
@@ -215,10 +216,18 @@ def fetch_abstract(doi: str, openalex_email: str | None, s2_api_key: str | None,
     }
 
 
+def resolve_db_path(path: str | Path) -> Path:
+    raw = str(path or "").strip()
+    if not raw:
+        raw = DEFAULT_DB_PATH
+
+    return Path(raw).expanduser()
+
+
 def connect_db(path: str | Path) -> sqlite3.Connection:
-    db_path = Path(path)
+    db_path = resolve_db_path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute(CREATE_TABLE_SQL)
     conn.commit()

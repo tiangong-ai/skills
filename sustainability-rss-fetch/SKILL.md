@@ -20,10 +20,16 @@ description: Subscribe sustainability journal RSS feeds, collect time-windowed c
 ## Mandatory Screening Workflow (Use This by Default)
 1. Prepare runtime and database.
 - Ensure dependency is installed: `python3 -m pip install feedparser`.
+- In multi-agent runtimes, pin DB to an absolute path before any command:
+
+```bash
+export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability_rss.db"
+```
+
 - Initialize SQLite schema once:
 
 ```bash
-python3 scripts/rss_subscribe.py init-db --db sustainability_rss.db
+python3 scripts/rss_subscribe.py init-db --db "$SUSTAIN_RSS_DB_PATH"
 ```
 
 2. Collect candidate window from source feeds (do not write entries yet).
@@ -59,7 +65,7 @@ python3 scripts/rss_subscribe.py collect-window \
 
 ```bash
 python3 scripts/rss_subscribe.py insert-selected \
-  --db sustainability_rss.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --candidates /tmp/sustainability-candidates.json \
   --selected-ids 3,7,12,21
 ```
@@ -68,33 +74,33 @@ python3 scripts/rss_subscribe.py insert-selected \
 - For operational maintenance when selection is already handled upstream, you can still use:
 
 ```bash
-python3 scripts/rss_subscribe.py sync --db sustainability_rss.db --max-feeds 20 --max-items-per-feed 100
+python3 scripts/rss_subscribe.py sync --db "$SUSTAIN_RSS_DB_PATH" --max-feeds 20 --max-items-per-feed 100
 ```
 
 ## Source Management
 - Add one feed URL:
 
 ```bash
-python3 scripts/rss_subscribe.py add-feed --db sustainability_rss.db --url "https://example.com/feed.xml"
+python3 scripts/rss_subscribe.py add-feed --db "$SUSTAIN_RSS_DB_PATH" --url "https://example.com/feed.xml"
 ```
 
 - Import feeds from OPML:
 
 ```bash
-python3 scripts/rss_subscribe.py import-opml --db sustainability_rss.db --opml assets/journal.opml
+python3 scripts/rss_subscribe.py import-opml --db "$SUSTAIN_RSS_DB_PATH" --opml assets/journal.opml
 ```
 
 ## Query Persisted Metadata
 - List feeds:
 
 ```bash
-python3 scripts/rss_subscribe.py list-feeds --db sustainability_rss.db --limit 50
+python3 scripts/rss_subscribe.py list-feeds --db "$SUSTAIN_RSS_DB_PATH" --limit 50
 ```
 
 - List recent entries:
 
 ```bash
-python3 scripts/rss_subscribe.py list-entries --db sustainability_rss.db --limit 100
+python3 scripts/rss_subscribe.py list-entries --db "$SUSTAIN_RSS_DB_PATH" --limit 100
 ```
 
 ## Input Requirements
@@ -113,6 +119,7 @@ python3 scripts/rss_subscribe.py list-entries --db sustainability_rss.db --limit
 
 ## Configurable Parameters
 - `db_path`
+- `SUSTAIN_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `opml_path`
 - `feed_urls`
 - `topic_prompt`

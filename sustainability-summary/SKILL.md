@@ -21,13 +21,16 @@ description: Retrieve time-windowed sustainability RSS evidence from SQLite and 
 - Required tables in SQLite: `feeds`, `entries` (from `sustainability-rss-fetch`).
 - Optional table: `entry_content` (from `sustainability-fulltext-fetch`).
 - Shared DB path should be the same across all sustainability RSS skills.
+- In multi-agent runtimes, set `SUSTAIN_RSS_DB_PATH` to one absolute DB path for this agent.
 
 ## RAG Workflow
 1. Retrieve evidence context by time window.
 
 ```bash
+export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability_rss.db"
+
 python3 scripts/time_report.py \
-  --db sustainability_rss.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --period weekly \
   --date 2026-02-10 \
   --max-records 120 \
@@ -72,6 +75,7 @@ Custom boundaries support both `YYYY-MM-DD` and ISO datetime.
 
 ## Configurable Parameters
 - `--db`
+- `SUSTAIN_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `--period`
 - `--date`
 - `--start`

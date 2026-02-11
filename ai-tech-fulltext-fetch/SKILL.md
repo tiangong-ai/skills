@@ -12,7 +12,7 @@ description: Fetch and persist article full text for RSS entries already stored 
 - Support incremental runs and safe retries without creating duplicate fulltext rows.
 
 ## Triggering Conditions
-- Receive a request to fetch article body/full text for entries already in `rss_metadata.db`.
+- Receive a request to fetch article body/full text for entries already in `ai_rss.db`.
 - Receive a request to build a second-stage pipeline after RSS metadata sync.
 - Need a stable, resumable queue over existing `entries` rows.
 - Need URL-based fulltext persistence before chunking, indexing, or summarization.
@@ -24,13 +24,13 @@ description: Fetch and persist article full text for RSS entries already stored 
 - In multi-agent runtimes, pin DB to the same absolute path used by `ai-tech-rss-fetch`:
 
 ```bash
-export RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/rss_metadata.db"
+export AI_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/ai_rss.db"
 ```
 
 2. Initialize fulltext table.
 
 ```bash
-python3 scripts/fulltext_fetch.py init-db --db "$RSS_DB_PATH"
+python3 scripts/fulltext_fetch.py init-db --db "$AI_RSS_DB_PATH"
 ```
 
 3. Run incremental fulltext sync.
@@ -38,7 +38,7 @@ python3 scripts/fulltext_fetch.py init-db --db "$RSS_DB_PATH"
 
 ```bash
 python3 scripts/fulltext_fetch.py sync \
-  --db "$RSS_DB_PATH" \
+  --db "$AI_RSS_DB_PATH" \
   --limit 50 \
   --timeout 20 \
   --min-chars 300
@@ -48,7 +48,7 @@ python3 scripts/fulltext_fetch.py sync \
 
 ```bash
 python3 scripts/fulltext_fetch.py fetch-entry \
-  --db "$RSS_DB_PATH" \
+  --db "$AI_RSS_DB_PATH" \
   --entry-id 1234
 ```
 
@@ -56,7 +56,7 @@ python3 scripts/fulltext_fetch.py fetch-entry \
 
 ```bash
 python3 scripts/fulltext_fetch.py list-content \
-  --db "$RSS_DB_PATH" \
+  --db "$AI_RSS_DB_PATH" \
   --status ready \
   --limit 100
 ```
@@ -85,7 +85,7 @@ python3 scripts/fulltext_fetch.py list-content \
 
 ## Configurable Parameters
 - `--db`
-- `RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
+- `AI_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `--limit`
 - `--force`
 - `--only-failed`

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -22,7 +23,8 @@ except ImportError:
     feedparser = None
 
 
-DEFAULT_DB_PATH = "sustainability_rss.db"
+DEFAULT_DB_FILENAME = "sustainability_rss.db"
+DEFAULT_DB_PATH = os.environ.get("SUSTAIN_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_USER_AGENT = "sustainability-rss-fetch/1.0 (+https://github.com/tiangong-ai/skills)"
 DEFAULT_TOPIC_PROMPT = (
     "筛选与可持续主题相关的文章：生命周期评价(LCA)、物质流分析(MFA)、绿色供应链、绿电、"
@@ -213,8 +215,16 @@ def require_feedparser() -> None:
     raise SystemExit(2)
 
 
+def resolve_db_path(db_path: str) -> Path:
+    raw = str(db_path or "").strip()
+    if not raw:
+        raw = DEFAULT_DB_PATH
+
+    return Path(raw).expanduser()
+
+
 def connect_db(db_path: str) -> sqlite3.Connection:
-    db_file = Path(db_path)
+    db_file = resolve_db_path(db_path)
     if db_file.parent and str(db_file.parent) not in ("", "."):
         db_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_file))
@@ -723,7 +733,7 @@ def cmd_collect_window(args: argparse.Namespace) -> int:
         },
         "source": {
             "opml_path": args.opml,
-            "db_path": args.db if args.use_subscribed_feeds else None,
+            "db_path": str(resolve_db_path(args.db)) if args.use_subscribed_feeds else None,
             "feed_urls": feed_urls,
         },
         "feeds": feed_reports,

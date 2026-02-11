@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -14,7 +15,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB_PATH = "sustainability_rss.db"
+DEFAULT_DB_FILENAME = "sustainability_rss.db"
+DEFAULT_DB_PATH = os.environ.get("SUSTAIN_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_MAX_RECORDS = 80
 DEFAULT_MAX_PER_FEED = 0
 DEFAULT_FULLTEXT_CHARS = 8192
@@ -157,6 +159,14 @@ def normalize_space(value: str) -> str:
     return " ".join(value.split())
 
 
+def resolve_db_path(db_path: str) -> Path:
+    raw = str(db_path or "").strip()
+    if not raw:
+        raw = DEFAULT_DB_PATH
+
+    return Path(raw).expanduser()
+
+
 def truncate_text(value: str, max_chars: int) -> str:
     clean = normalize_space(value)
     if max_chars <= 0:
@@ -275,7 +285,9 @@ def parse_fields(raw_fields: str | None) -> list[str]:
 
 
 def connect_db(db_path: str) -> sqlite3.Connection:
-    db_file = Path(db_path)
+    db_file = resolve_db_path(db_path)
+    if db_file.parent and str(db_file.parent) not in ("", "."):
+        db_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")

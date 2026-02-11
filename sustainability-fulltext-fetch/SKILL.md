@@ -21,11 +21,16 @@ description: Fetch and persist article full text for sustainability RSS entries 
 1. Ensure metadata table exists first.
 - Run `sustainability-rss-fetch` and populate `entries` in SQLite before using this skill.
 - This skill requires the `entries` table to exist.
+- In multi-agent runtimes, pin DB to the same absolute path used by `sustainability-rss-fetch`:
+
+```bash
+export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability_rss.db"
+```
 
 2. Initialize fulltext table.
 
 ```bash
-python3 scripts/fulltext_fetch.py init-db --db sustainability_rss.db
+python3 scripts/fulltext_fetch.py init-db --db "$SUSTAIN_RSS_DB_PATH"
 ```
 
 3. Run incremental fulltext sync.
@@ -33,7 +38,7 @@ python3 scripts/fulltext_fetch.py init-db --db sustainability_rss.db
 
 ```bash
 python3 scripts/fulltext_fetch.py sync \
-  --db sustainability_rss.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --limit 50 \
   --timeout 20 \
   --min-chars 300
@@ -43,7 +48,7 @@ python3 scripts/fulltext_fetch.py sync \
 
 ```bash
 python3 scripts/fulltext_fetch.py fetch-entry \
-  --db sustainability_rss.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --entry-id 1234
 ```
 
@@ -51,7 +56,7 @@ python3 scripts/fulltext_fetch.py fetch-entry \
 
 ```bash
 python3 scripts/fulltext_fetch.py list-content \
-  --db sustainability_rss.db \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --status ready \
   --limit 100
 ```
@@ -80,6 +85,7 @@ python3 scripts/fulltext_fetch.py list-content \
 
 ## Configurable Parameters
 - `--db`
+- `SUSTAIN_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `--limit`
 - `--force`
 - `--only-failed`

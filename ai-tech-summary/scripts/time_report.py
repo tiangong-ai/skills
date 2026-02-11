@@ -15,8 +15,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB_FILENAME = "rss_metadata.db"
-DEFAULT_DB_PATH = os.environ.get("RSS_DB_PATH", DEFAULT_DB_FILENAME)
+DEFAULT_DB_FILENAME = "ai_rss.db"
+DEFAULT_DB_PATH = os.environ.get("AI_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_MAX_RECORDS = 80
 DEFAULT_MAX_PER_FEED = 0
 DEFAULT_FULLTEXT_CHARS = 8192
@@ -163,11 +163,6 @@ def resolve_db_path(db_path: str) -> Path:
     raw = str(db_path or "").strip()
     if not raw:
         raw = DEFAULT_DB_PATH
-
-    env_override = str(os.environ.get("RSS_DB_PATH") or "").strip()
-    # Keep backward compatibility: legacy "--db rss_metadata.db" still honors env override.
-    if env_override and raw == DEFAULT_DB_FILENAME:
-        raw = env_override
 
     return Path(raw).expanduser()
 

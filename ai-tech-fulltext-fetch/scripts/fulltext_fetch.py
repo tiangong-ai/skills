@@ -23,8 +23,8 @@ except ImportError:
     trafilatura = None
 
 
-DEFAULT_DB_FILENAME = "rss_metadata.db"
-DEFAULT_DB_PATH = os.environ.get("RSS_DB_PATH", DEFAULT_DB_FILENAME)
+DEFAULT_DB_FILENAME = "ai_rss.db"
+DEFAULT_DB_PATH = os.environ.get("AI_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_USER_AGENT = "ai-tech-fulltext-fetch/1.0 (+https://github.com/tiangong-ai/skills)"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_MINUTES = 30
@@ -239,11 +239,6 @@ def resolve_db_path(db_path: str) -> Path:
     raw = str(db_path or "").strip()
     if not raw:
         raw = DEFAULT_DB_PATH
-
-    env_override = str(os.environ.get("RSS_DB_PATH") or "").strip()
-    # Keep backward compatibility: legacy "--db rss_metadata.db" still honors env override.
-    if env_override and raw == DEFAULT_DB_FILENAME:
-        raw = env_override
 
     return Path(raw).expanduser()
 
