@@ -1,0 +1,17 @@
+{
+  "db_path": "sustainability_rss.db",
+  "period": "weekly",
+  "date": "2026-02-10",
+  "start": "2026-02-01",
+  "end": "2026-02-10",
+  "max_records": 120,
+  "max_per_feed": 20,
+  "summary_chars": 8192,
+  "fulltext_chars": 8192,
+  "top_feeds": 10,
+  "top_keywords": 15,
+  "fields": "entry_id,timestamp_utc,feed_title,title,url,summary,fulltext_excerpt",
+  "output": "/tmp/sustainability-weekly-context.json",
+  "pretty": false,
+  "fail_on_empty": false
+}

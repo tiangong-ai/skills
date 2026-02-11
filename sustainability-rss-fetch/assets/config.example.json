@@ -1,0 +1,19 @@
+{
+  "db_path": "sustainability_rss.db",
+  "opml_path": "assets/journal.opml",
+  "feed_urls": [
+    "https://www.nature.com/natrevearthenviron.rss"
+  ],
+  "topic_prompt": "筛选与可持续主题相关的文章：生命周期评价、物质流分析、绿色供应链、绿电、绿色设计、减污降碳",
+  "window_start": "2026-02-01",
+  "window_end": "2026-02-10",
+  "candidate_output": "/tmp/sustainability-candidates.json",
+  "selected_ids": [3, 7, 12],
+  "max_feeds_per_run": 20,
+  "max_items_per_feed": 100,
+  "user_agent": "sustainability-rss-fetch/1.0 (+https://github.com/tiangong-ai/skills)",
+  "active_only": true,
+  "seen_ttl_days": 30,
+  "enable_conditional_get": true,
+  "cleanup_enabled": true
+}

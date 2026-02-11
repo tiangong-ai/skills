@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Journal RSS Feeds</title>
+  </head>
+  <body>
+    <outline text="Journals" title="Journals">
+      <!-- Nature 系列期刊 -->
+      <outline type="rss" text="Nature (general)" title="Nature" xmlUrl="https://www.nature.com/nature.rss" htmlUrl="https://www.nature.com/nature/"/> 
+      <outline type="rss" text="Nature Reviews Earth & Environment" title="Nature Reviews Earth & Environment" xmlUrl="https://www.nature.com/natrevearthenviron.rss" htmlUrl="https://www.nature.com/natrevearthenviron/"/> 
+      <outline type="rss" text="Nature Climate Change" title="Nature Climate Change" xmlUrl="http://feeds.nature.com/nclimate/rss/current?format=xml" htmlUrl="https://www.nature.com/nclimate/"/>
+      <outline type="rss" text="Nature Communications" title="Nature Communications" xmlUrl="http://feeds.nature.com/ncomms/rss/current?format=xml" htmlUrl="https://www.nature.com/ncomms/"/>
+      <outline type="rss" text="Nature Energy" title="Nature Energy" xmlUrl="http://feeds.nature.com/nenergy/rss/current?format=xml" htmlUrl="https://www.nature.com/nenergy/"/>
+      <outline type="rss" text="Nature Geoscience" title="Nature Geoscience" xmlUrl="http://feeds.nature.com/ngeo/rss/current?format=xml" htmlUrl="https://www.nature.com/ngeo/"/>
+
+      <!-- Science China 系列 -->
+      <outline type="rss" text="Science China Earth Sciences" title="Science China Earth Sciences" xmlUrl="https://www.springer.com/journal/11430?detailsPage=rss" htmlUrl="https://www.springer.com/journal/11430"/> 
+
+      <!-- SCIENCE 期刊 -->
+      <outline type="rss" text="Science (AAAS)" title="Science" xmlUrl="https://www.science.org/rss/news.xml" htmlUrl="https://www.science.org/journal/science/"/> 
+
+      <!-- Elsevier / ScienceDirect 科学期刊 RSS（多通过 rss.sciencedirect.com ） -->
+      <outline type="rss" text="Journal of Environmental Management" title="Journal of Environmental Management" xmlUrl="http://rss.sciencedirect.com/publication/science/03014797" htmlUrl="https://www.sciencedirect.com/journal/journal-of-environmental-management"/> 
+
+      <!-- Wiley / 其他平台 RSS -->
+      <outline type="rss" text="Journal of Industrial Ecology" title="Journal of Industrial Ecology" xmlUrl="https://onlinelibrary.wiley.com/feed/journal/15309290/issue" htmlUrl="https://onlinelibrary.wiley.com/journal/15309290"/> 
+
+      <!-- Frontiers 系列 RSS -->
+      <outline type="rss" text="Frontiers in Sustainability" title="Frontiers in Sustainability" xmlUrl="https://www.frontiersin.org/journals/sustainability/rss" htmlUrl="https://www.frontiersin.org/journals/sustainability"/> 
+
+      <!-- 社会科学 / 经济系统分析 -->
+      <outline type="rss" text="Economic Systems Research" title="Economic Systems Research" xmlUrl="https://www.tandfonline.com/feed/journal/uers20" htmlUrl="https://www.tandfonline.com/journals/uers20"/> 
+
+    </outline>
+  </body>
+</opml>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sustainability RSS Fetch"
+  short_description: "Stage RSS candidates, persist confirmed sustainability metadata"
+  default_prompt: "Use $sustainability-rss-fetch to collect all journal RSS candidates, apply prompt-based sustainability topic filtering with user confirmation, and insert only selected metadata into SQLite."

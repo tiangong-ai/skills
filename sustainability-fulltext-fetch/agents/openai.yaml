@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sustainability Fulltext Fetch"
+  short_description: "Fetch full text for confirmed sustainability RSS entries"
+  default_prompt: "Use $sustainability-fulltext-fetch to fetch and persist full article text for selected sustainability RSS entries in SQLite with retry-safe status tracking."

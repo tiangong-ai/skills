@@ -1,0 +1,15 @@
+{
+  "db_path": "sustainability_rss.db",
+  "limit": 50,
+  "force": false,
+  "only_failed": false,
+  "refetch_days": 0,
+  "timeout_seconds": 20,
+  "max_response_bytes": 2000000,
+  "min_chars": 300,
+  "max_retries": 3,
+  "retry_backoff_minutes": 30,
+  "user_agent": "sustainability-fulltext-fetch/1.0 (+https://github.com/tiangong-ai/skills)",
+  "disable_trafilatura": false,
+  "fail_on_errors": false
+}
