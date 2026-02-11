@@ -20,49 +20,55 @@ description: Subscribe to AI and tech RSS feeds and persist normalized metadata 
 ## Workflow
 1. Prepare runtime and database.
 - Ensure dependency is installed: `python3 -m pip install feedparser`.
+- In multi-agent runtimes, pin DB to an absolute path before any command:
+
+```bash
+export RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/rss_metadata.db"
+```
+
 - Initialize SQLite schema once:
 
 ```bash
-python3 scripts/rss_subscribe.py init-db --db rss_metadata.db
+python3 scripts/rss_subscribe.py init-db --db "$RSS_DB_PATH"
 ```
 
 2. Add feed subscriptions.
 - Add one feed URL:
 
 ```bash
-python3 scripts/rss_subscribe.py add-feed --db rss_metadata.db --url "https://example.com/feed.xml"
+python3 scripts/rss_subscribe.py add-feed --db "$RSS_DB_PATH" --url "https://example.com/feed.xml"
 ```
 
 - Import feeds from OPML:
 
 ```bash
-python3 scripts/rss_subscribe.py import-opml --db rss_metadata.db --opml assets/hn-popular-blogs-2025.opml
+python3 scripts/rss_subscribe.py import-opml --db "$RSS_DB_PATH" --opml assets/hn-popular-blogs-2025.opml
 ```
 
 3. Run incremental sync.
 - Fetch active feeds and store metadata:
 
 ```bash
-python3 scripts/rss_subscribe.py sync --db rss_metadata.db --max-feeds 20 --max-items-per-feed 100
+python3 scripts/rss_subscribe.py sync --db "$RSS_DB_PATH" --max-feeds 20 --max-items-per-feed 100
 ```
 
 - Optional one-feed sync:
 
 ```bash
-python3 scripts/rss_subscribe.py sync --db rss_metadata.db --feed-url "https://example.com/feed.xml"
+python3 scripts/rss_subscribe.py sync --db "$RSS_DB_PATH" --feed-url "https://example.com/feed.xml"
 ```
 
 4. Query persisted metadata.
 - List feeds:
 
 ```bash
-python3 scripts/rss_subscribe.py list-feeds --db rss_metadata.db --limit 50
+python3 scripts/rss_subscribe.py list-feeds --db "$RSS_DB_PATH" --limit 50
 ```
 
 - List recent entries:
 
 ```bash
-python3 scripts/rss_subscribe.py list-entries --db rss_metadata.db --limit 100
+python3 scripts/rss_subscribe.py list-entries --db "$RSS_DB_PATH" --limit 100
 ```
 
 ## Input Requirements
@@ -80,6 +86,7 @@ python3 scripts/rss_subscribe.py list-entries --db rss_metadata.db --limit 100
 
 ## Configurable Parameters
 - `db_path`
+- `RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `opml_path`
 - `feed_urls`
 - `max_feeds_per_run`

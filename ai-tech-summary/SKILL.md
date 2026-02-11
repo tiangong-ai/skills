@@ -21,13 +21,16 @@ description: Retrieve time-windowed RSS evidence from SQLite and let the agent p
 - Required tables in SQLite: `feeds`, `entries` (from `ai-tech-rss-fetch`).
 - Optional table: `entry_content` (from `ai-tech-fulltext-fetch`).
 - Shared DB path should be the same across all RSS skills.
+- In multi-agent runtimes, set `RSS_DB_PATH` to one absolute DB path for this agent.
 
 ## RAG Workflow
 1. Retrieve evidence context by time window.
 
 ```bash
+export RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/rss_metadata.db"
+
 python3 scripts/time_report.py \
-  --db rss_metadata.db \
+  --db "$RSS_DB_PATH" \
   --period weekly \
   --date 2026-02-10 \
   --max-records 120 \
@@ -72,6 +75,7 @@ Custom boundaries support both `YYYY-MM-DD` and ISO datetime.
 
 ## Configurable Parameters
 - `--db`
+- `RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
 - `--period`
 - `--date`
 - `--start`

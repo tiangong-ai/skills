@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import sqlite3
 import sys
@@ -22,7 +23,8 @@ except ImportError:
     trafilatura = None
 
 
-DEFAULT_DB_PATH = "rss_metadata.db"
+DEFAULT_DB_FILENAME = "rss_metadata.db"
+DEFAULT_DB_PATH = os.environ.get("RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_USER_AGENT = "ai-tech-fulltext-fetch/1.0 (+https://github.com/tiangong-ai/skills)"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_MINUTES = 30
@@ -233,8 +235,21 @@ def clean_text(value: str) -> str:
     return normalized.strip()
 
 
+def resolve_db_path(db_path: str) -> Path:
+    raw = str(db_path or "").strip()
+    if not raw:
+        raw = DEFAULT_DB_PATH
+
+    env_override = str(os.environ.get("RSS_DB_PATH") or "").strip()
+    # Keep backward compatibility: legacy "--db rss_metadata.db" still honors env override.
+    if env_override and raw == DEFAULT_DB_FILENAME:
+        raw = env_override
+
+    return Path(raw).expanduser()
+
+
 def connect_db(db_path: str) -> sqlite3.Connection:
-    db_file = Path(db_path)
+    db_file = resolve_db_path(db_path)
     if db_file.parent and str(db_file.parent) not in ("", "."):
         db_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_file))
