@@ -90,6 +90,20 @@ CREATE INDEX IF NOT EXISTS idx_entries_last_seen_at ON entries(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_entries_published_at ON entries(published_at);
 CREATE INDEX IF NOT EXISTS idx_entries_event_ts_doi
     ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at), doi);
+CREATE INDEX IF NOT EXISTS idx_entries_relevant_event_doi
+    ON entries(
+        is_relevant,
+        COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at),
+        doi
+    );
+CREATE INDEX IF NOT EXISTS idx_entries_event_doi_relevant_only
+    ON entries(
+        COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at),
+        doi
+    )
+    WHERE is_relevant = 1;
+CREATE INDEX IF NOT EXISTS idx_entries_relevant_surrogate_doi
+    ON entries(is_relevant, doi_is_surrogate, doi);
 """
 
 
@@ -866,7 +880,10 @@ def cleanup_stale_entries(conn: sqlite3.Connection, ttl_days: int) -> int:
         return 0
     threshold = datetime.now(timezone.utc) - timedelta(days=ttl_days)
     threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    cursor = conn.execute("DELETE FROM entries WHERE COALESCE(last_seen_at, '') < ?", (threshold_iso,))
+    cursor = conn.execute(
+        "DELETE FROM entries WHERE last_seen_at IS NOT NULL AND last_seen_at < ?",
+        (threshold_iso,),
+    )
     return int(cursor.rowcount)
 
 

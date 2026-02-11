@@ -72,7 +72,25 @@ CREATE INDEX IF NOT EXISTS idx_entry_content_status_updated_doi
     ON entry_content(status, updated_at DESC, doi DESC);
 CREATE INDEX IF NOT EXISTS idx_entry_content_failed_retry
     ON entry_content(status, next_retry_at, retry_count);
+CREATE INDEX IF NOT EXISTS idx_entry_content_failed_retry_doi
+    ON entry_content(status, next_retry_at, retry_count, doi);
+CREATE INDEX IF NOT EXISTS idx_entry_content_status_fetched_doi
+    ON entry_content(status, fetched_at, doi);
 """
+
+EVENT_TS_SQL_EXPR = (
+    "COALESCE("
+    "CASE WHEN e.published_at GLOB '????-??-??T*Z' THEN e.published_at END, "
+    "e.first_seen_at, "
+    "e.last_seen_at"
+    ")"
+)
+ENTRY_ELIGIBILITY_SQL_EXPR = (
+    "("
+    "(e.doi_is_surrogate = 0 AND e.doi NOT LIKE 'rss-hash:%') "
+    "OR COALESCE(NULLIF(e.canonical_url, ''), NULLIF(e.url, '')) IS NOT NULL"
+    ")"
+)
 
 
 class ReadableTextParser(HTMLParser):
@@ -796,73 +814,168 @@ def list_candidate_entries(
     oldest_first: bool,
     max_retries: int,
 ) -> list[sqlite3.Row]:
-    sql = """
-    SELECT
-        e.doi,
-        e.title,
-        e.canonical_url,
-        e.url,
-        e.doi_is_surrogate,
-        e.is_relevant,
-        ec.status AS content_status,
-        ec.fetched_at,
-        ec.updated_at
-    FROM entries e
-    LEFT JOIN entry_content ec ON ec.doi = e.doi
-    WHERE e.is_relevant = 1
-      AND (
-        (e.doi_is_surrogate = 0 AND e.doi NOT LIKE 'rss-hash:%')
-        OR COALESCE(NULLIF(e.canonical_url, ''), NULLIF(e.url, '')) IS NOT NULL
-      )
-    """
-    params: list[Any] = []
-    now_iso = now_utc_iso()
-    failed_retry_clause = "ec.status = 'failed' AND (ec.next_retry_at IS NULL OR ec.next_retry_at <= ?)"
-    failed_retry_params: list[Any] = [now_iso]
-    if max_retries > 0:
-        failed_retry_clause += " AND ec.retry_count < ?"
-        failed_retry_params.append(max_retries)
+    def _fetch_rows(sql: str, params: list[Any], query_limit: int) -> list[sqlite3.Row]:
+        local_sql = sql
+        local_params = list(params)
+        if query_limit > 0:
+            local_sql += " LIMIT ?"
+            local_params.append(query_limit)
+        return conn.execute(local_sql, tuple(local_params)).fetchall()
 
-    if only_failed:
-        sql += f" AND ({failed_retry_clause})"
-        params.extend(failed_retry_params)
-    elif not force:
-        if refetch_days > 0:
-            threshold = datetime.now(timezone.utc) - timedelta(days=refetch_days)
-            threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-            sql += (
-                " AND (ec.doi IS NULL "
-                f"OR ({failed_retry_clause}) "
-                "OR (ec.status = 'ready' AND ec.fetched_at < ?))"
-            )
-            params.extend(failed_retry_params)
-            params.append(threshold_iso)
-        else:
-            sql += f" AND (ec.doi IS NULL OR ({failed_retry_clause}))"
-            params.extend(failed_retry_params)
+    def _merge_groups(groups: list[list[sqlite3.Row]], merged_limit: int) -> list[sqlite3.Row]:
+        merged: list[sqlite3.Row] = []
+        seen: set[str] = set()
+        for rows in groups:
+            for row in rows:
+                doi = str(row["doi"] or "")
+                if not doi or doi in seen:
+                    continue
+                seen.add(doi)
+                merged.append(row)
+                if merged_limit > 0 and len(merged) >= merged_limit:
+                    return merged
+        return merged
+
+    def _load_missing_rows(query_limit: int) -> list[sqlite3.Row]:
+        sql = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entries e
+        LEFT JOIN entry_content ec ON ec.doi = e.doi
+        WHERE e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
+          AND ec.doi IS NULL
+        ORDER BY {EVENT_TS_SQL_EXPR} DESC, e.doi DESC
+        """
+        return _fetch_rows(sql, [], query_limit)
+
+    def _load_failed_rows_due(query_limit: int) -> list[sqlite3.Row]:
+        now_iso = now_utc_iso()
+        retry_clause = "ec.retry_count < ?" if max_retries > 0 else "1=1"
+        retry_params = [max_retries] if max_retries > 0 else []
+
+        sql_null = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entry_content ec
+        JOIN entries e ON e.doi = ec.doi
+        WHERE ec.status = 'failed'
+          AND ec.next_retry_at IS NULL
+          AND {retry_clause}
+          AND e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
+        ORDER BY ec.retry_count ASC
+        """
+        rows_null = _fetch_rows(sql_null, retry_params, query_limit)
+        if query_limit > 0 and len(rows_null) >= query_limit:
+            return rows_null
+
+        remain = 0 if query_limit <= 0 else max(query_limit - len(rows_null), 0)
+        sql_due = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entry_content ec
+        JOIN entries e ON e.doi = ec.doi
+        WHERE ec.status = 'failed'
+          AND ec.next_retry_at <= ?
+          AND {retry_clause}
+          AND e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
+        ORDER BY ec.next_retry_at ASC, ec.retry_count ASC
+        """
+        rows_due = _fetch_rows(sql_due, [now_iso, *retry_params], remain if query_limit > 0 else query_limit)
+        return _merge_groups([rows_null, rows_due], query_limit)
+
+    def _load_ready_stale_rows(query_limit: int, threshold_iso: str) -> list[sqlite3.Row]:
+        sql = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entry_content ec
+        JOIN entries e ON e.doi = ec.doi
+        WHERE ec.status = 'ready'
+          AND ec.fetched_at < ?
+          AND e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
+        ORDER BY ec.fetched_at ASC
+        """
+        return _fetch_rows(sql, [threshold_iso], query_limit)
 
     if oldest_first:
-        sql += " ORDER BY COALESCE(ec.updated_at, '') ASC, e.doi ASC"
-    else:
-        sql += """
-        ORDER BY
-            CASE
-                WHEN ec.doi IS NULL THEN 0
-                WHEN ec.status = 'failed' THEN 1
-                ELSE 2
-            END ASC,
-            CASE
-                WHEN ec.status = 'failed' THEN ec.retry_count
-                ELSE 0
-            END ASC,
-            COALESCE(e.published_at, e.first_seen_at, e.last_seen_at, '') DESC,
-            e.doi DESC
+        sql = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entries e
+        LEFT JOIN entry_content ec ON ec.doi = e.doi
+        WHERE e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
         """
-    if limit > 0:
-        sql += " LIMIT ?"
-        params.append(limit)
+        params: list[Any] = []
+        now_iso = now_utc_iso()
+        failed_retry_clause = "ec.status = 'failed' AND (ec.next_retry_at IS NULL OR ec.next_retry_at <= ?)"
+        failed_retry_params: list[Any] = [now_iso]
+        if max_retries > 0:
+            failed_retry_clause += " AND ec.retry_count < ?"
+            failed_retry_params.append(max_retries)
 
-    return conn.execute(sql, tuple(params)).fetchall()
+        if only_failed:
+            sql += f" AND ({failed_retry_clause})"
+            params.extend(failed_retry_params)
+        elif not force:
+            if refetch_days > 0:
+                threshold = datetime.now(timezone.utc) - timedelta(days=refetch_days)
+                threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                sql += (
+                    " AND (ec.doi IS NULL "
+                    f"OR ({failed_retry_clause}) "
+                    "OR (ec.status = 'ready' AND ec.fetched_at < ?))"
+                )
+                params.extend(failed_retry_params)
+                params.append(threshold_iso)
+            else:
+                sql += f" AND (ec.doi IS NULL OR ({failed_retry_clause}))"
+                params.extend(failed_retry_params)
+
+        sql += " ORDER BY COALESCE(ec.updated_at, '') ASC, e.doi ASC"
+        return _fetch_rows(sql, params, limit)
+
+    if force:
+        sql_force = f"""
+        SELECT
+            e.doi,
+            e.title,
+            e.canonical_url,
+            e.url
+        FROM entries e
+        WHERE e.is_relevant = 1
+          AND {ENTRY_ELIGIBILITY_SQL_EXPR}
+        ORDER BY {EVENT_TS_SQL_EXPR} DESC, e.doi DESC
+        """
+        return _fetch_rows(sql_force, [], limit)
+
+    if only_failed:
+        return _load_failed_rows_due(limit)
+
+    groups: list[list[sqlite3.Row]] = [_load_missing_rows(limit), _load_failed_rows_due(limit)]
+    if refetch_days > 0:
+        threshold = datetime.now(timezone.utc) - timedelta(days=refetch_days)
+        threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        groups.append(_load_ready_stale_rows(limit, threshold_iso))
+    return _merge_groups(groups, limit)
 
 
 def persist_extract_result(
