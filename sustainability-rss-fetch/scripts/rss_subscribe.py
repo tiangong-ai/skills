@@ -38,6 +38,7 @@ TRACKING_QUERY_PARAMS = {
     "mc_cid",
     "mc_eid",
 }
+DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -59,10 +60,8 @@ CREATE TABLE IF NOT EXISTS feeds (
 );
 
 CREATE TABLE IF NOT EXISTS entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    dedupe_key TEXT NOT NULL UNIQUE,
-    first_feed_id INTEGER NOT NULL,
-    last_feed_id INTEGER NOT NULL,
+    doi TEXT PRIMARY KEY,
+    feed_id INTEGER,
     guid TEXT,
     url TEXT,
     canonical_url TEXT,
@@ -72,23 +71,25 @@ CREATE TABLE IF NOT EXISTS entries (
     updated_at TEXT,
     summary TEXT,
     categories TEXT,
-    content_hash TEXT NOT NULL,
-    first_seen_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
+    content_hash TEXT,
+    doi_is_surrogate INTEGER NOT NULL DEFAULT 0,
+    is_relevant INTEGER CHECK (is_relevant IN (0, 1)),
+    first_seen_at TEXT,
+    last_seen_at TEXT,
     raw_entry_json TEXT,
-    FOREIGN KEY(first_feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
-    FOREIGN KEY(last_feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+    FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_feeds_active ON feeds(is_active);
 CREATE INDEX IF NOT EXISTS idx_feeds_last_checked_at ON feeds(last_checked_at);
 CREATE INDEX IF NOT EXISTS idx_feeds_active_checked_expr ON feeds(is_active, COALESCE(last_checked_at, ''), id);
+
+CREATE INDEX IF NOT EXISTS idx_entries_feed_id ON entries(feed_id);
+CREATE INDEX IF NOT EXISTS idx_entries_is_relevant ON entries(is_relevant);
 CREATE INDEX IF NOT EXISTS idx_entries_last_seen_at ON entries(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_entries_published_at ON entries(published_at);
-CREATE INDEX IF NOT EXISTS idx_entries_event_ts_id
-    ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at), id);
-CREATE INDEX IF NOT EXISTS idx_entries_sort_pub_seen_id
-    ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at), id);
+CREATE INDEX IF NOT EXISTS idx_entries_event_ts_doi
+    ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at), doi);
 """
 
 
@@ -135,6 +136,40 @@ def canonicalize_url(url: str) -> str:
         )
     )
     return normalized
+
+
+def normalize_doi(raw: Any) -> str:
+    text = normalize_space(str(raw or ""))
+    if not text:
+        return ""
+    text = re.sub(r"^https?://(dx\.)?doi\.org/", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^doi:\s*", "", text, flags=re.IGNORECASE)
+    text = text.strip().strip("<>")
+    text = text.rstrip(".,;:!?)]}>'\"")
+    match = DOI_PATTERN.search(text)
+    if not match:
+        return ""
+    doi = match.group(0).rstrip(".,;:!?)]}>'\"")
+    return doi.lower()
+
+
+def extract_doi_from_text(raw: Any) -> str:
+    text = normalize_space(str(raw or ""))
+    if not text:
+        return ""
+    return normalize_doi(text)
+
+
+def build_surrogate_doi(
+    feed_url: str,
+    guid: str,
+    url: str,
+    title: str,
+    published_at: str | None,
+    summary: str,
+) -> str:
+    basis = "|".join([feed_url, guid, url, title, published_at or "", summary[:300]])
+    return "rss-hash:" + sha256_hexdigest(basis)[:40]
 
 
 def parse_datetime_utc(raw: Any) -> datetime | None:
@@ -235,7 +270,140 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not table_exists(conn, table_name):
+        return set()
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def migrate_legacy_entries_if_needed(conn: sqlite3.Connection) -> None:
+    if not table_exists(conn, "entries"):
+        return
+
+    columns = table_columns(conn, "entries")
+    if "doi" in columns and "id" not in columns:
+        return
+
+    legacy_name = f"entries_legacy_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    conn.execute(f"ALTER TABLE entries RENAME TO {legacy_name}")
+    conn.executescript(SCHEMA_SQL)
+
+    migrated = 0
+    skipped = 0
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                last_feed_id AS feed_id,
+                guid,
+                url,
+                canonical_url,
+                title,
+                author,
+                published_at,
+                updated_at,
+                summary,
+                categories,
+                content_hash,
+                first_seen_at,
+                last_seen_at,
+                raw_entry_json
+            FROM {legacy_name}
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return
+
+    for row in rows:
+        guid = normalize_space(str(row["guid"] or ""))
+        url = normalize_space(str(row["url"] or ""))
+        canonical_url = normalize_space(str(row["canonical_url"] or ""))
+        title = normalize_space(str(row["title"] or ""))
+        summary = normalize_space(str(row["summary"] or ""))
+        raw_entry_json = str(row["raw_entry_json"] or "")
+
+        doi = ""
+        for candidate in (guid, canonical_url, url, title, summary, raw_entry_json):
+            doi = extract_doi_from_text(candidate)
+            if doi:
+                break
+        doi_is_surrogate = 0
+        if not doi:
+            doi = build_surrogate_doi(
+                feed_url="",
+                guid=guid,
+                url=canonical_url or url,
+                title=title,
+                published_at=str(row["published_at"] or ""),
+                summary=summary,
+            )
+            doi_is_surrogate = 1
+
+        if not doi:
+            skipped += 1
+            continue
+
+        conn.execute(
+            """
+            INSERT INTO entries (
+                doi, feed_id, guid, url, canonical_url, title, author,
+                published_at, updated_at, summary, categories, content_hash,
+                doi_is_surrogate, is_relevant, first_seen_at, last_seen_at, raw_entry_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(doi) DO UPDATE SET
+                feed_id = COALESCE(excluded.feed_id, entries.feed_id),
+                guid = COALESCE(excluded.guid, entries.guid),
+                url = COALESCE(excluded.url, entries.url),
+                canonical_url = COALESCE(excluded.canonical_url, entries.canonical_url),
+                title = COALESCE(excluded.title, entries.title),
+                author = COALESCE(excluded.author, entries.author),
+                published_at = COALESCE(excluded.published_at, entries.published_at),
+                updated_at = COALESCE(excluded.updated_at, entries.updated_at),
+                summary = COALESCE(excluded.summary, entries.summary),
+                categories = COALESCE(excluded.categories, entries.categories),
+                content_hash = COALESCE(excluded.content_hash, entries.content_hash),
+                doi_is_surrogate = entries.doi_is_surrogate,
+                first_seen_at = COALESCE(entries.first_seen_at, excluded.first_seen_at),
+                last_seen_at = COALESCE(excluded.last_seen_at, entries.last_seen_at),
+                raw_entry_json = COALESCE(excluded.raw_entry_json, entries.raw_entry_json)
+            """,
+            (
+                doi,
+                row["feed_id"],
+                guid or None,
+                url or None,
+                canonical_url or None,
+                title or None,
+                normalize_space(str(row["author"] or "")) or None,
+                normalize_space(str(row["published_at"] or "")) or None,
+                normalize_space(str(row["updated_at"] or "")) or None,
+                summary or None,
+                str(row["categories"] or "") or None,
+                str(row["content_hash"] or "") or None,
+                doi_is_surrogate,
+                1,
+                normalize_space(str(row["first_seen_at"] or "")) or None,
+                normalize_space(str(row["last_seen_at"] or "")) or None,
+                raw_entry_json or None,
+            ),
+        )
+        migrated += 1
+
+    conn.commit()
+    print(f"MIGRATE_OK legacy_table={legacy_name} migrated={migrated} skipped={skipped}")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
+    migrate_legacy_entries_if_needed(conn)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
 
@@ -302,6 +470,49 @@ def upsert_feed(conn: sqlite3.Connection, feed_url: str, feed_title: str | None 
     return int(cursor.lastrowid), True
 
 
+def resolve_entry_doi(
+    entry: Any,
+    feed_url: str,
+    guid: str,
+    raw_url: str,
+    canonical_url: str,
+    title: str,
+    summary: str,
+    published_at: str | None,
+    raw_entry_json: str,
+) -> tuple[str, int]:
+    direct_keys = [
+        "doi",
+        "DOI",
+        "dc_identifier",
+        "dc:identifier",
+        "prism_doi",
+        "prism:doi",
+        "citation_doi",
+        "citation:doi",
+        "identifier",
+    ]
+    for key in direct_keys:
+        doi = normalize_doi(entry.get(key))
+        if doi:
+            return doi, 0
+
+    links = entry.get("links") or []
+    for item in links:
+        if isinstance(item, dict):
+            for link_key in ("href", "title", "rel", "type"):
+                doi = extract_doi_from_text(item.get(link_key))
+                if doi:
+                    return doi, 0
+
+    for candidate in (guid, canonical_url, raw_url, title, summary, raw_entry_json):
+        doi = extract_doi_from_text(candidate)
+        if doi:
+            return doi, 0
+
+    return build_surrogate_doi(feed_url, guid, canonical_url or raw_url, title, published_at, summary), 1
+
+
 def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
     guid = normalize_space(str(entry.get("id") or entry.get("guid") or ""))
     raw_url = normalize_space(str(entry.get("link") or ""))
@@ -322,16 +533,32 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
             category_terms.append(term)
     categories = sorted(set(category_terms))
 
-    legacy_guid_dedupe_key = None
-    if guid:
-        feed_scope = canonicalize_url(feed_url) or normalize_space(feed_url)
-        dedupe_key = f"guid:{feed_scope}:{guid}"
-        legacy_guid_dedupe_key = f"guid:{guid}"
-    elif canonical_url:
-        dedupe_key = f"url:{canonical_url}"
-    else:
-        fallback = "|".join([feed_url, title, published_at or "", summary[:200]])
-        dedupe_key = f"hash:{sha256_hexdigest(fallback)}"
+    raw_entry_json = json.dumps(
+        {
+            "id": entry.get("id"),
+            "title": entry.get("title"),
+            "link": entry.get("link"),
+            "published": entry.get("published"),
+            "updated": entry.get("updated"),
+            "author": entry.get("author"),
+            "doi": entry.get("doi") or entry.get("DOI"),
+        },
+        default=str,
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+    doi, doi_is_surrogate = resolve_entry_doi(
+        entry=entry,
+        feed_url=feed_url,
+        guid=guid,
+        raw_url=raw_url,
+        canonical_url=canonical_url,
+        title=title,
+        summary=summary,
+        published_at=published_at,
+        raw_entry_json=raw_entry_json,
+    )
 
     content_basis = "|".join(
         [
@@ -345,23 +572,9 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
     )
     content_hash = sha256_hexdigest(content_basis)
 
-    raw_entry_json = json.dumps(
-        {
-            "id": entry.get("id"),
-            "title": entry.get("title"),
-            "link": entry.get("link"),
-            "published": entry.get("published"),
-            "updated": entry.get("updated"),
-            "author": entry.get("author"),
-        },
-        default=str,
-        ensure_ascii=True,
-        sort_keys=True,
-    )
-
     return {
-        "dedupe_key": dedupe_key,
-        "legacy_guid_dedupe_key": legacy_guid_dedupe_key,
+        "doi": doi,
+        "doi_is_surrogate": doi_is_surrogate,
         "guid": guid or None,
         "url": raw_url or None,
         "canonical_url": canonical_url or None,
@@ -376,34 +589,38 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
     }
 
 
-def upsert_entry_record(conn: sqlite3.Connection, feed_id: int, record: dict[str, Any], seen_at: str) -> str:
+def upsert_entry_record(
+    conn: sqlite3.Connection,
+    feed_id: int,
+    record: dict[str, Any],
+    seen_at: str,
+    relevance: int | None,
+) -> str:
     categories_value = record.get("categories")
     if isinstance(categories_value, list):
         record = dict(record)
         record["categories"] = json.dumps(categories_value, ensure_ascii=True)
 
+    doi = normalize_space(str(record.get("doi") or ""))
+    if not doi:
+        raise ValueError("empty_doi")
+
     existing = conn.execute(
-        "SELECT id, content_hash FROM entries WHERE dedupe_key = ?",
-        (record["dedupe_key"],),
+        "SELECT content_hash, is_relevant FROM entries WHERE doi = ?",
+        (doi,),
     ).fetchone()
-    if not existing and record["legacy_guid_dedupe_key"]:
-        existing = conn.execute(
-            "SELECT id, content_hash FROM entries WHERE dedupe_key = ?",
-            (record["legacy_guid_dedupe_key"],),
-        ).fetchone()
 
     if not existing:
         conn.execute(
             """
             INSERT INTO entries (
-                dedupe_key, first_feed_id, last_feed_id, guid, url, canonical_url,
+                doi, feed_id, guid, url, canonical_url,
                 title, author, published_at, updated_at, summary, categories,
-                content_hash, first_seen_at, last_seen_at, raw_entry_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                content_hash, doi_is_surrogate, is_relevant, first_seen_at, last_seen_at, raw_entry_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                record["dedupe_key"],
-                feed_id,
+                doi,
                 feed_id,
                 record["guid"],
                 record["url"],
@@ -415,6 +632,8 @@ def upsert_entry_record(conn: sqlite3.Connection, feed_id: int, record: dict[str
                 record["summary"],
                 record["categories"],
                 record["content_hash"],
+                int(record.get("doi_is_surrogate") or 0),
+                relevance,
                 seen_at,
                 seen_at,
                 record["raw_entry_json"],
@@ -422,49 +641,124 @@ def upsert_entry_record(conn: sqlite3.Connection, feed_id: int, record: dict[str
         )
         return "new"
 
-    entry_id = int(existing["id"])
-    if existing["content_hash"] == record["content_hash"]:
+    existing_relevance = existing["is_relevant"]
+    if existing_relevance == 0 and relevance is None:
+        conn.execute(
+            "UPDATE entries SET feed_id = ?, last_seen_at = ? WHERE doi = ?",
+            (feed_id, seen_at, doi),
+        )
+        return "kept_minimized"
+
+    if str(existing["content_hash"] or "") == str(record["content_hash"] or ""):
+        if relevance is None:
+            conn.execute(
+                "UPDATE entries SET feed_id = ?, last_seen_at = ? WHERE doi = ?",
+                (feed_id, seen_at, doi),
+            )
+        else:
+            conn.execute(
+                "UPDATE entries SET feed_id = ?, last_seen_at = ?, is_relevant = ? WHERE doi = ?",
+                (feed_id, seen_at, relevance, doi),
+            )
+        return "unchanged"
+
+    if relevance is None:
         conn.execute(
             """
             UPDATE entries
-            SET last_feed_id = ?, last_seen_at = ?
-            WHERE id = ?
+            SET feed_id = ?, guid = ?, url = ?, canonical_url = ?, title = ?,
+                author = ?, published_at = ?, updated_at = ?, summary = ?, categories = ?,
+                content_hash = ?, doi_is_surrogate = ?, last_seen_at = ?, raw_entry_json = ?
+            WHERE doi = ?
             """,
-            (feed_id, seen_at, entry_id),
+            (
+                feed_id,
+                record["guid"],
+                record["url"],
+                record["canonical_url"],
+                record["title"],
+                record["author"],
+                record["published_at"],
+                record["updated_at"],
+                record["summary"],
+                record["categories"],
+                record["content_hash"],
+                int(record.get("doi_is_surrogate") or 0),
+                seen_at,
+                record["raw_entry_json"],
+                doi,
+            ),
         )
-        return "unchanged"
+    else:
+        conn.execute(
+            """
+            UPDATE entries
+            SET feed_id = ?, guid = ?, url = ?, canonical_url = ?, title = ?,
+                author = ?, published_at = ?, updated_at = ?, summary = ?, categories = ?,
+                content_hash = ?, doi_is_surrogate = ?, is_relevant = ?, last_seen_at = ?, raw_entry_json = ?
+            WHERE doi = ?
+            """,
+            (
+                feed_id,
+                record["guid"],
+                record["url"],
+                record["canonical_url"],
+                record["title"],
+                record["author"],
+                record["published_at"],
+                record["updated_at"],
+                record["summary"],
+                record["categories"],
+                record["content_hash"],
+                int(record.get("doi_is_surrogate") or 0),
+                relevance,
+                seen_at,
+                record["raw_entry_json"],
+                doi,
+            ),
+        )
+    return "updated"
 
+
+def ensure_entry_stub(conn: sqlite3.Connection, doi: str, doi_is_surrogate: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO entries (doi, doi_is_surrogate, is_relevant)
+        VALUES (?, ?, 0)
+        ON CONFLICT(doi) DO NOTHING
+        """,
+        (doi, doi_is_surrogate),
+    )
+
+
+def minimize_entry_to_doi(conn: sqlite3.Connection, doi: str) -> None:
     conn.execute(
         """
         UPDATE entries
-        SET last_feed_id = ?, guid = ?, url = ?, canonical_url = ?, title = ?,
-            author = ?, published_at = ?, updated_at = ?, summary = ?, categories = ?,
-            content_hash = ?, last_seen_at = ?, raw_entry_json = ?
-        WHERE id = ?
+        SET feed_id = NULL,
+            guid = NULL,
+            url = NULL,
+            canonical_url = NULL,
+            title = NULL,
+            author = NULL,
+            published_at = NULL,
+            updated_at = NULL,
+            summary = NULL,
+            categories = NULL,
+            content_hash = NULL,
+            first_seen_at = NULL,
+            last_seen_at = NULL,
+            raw_entry_json = NULL,
+            is_relevant = 0
+        WHERE doi = ?
         """,
-        (
-            feed_id,
-            record["guid"],
-            record["url"],
-            record["canonical_url"],
-            record["title"],
-            record["author"],
-            record["published_at"],
-            record["updated_at"],
-            record["summary"],
-            record["categories"],
-            record["content_hash"],
-            seen_at,
-            record["raw_entry_json"],
-            entry_id,
-        ),
+        (doi,),
     )
-    return "updated"
 
 
 def upsert_entry(conn: sqlite3.Connection, feed_id: int, feed_url: str, entry: Any, seen_at: str) -> str:
     record = build_entry_record(feed_url, entry)
-    return upsert_entry_record(conn, feed_id, record, seen_at)
+    return upsert_entry_record(conn, feed_id, record, seen_at, relevance=None)
 
 
 def sync_feed(
@@ -498,6 +792,7 @@ def sync_feed(
         "new": 0,
         "updated": 0,
         "unchanged": 0,
+        "kept_minimized": 0,
         "errors": 0,
     }
 
@@ -571,7 +866,7 @@ def cleanup_stale_entries(conn: sqlite3.Connection, ttl_days: int) -> int:
         return 0
     threshold = datetime.now(timezone.utc) - timedelta(days=ttl_days)
     threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    cursor = conn.execute("DELETE FROM entries WHERE last_seen_at < ?", (threshold_iso,))
+    cursor = conn.execute("DELETE FROM entries WHERE COALESCE(last_seen_at, '') < ?", (threshold_iso,))
     return int(cursor.rowcount)
 
 
@@ -654,6 +949,8 @@ def collect_candidates_from_feed(
                 "feed_url": feed_url,
                 "feed_title": feed_title,
                 "site_url": site_url,
+                "doi": record.get("doi"),
+                "doi_is_surrogate": int(record.get("doi_is_surrogate") or 0),
                 "title": record.get("title"),
                 "url": record.get("url"),
                 "canonical_url": record.get("canonical_url"),
@@ -662,11 +959,59 @@ def collect_candidates_from_feed(
                 "updated_at": record.get("updated_at"),
                 "summary": record.get("summary"),
                 "categories": parse_categories(record.get("categories")),
-                "dedupe_key": record.get("dedupe_key"),
                 "entry_record": record,
             }
         )
     return feed_meta, collected, skipped_by_window
+
+
+def persist_candidates_to_db(
+    conn: sqlite3.Connection,
+    candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    seen_at = now_utc_iso()
+    totals = {
+        "new": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "kept_minimized": 0,
+        "feeds_new": 0,
+        "feeds_existing": 0,
+        "skipped_invalid": 0,
+    }
+
+    for item in candidates:
+        feed_url = canonicalize_url(str(item.get("feed_url") or ""))
+        if not feed_url:
+            totals["skipped_invalid"] += 1
+            continue
+
+        feed_title = normalize_space(str(item.get("feed_title") or "")) or None
+        site_url = canonicalize_url(str(item.get("site_url") or "")) or None
+        feed_id, created = upsert_feed(conn, feed_url, feed_title)
+        if created:
+            totals["feeds_new"] += 1
+        else:
+            totals["feeds_existing"] += 1
+        if site_url:
+            conn.execute(
+                "UPDATE feeds SET site_url = COALESCE(?, site_url), updated_at = ? WHERE id = ?",
+                (site_url, seen_at, feed_id),
+            )
+
+        entry_record = item.get("entry_record")
+        if not isinstance(entry_record, dict):
+            totals["skipped_invalid"] += 1
+            continue
+
+        try:
+            state = upsert_entry_record(conn, feed_id, entry_record, seen_at, relevance=None)
+            totals[state] += 1
+        except ValueError:
+            totals["skipped_invalid"] += 1
+
+    conn.commit()
+    return totals
 
 
 def cmd_collect_window(args: argparse.Namespace) -> int:
@@ -724,6 +1069,10 @@ def cmd_collect_window(args: argparse.Namespace) -> int:
         feed_report["skipped_by_window"] = skipped_by_window
         feed_reports.append(feed_report)
 
+    with connect_db(args.db) as conn:
+        init_db(conn)
+        ingest_totals = persist_candidates_to_db(conn, payload_candidates)
+
     payload = {
         "generated_at_utc": now_utc_iso(),
         "topic_prompt": normalize_space(str(args.topic_prompt or DEFAULT_TOPIC_PROMPT)),
@@ -733,10 +1082,11 @@ def cmd_collect_window(args: argparse.Namespace) -> int:
         },
         "source": {
             "opml_path": args.opml,
-            "db_path": str(resolve_db_path(args.db)) if args.use_subscribed_feeds else None,
+            "db_path": str(resolve_db_path(args.db)),
             "feed_urls": feed_urls,
         },
         "feeds": feed_reports,
+        "db_ingest": ingest_totals,
         "candidates": payload_candidates,
     }
 
@@ -754,6 +1104,8 @@ def cmd_collect_window(args: argparse.Namespace) -> int:
         f"feeds={len(feed_urls)} "
         f"candidates={len(payload_candidates)} "
         f"skipped_by_window={skipped_by_window_total} "
+        f"ingested_new={ingest_totals['new']} "
+        f"ingested_updated={ingest_totals['updated']} "
         f"output={output_path}"
     )
     return 0
@@ -801,9 +1153,12 @@ def cmd_insert_selected(args: argparse.Namespace) -> int:
 
     totals = {
         "selected": len(selected_ids),
+        "relevant_marked": 0,
+        "irrelevant_pruned": 0,
         "new": 0,
         "updated": 0,
         "unchanged": 0,
+        "kept_minimized": 0,
         "skipped_invalid": 0,
         "unknown_ids": len(unknown_ids),
     }
@@ -817,38 +1172,53 @@ def cmd_insert_selected(args: argparse.Namespace) -> int:
             if not str(raw_candidate_id or "").isdigit():
                 totals["skipped_invalid"] += 1
                 continue
-            candidate_id = int(raw_candidate_id)
-            if candidate_id not in selected_ids:
-                continue
-
-            feed_url = canonicalize_url(str(item.get("feed_url") or ""))
-            if not feed_url:
-                totals["skipped_invalid"] += 1
-                continue
-            feed_title = normalize_space(str(item.get("feed_title") or "")) or None
-            site_url = canonicalize_url(str(item.get("site_url") or "")) or None
-            feed_id, _ = upsert_feed(conn, feed_url, feed_title)
-            if site_url:
-                conn.execute(
-                    "UPDATE feeds SET site_url = COALESCE(?, site_url), updated_at = ? WHERE id = ?",
-                    (site_url, seen_at, feed_id),
-                )
 
             entry_record = item.get("entry_record")
             if not isinstance(entry_record, dict):
                 totals["skipped_invalid"] += 1
                 continue
-            state = upsert_entry_record(conn, feed_id, entry_record, seen_at)
-            totals[state] += 1
+
+            doi = normalize_space(str(entry_record.get("doi") or item.get("doi") or ""))
+            doi_is_surrogate = int(entry_record.get("doi_is_surrogate") or item.get("doi_is_surrogate") or 0)
+            if not doi:
+                totals["skipped_invalid"] += 1
+                continue
+
+            candidate_id = int(raw_candidate_id)
+            if candidate_id in selected_ids:
+                feed_url = canonicalize_url(str(item.get("feed_url") or ""))
+                if not feed_url:
+                    totals["skipped_invalid"] += 1
+                    continue
+                feed_title = normalize_space(str(item.get("feed_title") or "")) or None
+                site_url = canonicalize_url(str(item.get("site_url") or "")) or None
+                feed_id, _ = upsert_feed(conn, feed_url, feed_title)
+                if site_url:
+                    conn.execute(
+                        "UPDATE feeds SET site_url = COALESCE(?, site_url), updated_at = ? WHERE id = ?",
+                        (site_url, seen_at, feed_id),
+                    )
+
+                state = upsert_entry_record(conn, feed_id, entry_record, seen_at, relevance=1)
+                totals[state] += 1
+                totals["relevant_marked"] += 1
+                continue
+
+            ensure_entry_stub(conn, doi=doi, doi_is_surrogate=doi_is_surrogate)
+            minimize_entry_to_doi(conn, doi)
+            totals["irrelevant_pruned"] += 1
 
         conn.commit()
 
     print(
         "INSERT_SELECTED_OK "
         f"selected={totals['selected']} "
+        f"relevant_marked={totals['relevant_marked']} "
+        f"irrelevant_pruned={totals['irrelevant_pruned']} "
         f"new={totals['new']} "
         f"updated={totals['updated']} "
         f"unchanged={totals['unchanged']} "
+        f"kept_minimized={totals['kept_minimized']} "
         f"skipped_invalid={totals['skipped_invalid']} "
         f"unknown_ids={totals['unknown_ids']}"
     )
@@ -896,6 +1266,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         "new": 0,
         "updated": 0,
         "unchanged": 0,
+        "kept_minimized": 0,
         "errors": 0,
         "cleanup_deleted": 0,
     }
@@ -920,7 +1291,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
             feed_rows = conn.execute(sql, params).fetchall()
 
         if not feed_rows:
-            print("SYNC_OK feeds_checked=0 feeds_nochange=0 new=0 updated=0 unchanged=0 errors=0 cleanup_deleted=0")
+            print(
+                "SYNC_OK feeds_checked=0 feeds_nochange=0 new=0 updated=0 unchanged=0 "
+                "kept_minimized=0 errors=0 cleanup_deleted=0"
+            )
             return 0
 
         for row in feed_rows:
@@ -931,7 +1305,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 use_conditional_get=not args.disable_conditional_get,
                 user_agent=args.user_agent,
             )
-            for key in ("feeds_checked", "feeds_nochange", "new", "updated", "unchanged", "errors"):
+            for key in ("feeds_checked", "feeds_nochange", "new", "updated", "unchanged", "kept_minimized", "errors"):
                 totals[key] += int(row_result.get(key, 0))
             conn.commit()
 
@@ -947,6 +1321,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         f"new={totals['new']} "
         f"updated={totals['updated']} "
         f"unchanged={totals['unchanged']} "
+        f"kept_minimized={totals['kept_minimized']} "
         f"errors={totals['errors']} "
         f"cleanup_deleted={totals['cleanup_deleted']}"
     )
@@ -980,21 +1355,23 @@ def cmd_list_entries(args: argparse.Namespace) -> int:
         init_db(conn)
         rows = conn.execute(
             """
-            SELECT e.id, e.dedupe_key, e.title, e.canonical_url, e.published_at, e.last_seen_at, f.feed_url
+            SELECT e.doi, e.is_relevant, e.title, e.canonical_url, e.published_at, e.last_seen_at,
+                   e.doi_is_surrogate, f.feed_url
             FROM entries e
-            JOIN feeds f ON f.id = e.last_feed_id
-            ORDER BY COALESCE(CASE WHEN e.published_at GLOB '????-??-??T*Z' THEN e.published_at END, e.first_seen_at) DESC, e.id DESC
+            LEFT JOIN feeds f ON f.id = e.feed_id
+            ORDER BY COALESCE(CASE WHEN e.published_at GLOB '????-??-??T*Z' THEN e.published_at END, e.first_seen_at, e.last_seen_at) DESC,
+                     e.doi DESC
             LIMIT ?
             """,
             (args.limit,),
         ).fetchall()
 
-    print("id\tpublished_at\tlast_seen_at\ttitle\turl\tdedupe_key\tfeed_url")
+    print("doi\trelevant\tdoi_is_surrogate\tpublished_at\tlast_seen_at\ttitle\turl\tfeed_url")
     for row in rows:
         print(
-            f"{row['id']}\t{row['published_at'] or ''}\t{row['last_seen_at'] or ''}\t"
-            f"{(row['title'] or '').replace(chr(9), ' ')}\t{row['canonical_url'] or ''}\t"
-            f"{row['dedupe_key']}\t{row['feed_url']}"
+            f"{row['doi']}\t{'' if row['is_relevant'] is None else row['is_relevant']}\t{row['doi_is_surrogate']}\t"
+            f"{row['published_at'] or ''}\t{row['last_seen_at'] or ''}\t"
+            f"{(row['title'] or '').replace(chr(9), ' ')}\t{row['canonical_url'] or ''}\t{row['feed_url'] or ''}"
         )
     return 0
 
@@ -1020,12 +1397,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser_collect = subparsers.add_parser(
         "collect-window",
-        help="Fetch candidate entries into a JSON window for prompt-based topic filtering before DB insertion.",
+        help="Fetch candidate entries into JSON and persist all fetched records into SQLite first.",
     )
     parser_collect.add_argument(
         "--db",
         default=DEFAULT_DB_PATH,
-        help=f"SQLite db path used when --use-subscribed-feeds is enabled (default: {DEFAULT_DB_PATH})",
+        help=f"SQLite db path used for subscribed feeds and candidate ingestion (default: {DEFAULT_DB_PATH})",
     )
     parser_collect.add_argument("--opml", default=None, help="Optional OPML file path as feed source.")
     parser_collect.add_argument(
@@ -1072,14 +1449,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser_insert_selected = subparsers.add_parser(
         "insert-selected",
-        help="Insert only confirmed candidate IDs from collect-window JSON into SQLite.",
+        help="Mark selected candidate IDs as relevant and prune unselected candidates to DOI-only rows.",
     )
     parser_insert_selected.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser_insert_selected.add_argument("--candidates", required=True, help="JSON file generated by collect-window.")
     parser_insert_selected.add_argument(
         "--selected-ids",
         default="",
-        help="Comma-separated candidate IDs confirmed for insertion.",
+        help="Comma-separated candidate IDs confirmed as relevant.",
     )
     parser_insert_selected.add_argument(
         "--selected-ids-file",
@@ -1089,11 +1466,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser_insert_selected.add_argument(
         "--select-all",
         action="store_true",
-        help="Insert all candidates from the window JSON.",
+        help="Mark all candidates from the window JSON as relevant.",
     )
     parser_insert_selected.set_defaults(func=cmd_insert_selected)
 
-    parser_sync = subparsers.add_parser("sync", help="Fetch active feeds and persist entry metadata.")
+    parser_sync = subparsers.add_parser("sync", help="Fetch active feeds and persist all entry metadata by DOI.")
     parser_sync.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser_sync.add_argument("--feed-url", default=None, help="Sync a single feed URL.")
     parser_sync.add_argument("--max-feeds", type=int, default=0, help="Max feeds per run, 0 means no limit.")

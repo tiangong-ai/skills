@@ -11,7 +11,7 @@
     "period_label": "Daily|Weekly|Monthly|Custom",
     "start_utc": "2026-02-10T00:00:00Z",
     "end_utc": "2026-02-11T00:00:00Z",
-    "selected_fields": ["entry_id", "title", "..."],
+    "selected_fields": ["doi", "title", "..."],
     "max_records": 80,
     "max_per_feed": 0
   },
@@ -29,7 +29,7 @@
   },
   "records": [
     {
-      "entry_id": 123,
+      "doi": "10.1038/nature12373",
       "timestamp_utc": "2026-02-10T08:00:00Z",
       "feed_title": "Example Feed",
       "title": "Example title",
@@ -40,10 +40,10 @@
 }
 ```
 
-## Agent summary guidance
+## Agent Summary Guidance
 
 1. Treat `records` as the primary evidence.
 2. Use `aggregates` as secondary hints for trend framing.
 3. If `dataset.truncated=true`, explicitly mention coverage limitation.
-4. Anchor important claims with `entry_id` and URL references.
+4. Anchor important claims with `doi` and URL references.
 5. Avoid claims that cannot be traced to retrieved evidence.

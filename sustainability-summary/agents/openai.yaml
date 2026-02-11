@@ -1,4 +1,4 @@
 interface:
   display_name: "Sustainability Summary"
-  short_description: "RAG summarize sustainability RSS evidence by time window"
-  default_prompt: "Use $sustainability-summary to retrieve time-windowed sustainability RSS evidence from SQLite and produce a grounded summary in the final response."
+  short_description: "Summarize relevant DOI evidence by time window"
+  default_prompt: "Use $sustainability-summary to retrieve time-windowed relevant DOI records from shared SQLite and produce a grounded summary with DOI/URL evidence anchors."

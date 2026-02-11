@@ -25,7 +25,7 @@ DEFAULT_TOP_FEEDS = 20
 DEFAULT_TOP_KEYWORDS = 25
 
 DEFAULT_FIELDS = [
-    "entry_id",
+    "doi",
     "timestamp_utc",
     "timestamp_source",
     "feed_title",
@@ -39,8 +39,7 @@ DEFAULT_FIELDS = [
 ]
 
 ALL_FIELDS = {
-    "entry_id",
-    "dedupe_key",
+    "doi",
     "timestamp_utc",
     "timestamp_source",
     "published_at",
@@ -58,7 +57,7 @@ ALL_FIELDS = {
 }
 
 EVENT_TS_SQL_EXPR = (
-    "COALESCE("
+    "COALESCE(" 
     "CASE WHEN e.published_at GLOB '????-??-??T*Z' THEN e.published_at END, "
     "e.first_seen_at, "
     "e.last_seen_at"
@@ -304,8 +303,18 @@ def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return bool(row)
 
 
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not table_exists(conn, table_name):
+        return set()
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
 def ensure_required_tables(conn: sqlite3.Connection) -> bool:
-    return table_exists(conn, "feeds") and table_exists(conn, "entries")
+    if not (table_exists(conn, "feeds") and table_exists(conn, "entries")):
+        return False
+    columns = table_columns(conn, "entries")
+    return "doi" in columns and "is_relevant" in columns
 
 
 def choose_entry_timestamp(row: sqlite3.Row) -> tuple[datetime | None, str]:
@@ -336,7 +345,8 @@ def count_rows_in_range(conn: sqlite3.Connection, start_utc_iso: str, end_utc_is
         f"""
         SELECT COUNT(1) AS c
         FROM entries e
-        WHERE {EVENT_TS_SQL_EXPR} >= ?
+        WHERE e.is_relevant = 1
+          AND {EVENT_TS_SQL_EXPR} >= ?
           AND {EVENT_TS_SQL_EXPR} < ?
         """,
         (start_utc_iso, end_utc_iso),
@@ -365,12 +375,11 @@ def load_rows(
             "'' AS fulltext_text"
         )
     )
-    join_clause = "LEFT JOIN entry_content ec ON ec.entry_id = e.id" if has_entry_content else ""
+    join_clause = "LEFT JOIN entry_content ec ON ec.doi = e.doi" if has_entry_content else ""
 
     sql = f"""
     SELECT
-        e.id AS entry_id,
-        e.dedupe_key,
+        e.doi,
         e.title,
         e.canonical_url,
         e.url,
@@ -383,11 +392,12 @@ def load_rows(
         f.feed_url,
         {content_columns}
     FROM entries e
-    LEFT JOIN feeds f ON f.id = e.last_feed_id
+    LEFT JOIN feeds f ON f.id = e.feed_id
     {join_clause}
-    WHERE {EVENT_TS_SQL_EXPR} >= ?
+    WHERE e.is_relevant = 1
+      AND {EVENT_TS_SQL_EXPR} >= ?
       AND {EVENT_TS_SQL_EXPR} < ?
-    ORDER BY {EVENT_TS_SQL_EXPR} DESC, e.id DESC
+    ORDER BY {EVENT_TS_SQL_EXPR} DESC, e.doi DESC
     """
     params: list[Any] = [start_utc_iso, end_utc_iso]
     if limit > 0:
@@ -421,8 +431,7 @@ def build_record(row: sqlite3.Row, summary_chars: int, fulltext_chars: int) -> d
             categories = []
 
     return {
-        "entry_id": int(row["entry_id"]),
-        "dedupe_key": str(row["dedupe_key"] or ""),
+        "doi": str(row["doi"] or ""),
         "timestamp_utc": timestamp.isoformat().replace("+00:00", "Z"),
         "timestamp_source": timestamp_source,
         "published_at": normalize_space(str(row["published_at"] or "")),
@@ -547,7 +556,6 @@ def emit_output(payload: dict[str, Any], output_path: str | None, pretty: bool) 
     if pretty:
         body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
     else:
-        # Minified JSON for lower token cost in downstream agent prompts.
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
     if output_path:
         target = Path(output_path)
@@ -575,8 +583,8 @@ def run(args: argparse.Namespace) -> int:
     with connect_db(args.db) as conn:
         if not ensure_required_tables(conn):
             print(
-                "SUMMARY_ERR reason=missing_tables detail='feeds/entries not found. "
-                "Run sustainability-rss-fetch init-db and insert-selected first.'",
+                "SUMMARY_ERR reason=missing_tables detail='feeds/entries with doi not found. "
+                "Run sustainability-rss-fetch init-db and collect-window first.'",
                 file=sys.stderr,
             )
             return 2
@@ -631,7 +639,7 @@ def run(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Retrieve time-windowed RSS records for agent-side RAG summarization.",
+        description="Retrieve time-windowed relevant RSS records for agent-side RAG summarization.",
     )
     parser.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser.add_argument(

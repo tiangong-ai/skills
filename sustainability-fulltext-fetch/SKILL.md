@@ -1,58 +1,50 @@
 ---
 name: sustainability-fulltext-fetch
-description: Fetch and persist article full text for sustainability RSS entries already stored in SQLite by sustainability-rss-fetch. Use when backfilling or incrementally syncing body text from entries.url or entries.canonical_url into a companion table for downstream retrieval, indexing, or summarization.
+description: Fetch and persist content for DOI-keyed sustainability RSS entries from the shared SQLite DB, using OpenAlex/Semantic Scholar API metadata first and webpage fulltext extraction as fallback. Use when building resilient DOI-first content enrichment after relevance labeling.
 ---
 
 # Sustainability Fulltext Fetch
 
 ## Core Goal
-- Reuse the same SQLite database populated by `sustainability-rss-fetch`.
-- Fetch article body text from each selected RSS entry URL.
-- Persist extraction status and text in a companion table (`entry_content`).
-- Support incremental runs and safe retries without creating duplicate fulltext rows.
+- Reuse the same SQLite DB populated by `sustainability-rss-fetch`.
+- Process only relevant entries (`is_relevant=1`).
+- Prefer API metadata retrieval by DOI (OpenAlex first, Semantic Scholar fallback).
+- Fallback to webpage fulltext extraction when API metadata is unavailable.
+- Persist one content row per DOI in `entry_content`.
 
 ## Triggering Conditions
-- Receive a request to fetch article body/full text for entries already in `sustainability_rss.db`.
-- Receive a request to build a second-stage pipeline after sustainability RSS metadata selection.
-- Need a stable, resumable queue over existing `entries` rows.
-- Need URL-based fulltext persistence before chunking, indexing, or summarization.
+- Receive a request to enrich relevant DOI records with abstract/fulltext content.
+- Receive a request to replace webpage-first crawling with API-first enrichment.
+- Need retry-safe incremental updates without duplicate rows.
 
 ## Workflow
-1. Ensure metadata table exists first.
-- Run `sustainability-rss-fetch` and populate `entries` in SQLite before using this skill.
-- This skill requires the `entries` table to exist.
-- In multi-agent runtimes, pin DB to the same absolute path used by `sustainability-rss-fetch`:
+1. Ensure upstream DOI/relevance data exists.
 
 ```bash
 export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability_rss.db"
-```
-
-2. Initialize fulltext table.
-
-```bash
 python3 scripts/fulltext_fetch.py init-db --db "$SUSTAIN_RSS_DB_PATH"
 ```
 
-3. Run incremental fulltext sync.
-- Default behavior fetches rows that are missing full text or currently failed.
+2. Run incremental sync (API first, webpage fallback).
 
 ```bash
 python3 scripts/fulltext_fetch.py sync \
   --db "$SUSTAIN_RSS_DB_PATH" \
   --limit 50 \
-  --timeout 20 \
+  --openalex-email "you@example.com" \
+  --api-min-chars 80 \
   --min-chars 300
 ```
 
-4. Fetch one entry on demand.
+3. Fetch one DOI on demand.
 
 ```bash
 python3 scripts/fulltext_fetch.py fetch-entry \
   --db "$SUSTAIN_RSS_DB_PATH" \
-  --entry-id 1234
+  --doi "10.1038/nature12373"
 ```
 
-5. Inspect extracted content state.
+4. Inspect stored content state.
 
 ```bash
 python3 scripts/fulltext_fetch.py list-content \
@@ -62,38 +54,46 @@ python3 scripts/fulltext_fetch.py list-content \
 ```
 
 ## Data Contract
-- Reads from existing `entries` table:
-  - `id`, `canonical_url`, `url`, `title`.
-- Writes to `entry_content` table:
-  - `entry_id` (unique, one row per entry)
-  - `source_url`, `final_url`, `http_status`
-  - `extractor` (`trafilatura`, `html-parser`, or `none`)
+- Reads from `entries`:
+  - `doi`, `doi_is_surrogate`, `is_relevant`, `canonical_url`, `url`, `title`.
+- Writes to `entry_content` (primary key `doi`):
+  - source URL/status/extractor
+  - `content_kind` (`abstract` or `fulltext`)
   - `content_text`, `content_hash`, `content_length`
-  - `status` (`ready` or `failed`)
-  - `retry_count`, `last_error`, timestamps.
+  - retry fields and timestamps.
 
-## Extraction and Update Rules
-- URL source priority: `canonical_url` first, fallback to `url`.
-- Attempt `trafilatura` extraction when dependency is available, fallback to built-in HTML parser.
-- Upsert by `entry_id`:
-  - Success: write/update full text and reset `retry_count` to `0`.
-  - Failure with existing `ready` content: keep old text, keep status `ready`, record `last_error`.
-  - Failure without ready content: status becomes `failed`, increment `retry_count`, set `next_retry_at`.
-- Failed retries are capped by `--max-retries` (default `3`) and paced by `--retry-backoff-minutes`.
-- `--force` allows refetching already `ready` rows.
-- `--refetch-days N` allows refreshing rows older than `N` days.
+## Extraction Priority
+1. API metadata path:
+- OpenAlex by DOI.
+- Semantic Scholar fallback by DOI.
+- If accepted (`--api-min-chars`), persist as `content_kind=abstract`.
+
+2. Webpage fallback path:
+- Use `canonical_url` then `url`.
+- Extract with `trafilatura` when available, else built-in HTML parser.
+- Persist as `content_kind=fulltext`.
+
+## Update Semantics
+- Upsert key: `doi`.
+- Success: status `ready`, reset retry counters.
+- Failure with existing ready row: keep old content, record latest error.
+- Failure without ready row: set `status=failed`, increment retry state.
 
 ## Configurable Parameters
 - `--db`
-- `SUSTAIN_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
+- `SUSTAIN_RSS_DB_PATH`
 - `--limit`
 - `--force`
 - `--only-failed`
 - `--refetch-days`
-- `--oldest-first`
 - `--timeout`
 - `--max-bytes`
 - `--min-chars`
+- `--openalex-email` / `OPENALEX_EMAIL`
+- `--s2-api-key` / `S2_API_KEY`
+- `--api-timeout`
+- `--api-min-chars`
+- `--disable-api-metadata`
 - `--max-retries`
 - `--retry-backoff-minutes`
 - `--user-agent`
@@ -101,10 +101,10 @@ python3 scripts/fulltext_fetch.py list-content \
 - `--fail-on-errors`
 
 ## Error Handling
-- Missing `entries` table: return actionable error and stop.
-- Network/HTTP/parse errors: store failure state and continue processing other entries.
-- Non-text content types (PDF/image/audio/video/zip): mark as failed for that entry.
-- Extraction too short (`--min-chars`): treat as failure to avoid low-quality body text.
+- Missing DOI-keyed `entries` table: stop with actionable message.
+- API/network/HTTP failures: record failures and continue queue.
+- Webpage non-text content: mark failed for that DOI.
+- Short extraction: fail by threshold to avoid low-quality content.
 
 ## References
 - `references/schema.md`

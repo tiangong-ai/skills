@@ -10,7 +10,7 @@
   "fulltext_chars": 8192,
   "top_feeds": 10,
   "top_keywords": 15,
-  "fields": "entry_id,timestamp_utc,feed_title,title,url,summary,fulltext_excerpt",
+  "fields": "doi,timestamp_utc,feed_title,title,url,summary,fulltext_excerpt",
   "output": "/tmp/sustainability-weekly-context.json",
   "pretty": false,
   "fail_on_empty": false

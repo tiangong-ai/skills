@@ -3,43 +3,40 @@
 ## Accepted Input Sources
 - RSS XML feed URLs
 - OPML feed lists (`.opml`)
-- Topic prompt for semantic screening (default sustainability themes, user-customizable)
+- Topic prompt for semantic screening
 
 ## Default Source Asset
-- Use `assets/journal.opml` as the default feed source list.
-- This file is sourced from user-provided journal feeds and should be treated as the first-choice input.
+- `assets/journal.opml`
 
 ## Candidate Window Schema (`collect-window` output)
 
 ```json
 {
   "generated_at_utc": "2026-02-11T12:00:00Z",
-  "topic_prompt": "筛选与可持续主题相关的文章：生命周期评价、物质流分析、绿色供应链、绿电、绿色设计、减污降碳",
+  "topic_prompt": "...",
   "window": {
     "start_utc": "2026-02-01T00:00:00Z",
     "end_utc": "2026-02-11T00:00:00Z"
   },
-  "feeds": [
-    {
-      "feed_url": "https://example.com/feed.xml",
-      "feed_title": "Example Journal",
-      "status": 200,
-      "candidate_count": 10,
-      "skipped_by_window": 2
-    }
-  ],
+  "db_ingest": {
+    "new": 100,
+    "updated": 20,
+    "unchanged": 300
+  },
   "candidates": [
     {
       "candidate_id": 1,
+      "doi": "10.1038/nature12373",
+      "doi_is_surrogate": 0,
       "title": "Article title",
       "published_at": "2026-02-10T09:30:00Z",
       "feed_title": "Example Journal",
       "url": "https://example.com/post",
       "summary": "Abstract snippet",
       "categories": ["lca", "carbon"],
-      "dedupe_key": "guid:https://example.com/feed.xml:abc123",
       "entry_record": {
-        "guid": "abc123",
+        "doi": "10.1038/nature12373",
+        "doi_is_surrogate": 0,
         "canonical_url": "https://example.com/post"
       }
     }
@@ -47,44 +44,34 @@
 }
 ```
 
-## Persisted Record Schema (`insert-selected`)
-Persist feed-level and entry-level metadata in SQLite.
+## Persisted Record Schema (`entries`)
 
 ```json
 {
-  "feed": {
-    "feed_url": "https://example.com/feed.xml",
-    "feed_title": "Example Feed",
-    "site_url": "https://example.com/",
-    "etag": "optional etag",
-    "last_modified": "optional HTTP last-modified header",
-    "last_checked_at": "2026-02-10T09:30:00Z",
-    "last_status": 200
-  },
-  "entry": {
-    "dedupe_key": "guid:<feed_url>:<id> | url:<canonical_url> | hash:<sha256>",
-    "guid": "optional guid/id",
-    "url": "https://example.com/post",
-    "canonical_url": "https://example.com/post",
-    "title": "entry title",
-    "author": "optional author",
-    "published_at": "2026-02-10T09:30:00Z",
-    "updated_at": "2026-02-10T10:00:00Z",
-    "summary": "feed summary/description",
-    "categories": ["lca", "mfa"],
-    "content_hash": "sha256(title+summary+timestamps+url)",
-    "first_seen_at": "2026-02-10T10:05:00Z",
-    "last_seen_at": "2026-02-10T10:05:00Z"
-  }
+  "doi": "10.1038/nature12373",
+  "doi_is_surrogate": 0,
+  "is_relevant": 1,
+  "feed_id": 12,
+  "guid": "optional guid",
+  "url": "https://example.com/post",
+  "canonical_url": "https://example.com/post",
+  "title": "entry title",
+  "author": "optional author",
+  "published_at": "2026-02-10T09:30:00Z",
+  "updated_at": "2026-02-10T10:00:00Z",
+  "summary": "feed summary/description",
+  "categories": ["lca", "mfa"],
+  "content_hash": "sha256(...)",
+  "first_seen_at": "2026-02-10T10:05:00Z",
+  "last_seen_at": "2026-02-10T10:05:00Z"
 }
 ```
 
+## Relevance Labeling
+- `insert-selected` marks selected candidates as `is_relevant=1`.
+- Unselected candidates are pruned to DOI-only (`is_relevant=0`).
+
 ## Parsing Rules
-- RSS XML/Atom:
-  - Parse feed metadata: `title`, `link`, HTTP caching headers, status.
-  - Parse entry metadata: `id/guid`, `link`, `title`, `author`, `published`, `updated`, `summary`, tags.
-- OPML:
-  - Parse every `<outline xmlUrl="...">` as a feed URL.
-- Topic screening:
-  - Perform semantic screening in agent context using `topic_prompt` and user instructions.
-  - Do not use regex-only rules for final relevance decisions.
+- Parse entry metadata from RSS/Atom (`id/guid`, `link`, `title`, `author`, `published`, `updated`, `summary`, tags).
+- Resolve DOI from native fields, links, and text patterns.
+- If DOI is missing, generate deterministic surrogate DOI (`rss-hash:...`) to keep full-ingestion behavior.

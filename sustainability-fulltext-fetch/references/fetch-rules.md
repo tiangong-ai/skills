@@ -3,46 +3,43 @@
 ## Candidate Selection
 
 Default `sync` selection:
-- Include entries with URL (`canonical_url` or `url`) present.
+- Include only `entries.is_relevant = 1`.
+- Include rows that are API-eligible (real DOI) or webpage-eligible (`canonical_url`/`url` exists).
 - Include rows with missing content state (`entry_content` absent).
 - Include rows with `status=failed` only when:
   - retry is not exhausted (`retry_count < max_retries`, default `3`);
-  - and retry cooldown is reached (`next_retry_at` is NULL or <= now).
-- Default queue order prioritizes fresher rows to maximize success under bounded `--limit`.
+  - retry cooldown is reached (`next_retry_at` is NULL or <= now).
 
 Optional selection controls:
 - `--force`: include all rows (including ready).
 - `--only-failed`: include only failed rows.
 - `--refetch-days N`: include ready rows older than `N` days.
-- `--oldest-first`: revert to historical oldest-first processing order for backfills.
-- `--max-retries`: cap failed retries per entry (`3` by default, `0` means unlimited).
-- `--retry-backoff-minutes`: base minutes for exponential cooldown between failed retries.
+- `--oldest-first`: use historical oldest-first ordering.
+- `--max-retries`: cap failed retries (`0` means unlimited).
+- `--retry-backoff-minutes`: base minutes for exponential cooldown.
 
-## URL and Extraction Priority
+## Extraction Priority
 
-1. Pick URL:
-- `canonical_url` first.
-- fallback `url`.
+1. API metadata by DOI (default):
+- OpenAlex first.
+- Semantic Scholar fallback.
+- Accept text when `content_length >= --api-min-chars`.
 
-2. Extract body text:
-- Prefer `trafilatura` if installed and not disabled.
+2. Webpage fallback:
+- `canonical_url` first, fallback `url`.
+- Prefer `trafilatura` if installed.
 - Fallback to built-in HTML parser.
-
-3. Quality threshold:
-- Enforce `--min-chars`.
-- Treat too-short extraction as failure.
+- Accept text when `content_length >= --min-chars`.
 
 ## Failure Handling
 
-- HTTP/network/parsing/content-type errors are recorded per entry.
-- One failed entry does not stop the rest of the sync batch.
+- API/network/parsing/content-type errors are recorded per DOI.
+- One failed DOI does not stop the batch.
 - Failed retries use exponential backoff and stop entering default queue after `max_retries`.
 - `--fail-on-errors` optionally returns non-zero if new failed states are produced.
 
 ## Operational Guidance
 
-- Run `sustainability-rss-fetch insert-selected` first to keep `entries` focused and confirmed.
-- Run this skill on a separate schedule:
-  - high-velocity feeds: every 10-30 minutes
-  - normal feeds: every 30-120 minutes
+- Run `sustainability-rss-fetch insert-selected` first to keep relevant scope strict.
+- Configure `OPENALEX_EMAIL` (and optional `S2_API_KEY`) for better API reliability.
 - Keep `--limit` bounded for predictable runtime per job.

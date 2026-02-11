@@ -1,42 +1,36 @@
 ---
 name: sustainability-rss-fetch
-description: Subscribe sustainability journal RSS feeds, collect time-windowed candidate articles, and persist only confirmed sustainability-relevant metadata into SQLite. Use when ingesting feeds from OPML/URLs and when topic screening must be prompt-based (default LCA/MFA/green supply chain/green electricity/green design/pollution-carbon reduction, or user-defined themes) before writing to the database.
+description: Ingest all sustainability journal RSS entries into a shared SQLite database first, keyed by DOI, then mark relevance and prune non-relevant rows to DOI-only. Use when building a DOI-first ingestion pipeline with mandatory full ingestion before topic filtering.
 ---
 
 # Sustainability RSS Fetch
 
 ## Core Goal
-- Subscribe RSS/Atom sources for sustainability journals.
-- Collect a full candidate window from source feeds first.
-- Perform prompt-based semantic topic screening in the agent context (no regex filtering).
-- Show candidate metadata for confirmation, then persist only confirmed entries into SQLite.
+- Ingest all RSS/Atom items into SQLite before topic filtering.
+- Use `doi` as the primary key in `entries`.
+- Keep one shared DB for downstream fulltext and summary skills.
+- After semantic screening, keep relevant rows and prune non-relevant rows to DOI-only.
 
 ## Triggering Conditions
-- Receive a request to import sustainability journal feeds from OPML/URLs.
-- Receive a request to screen feed articles by sustainability topics before database write.
-- Receive a request to run incremental sync with deduplication for already-confirmed entries.
-- Need stable metadata persistence for downstream fulltext and summarization.
+- Receive a request to import sustainability feeds and persist all fetched records first.
+- Receive a request to do prompt-based topic screening after DB ingestion.
+- Receive a request to convert irrelevant rows into lightweight DOI-only records.
+- Need stable DOI-keyed storage for downstream API/fulltext/summarization.
 
-## Mandatory Screening Workflow (Use This by Default)
-1. Prepare runtime and database.
-- Ensure dependency is installed: `python3 -m pip install feedparser`.
-- In multi-agent runtimes, pin DB to an absolute path before any command:
+## Mandatory Workflow
+1. Prepare runtime and shared DB path.
 
 ```bash
+python3 -m pip install feedparser
 export SUSTAIN_RSS_DB_PATH="/absolute/path/to/workspace-rss-bot/sustainability_rss.db"
-```
-
-- Initialize SQLite schema once:
-
-```bash
 python3 scripts/rss_subscribe.py init-db --db "$SUSTAIN_RSS_DB_PATH"
 ```
 
-2. Collect candidate window from source feeds (do not write entries yet).
-- Use OPML source (recommended for this skill):
+2. Collect RSS window and ingest all fetched items first.
 
 ```bash
 python3 scripts/rss_subscribe.py collect-window \
+  --db "$SUSTAIN_RSS_DB_PATH" \
   --opml assets/journal.opml \
   --start 2026-02-01 \
   --end 2026-02-10 \
@@ -46,22 +40,11 @@ python3 scripts/rss_subscribe.py collect-window \
   --pretty
 ```
 
-3. Screen candidates in agent context with prompt semantics.
-- Load `/tmp/sustainability-candidates.json`.
-- Use `topic_prompt` + user instructions for semantic matching.
-- Do not use regex-only matching; evaluate title/summary/categories/feed context together.
-- Produce a confirmation list including at least:
-  - `candidate_id`
-  - `title`
-  - `published_at`
-  - `feed_title`
-  - `url`
+3. Screen candidates in agent context (semantic, not regex-only).
+- Use `topic_prompt` + user instructions.
+- Produce selected `candidate_id` list.
 
-4. Ask user confirmation on selected candidates.
-- Confirm selected IDs before any DB write.
-- If user changes themes, re-run semantic screening first.
-
-5. Persist only confirmed candidates.
+4. Mark selected rows as relevant and prune unselected rows.
 
 ```bash
 python3 scripts/rss_subscribe.py insert-selected \
@@ -70,96 +53,53 @@ python3 scripts/rss_subscribe.py insert-selected \
   --selected-ids 3,7,12,21
 ```
 
-## Optional Classic Sync Workflow
-- For operational maintenance when selection is already handled upstream, you can still use:
+Result:
+- selected candidates: `is_relevant=1`, keep metadata.
+- unselected candidates: clear metadata fields, keep DOI-only row (`is_relevant=0`).
 
+## Optional Maintenance Sync
 ```bash
 python3 scripts/rss_subscribe.py sync --db "$SUSTAIN_RSS_DB_PATH" --max-feeds 20 --max-items-per-feed 100
 ```
 
 ## Source Management
-- Add one feed URL:
-
 ```bash
 python3 scripts/rss_subscribe.py add-feed --db "$SUSTAIN_RSS_DB_PATH" --url "https://example.com/feed.xml"
-```
-
-- Import feeds from OPML:
-
-```bash
 python3 scripts/rss_subscribe.py import-opml --db "$SUSTAIN_RSS_DB_PATH" --opml assets/journal.opml
 ```
 
-## Query Persisted Metadata
-- List feeds:
-
+## Query Data
 ```bash
 python3 scripts/rss_subscribe.py list-feeds --db "$SUSTAIN_RSS_DB_PATH" --limit 50
-```
-
-- List recent entries:
-
-```bash
 python3 scripts/rss_subscribe.py list-entries --db "$SUSTAIN_RSS_DB_PATH" --limit 100
 ```
 
-## Input Requirements
-- Supported inputs:
-  - RSS XML feed URLs.
-  - OPML feed list files.
-  - Optional user-defined sustainability topic prompt.
-
-## Output Contract (Metadata Only)
-- Persist `feeds` metadata to SQLite:
-  - `feed_url`, `feed_title`, `site_url`, `etag`, `last_modified`, status fields.
-- Persist `entries` metadata to SQLite:
-  - `dedupe_key`, `guid`, `url`, `canonical_url`, `title`, `author`,
-    `published_at`, `updated_at`, `summary`, `categories`, timestamps.
-- Do not store generated summaries and do not fetch full article bodies in this skill.
+## Data Contract
+- `feeds` table: subscription and fetch state.
+- `entries` table (`doi` PK):
+  - metadata fields (`title/url/summary/categories/...`)
+  - `doi_is_surrogate` (when no DOI is present in source)
+  - `is_relevant` (`1` relevant, `0` pruned non-relevant, `NULL` not labeled yet)
+- Non-relevant rows are pruned to DOI-only payload for storage efficiency.
 
 ## Configurable Parameters
-- `db_path`
-- `SUSTAIN_RSS_DB_PATH` (recommended absolute path in multi-agent runtime)
-- `opml_path`
-- `feed_urls`
-- `topic_prompt`
-- `start/end window`
-- `max_feeds_per_run`
-- `max_items_per_feed`
-- `user_agent`
-- `seen_ttl_days`
-- `enable_conditional_get`
-- Example config: `assets/config.example.json`
+- `--db`
+- `SUSTAIN_RSS_DB_PATH`
+- `--opml`
+- `--feed-url`
+- `--use-subscribed-feeds`
+- `--topic-prompt`
+- `--start/--end`
+- `--max-feeds`
+- `--max-items-per-feed`
+- `--user-agent`
+- `--cleanup-ttl-days`
 
 ## Error and Boundary Handling
-- Feed HTTP/network failure: keep collecting/syncing other feeds and record errors.
-- Feed `304 Not Modified`: skip entry parsing in `sync` mode.
-- Missing `guid` and `link`: use hashed fallback dedupe key.
-- Dependency missing (`feedparser`): return install guidance.
-- Empty or invalid selected IDs in `insert-selected`: fail fast before DB write.
-
-## Final Output Checklist (Required)
-- core goal
-- triggering conditions
-- input requirements
-- metadata schema
-- semantic screening and confirmation rules
-- command workflow
-- configurable parameters
-- error handling
-
-Use the following simplified checklist verbatim when the user requests it:
-
-```text
-核心目标
-输入需求
-触发条件
-元数据模型
-语义筛选与确认规则
-命令流程
-可配置参数
-错误处理
-```
+- Feed/network failure: continue other feeds and keep errors in feed state.
+- Missing `feedparser`: return install guidance.
+- Missing DOI in RSS item: create deterministic surrogate DOI key to keep full-ingestion guarantee.
+- Invalid selected IDs: fail fast before label/prune write.
 
 ## References
 - `references/input-model.md`
@@ -167,7 +107,7 @@ Use the following simplified checklist verbatim when the user requests it:
 - `references/time-range-rules.md`
 
 ## Assets
-- `assets/journal.opml` (default sustainability journal feed source)
+- `assets/journal.opml`
 - `assets/config.example.json`
 
 ## Scripts

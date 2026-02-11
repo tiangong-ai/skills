@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Fetch article full text for RSS entries already stored in SQLite."""
+"""Fetch article full text for DOI-keyed RSS entries already stored in SQLite."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import sqlite3
@@ -15,6 +16,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 try:
@@ -28,7 +30,11 @@ DEFAULT_DB_PATH = os.environ.get("SUSTAIN_RSS_DB_PATH", DEFAULT_DB_FILENAME)
 DEFAULT_USER_AGENT = "sustainability-fulltext-fetch/1.0 (+https://github.com/tiangong-ai/skills)"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_MINUTES = 30
+DEFAULT_API_TIMEOUT_SECONDS = 12.0
 MAX_RETRY_BACKOFF_MINUTES = 24 * 60
+OPENALEX_BASE = "https://api.openalex.org/works/https://doi.org/"
+SEMANTIC_SCHOLAR_BASE = "https://api.semanticscholar.org/graph/v1/paper/"
+DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 BINARY_CONTENT_PREFIXES = (
     "application/pdf",
     "application/zip",
@@ -40,12 +46,12 @@ BINARY_CONTENT_PREFIXES = (
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS entry_content (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_id INTEGER NOT NULL UNIQUE,
-    source_url TEXT NOT NULL,
+    doi TEXT PRIMARY KEY,
+    source_url TEXT,
     final_url TEXT,
     http_status INTEGER,
     extractor TEXT NOT NULL,
+    content_kind TEXT NOT NULL DEFAULT 'fulltext',
     content_text TEXT,
     content_hash TEXT,
     content_length INTEGER NOT NULL DEFAULT 0,
@@ -56,14 +62,16 @@ CREATE TABLE IF NOT EXISTS entry_content (
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+    FOREIGN KEY(doi) REFERENCES entries(doi) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_entry_content_status ON entry_content(status);
 CREATE INDEX IF NOT EXISTS idx_entry_content_updated_at ON entry_content(updated_at);
 CREATE INDEX IF NOT EXISTS idx_entry_content_retry_count ON entry_content(retry_count);
-CREATE INDEX IF NOT EXISTS idx_entry_content_status_updated_entry
-    ON entry_content(status, updated_at DESC, entry_id DESC);
+CREATE INDEX IF NOT EXISTS idx_entry_content_status_updated_doi
+    ON entry_content(status, updated_at DESC, doi DESC);
+CREATE INDEX IF NOT EXISTS idx_entry_content_failed_retry
+    ON entry_content(status, next_retry_at, retry_count);
 """
 
 
@@ -149,12 +157,21 @@ class FetchResponse:
 
 
 @dataclass
+class ApiFetchResult:
+    ok: bool
+    source: str | None
+    text: str | None
+    error: str | None
+
+
+@dataclass
 class ExtractResult:
     status: str
     source_url: str
     final_url: str | None
     http_status: int | None
     extractor: str
+    content_kind: str
     content_text: str | None
     content_hash: str | None
     content_length: int
@@ -200,6 +217,23 @@ def compute_next_retry_at(
 
 def normalize_space(value: str) -> str:
     return " ".join(value.split())
+
+
+def normalize_doi(raw: Any) -> str:
+    text = normalize_space(str(raw or ""))
+    if not text:
+        return ""
+    if text.lower().startswith("rss-hash:"):
+        return ""
+    text = re.sub(r"^https?://(dx\.)?doi\.org/", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^doi:\s*", "", text, flags=re.IGNORECASE)
+    text = text.strip().strip("<>")
+    text = text.rstrip(".,;:!?)]}>'\"")
+    match = DOI_PATTERN.search(text)
+    if not match:
+        return ""
+    doi = match.group(0).rstrip(".,;:!?)]}>'\"")
+    return doi.lower()
 
 
 def sha256_hexdigest(text: str) -> str:
@@ -263,25 +297,124 @@ def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return bool(row)
 
 
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not table_exists(conn, table_name):
+        return set()
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
 def ensure_entries_table(conn: sqlite3.Connection) -> None:
-    if table_exists(conn, "entries"):
+    if not table_exists(conn, "entries"):
+        raise ValueError("entries_table_missing")
+    columns = table_columns(conn, "entries")
+    required = {"doi", "is_relevant", "doi_is_surrogate"}
+    if not required.issubset(columns):
+        raise ValueError("entries_table_missing_doi")
+
+
+def migrate_legacy_entry_content_if_needed(conn: sqlite3.Connection) -> None:
+    if not table_exists(conn, "entry_content"):
         return
-    raise ValueError("entries_table_missing")
+    columns = table_columns(conn, "entry_content")
+    if "doi" in columns:
+        return
+
+    legacy_name = f"entry_content_legacy_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    conn.execute(f"ALTER TABLE entry_content RENAME TO {legacy_name}")
+    conn.executescript(SCHEMA_SQL)
+
+    entries_columns = table_columns(conn, "entries")
+    if "id" not in entries_columns:
+        # Old entry_content relied on entries.id. If the id column is gone after schema migration,
+        # keep legacy rows untouched in backup table and continue with fresh DOI-based table.
+        conn.commit()
+        return
+
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT
+                e.doi,
+                ec.source_url,
+                ec.final_url,
+                ec.http_status,
+                ec.extractor,
+                ec.content_text,
+                ec.content_hash,
+                ec.content_length,
+                ec.fetched_at,
+                ec.last_error,
+                ec.retry_count,
+                ec.next_retry_at,
+                ec.status,
+                ec.created_at,
+                ec.updated_at
+            FROM {legacy_name} ec
+            JOIN entries e ON e.id = ec.entry_id
+            WHERE e.doi IS NOT NULL AND e.doi <> ''
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        conn.commit()
+        return
+
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO entry_content (
+                doi, source_url, final_url, http_status, extractor, content_kind,
+                content_text, content_hash, content_length, fetched_at, last_error,
+                retry_count, next_retry_at, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(doi) DO UPDATE SET
+                source_url = excluded.source_url,
+                final_url = excluded.final_url,
+                http_status = excluded.http_status,
+                extractor = excluded.extractor,
+                content_kind = excluded.content_kind,
+                content_text = excluded.content_text,
+                content_hash = excluded.content_hash,
+                content_length = excluded.content_length,
+                fetched_at = excluded.fetched_at,
+                last_error = excluded.last_error,
+                retry_count = excluded.retry_count,
+                next_retry_at = excluded.next_retry_at,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (
+                row["doi"],
+                row["source_url"],
+                row["final_url"],
+                row["http_status"],
+                row["extractor"],
+                "fulltext",
+                row["content_text"],
+                row["content_hash"],
+                row["content_length"],
+                row["fetched_at"],
+                row["last_error"],
+                row["retry_count"],
+                row["next_retry_at"],
+                row["status"],
+                row["created_at"],
+                row["updated_at"],
+            ),
+        )
+
+    conn.commit()
 
 
 def init_db(conn: sqlite3.Connection) -> None:
     ensure_entries_table(conn)
+    migrate_legacy_entry_content_if_needed(conn)
     conn.executescript(SCHEMA_SQL)
-    columns = {
-        str(row["name"])
-        for row in conn.execute("PRAGMA table_info(entry_content)").fetchall()
-    }
+    columns = table_columns(conn, "entry_content")
     if "next_retry_at" not in columns:
         conn.execute("ALTER TABLE entry_content ADD COLUMN next_retry_at TEXT")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_entry_content_failed_retry "
-        "ON entry_content(status, next_retry_at, retry_count)"
-    )
+    if "content_kind" not in columns:
+        conn.execute("ALTER TABLE entry_content ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'fulltext'")
 
 
 def choose_entry_url(row: sqlite3.Row) -> str:
@@ -416,7 +549,7 @@ def extract_with_fallback_parser(html: str) -> str:
     return clean_text(parser.get_text())
 
 
-def build_extract_result(
+def build_extract_result_from_html(
     fetch_response: FetchResponse,
     min_chars: int,
     disable_trafilatura: bool,
@@ -428,6 +561,7 @@ def build_extract_result(
             final_url=fetch_response.final_url,
             http_status=fetch_response.http_status,
             extractor="none",
+            content_kind="fulltext",
             content_text=None,
             content_hash=None,
             content_length=0,
@@ -454,6 +588,7 @@ def build_extract_result(
             final_url=fetch_response.final_url,
             http_status=fetch_response.http_status,
             extractor=extractor,
+            content_kind="fulltext",
             content_text=None,
             content_hash=None,
             content_length=0,
@@ -468,6 +603,7 @@ def build_extract_result(
             final_url=fetch_response.final_url,
             http_status=fetch_response.http_status,
             extractor=extractor,
+            content_kind="fulltext",
             content_text=None,
             content_hash=None,
             content_length=content_length,
@@ -480,6 +616,170 @@ def build_extract_result(
         final_url=fetch_response.final_url,
         http_status=fetch_response.http_status,
         extractor=extractor,
+        content_kind="fulltext",
+        content_text=text,
+        content_hash=sha256_hexdigest(text),
+        content_length=content_length,
+        last_error=None,
+    )
+
+
+def http_get_json(url: str, headers: dict[str, str], timeout: float) -> tuple[int | None, dict[str, Any]]:
+    request = Request(url=url, headers=headers)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            payload = json.loads(body) if body else {}
+            return int(getattr(response, "status", 200)), payload
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        payload: dict[str, Any] = {}
+        if body:
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                payload = {"raw": body[:500]}
+        return exc.code, payload
+    except URLError as exc:
+        return None, {"error": str(exc.reason)}
+
+
+def reconstruct_abstract(inverted_index: dict[str, list[int]] | None) -> str | None:
+    if not inverted_index:
+        return None
+
+    indexed_tokens: list[tuple[int, str]] = []
+    for token, positions in inverted_index.items():
+        if not isinstance(positions, list):
+            continue
+        for pos in positions:
+            if isinstance(pos, int):
+                indexed_tokens.append((pos, token))
+
+    if not indexed_tokens:
+        return None
+
+    indexed_tokens.sort(key=lambda item: item[0])
+    text = " ".join(token for _, token in indexed_tokens)
+    text = re.sub(r"\s+([,.;:!?%)\]}])", r"\1", text)
+    text = re.sub(r"([(\[{])\s+", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text or None
+
+
+def fetch_openalex(doi: str, email: str | None, timeout: float) -> tuple[str | None, str | None]:
+    normalized = normalize_doi(doi)
+    if not normalized:
+        return None, "invalid_doi"
+
+    url = OPENALEX_BASE + quote(normalized, safe="")
+    headers = {"Accept": "application/json"}
+    if email:
+        ua = email if email.lower().startswith("mailto:") else f"mailto:{email}"
+        headers["User-Agent"] = ua
+    else:
+        headers["User-Agent"] = "sustainability-fulltext-fetch/1.0"
+
+    status, payload = http_get_json(url, headers, timeout)
+    if status is None:
+        return None, "openalex_network_error"
+    if status == 404:
+        return None, "openalex_not_found"
+    if 500 <= status < 600:
+        return None, "openalex_server_error"
+    if status != 200:
+        return None, f"openalex_http_{status}"
+
+    abstract = reconstruct_abstract(payload.get("abstract_inverted_index"))
+    if abstract:
+        return abstract, None
+    return None, "openalex_no_abstract"
+
+
+def fetch_semantic_scholar(doi: str, api_key: str | None, timeout: float) -> tuple[str | None, str | None]:
+    normalized = normalize_doi(doi)
+    if not normalized:
+        return None, "invalid_doi"
+
+    paper_id = quote(f"DOI:{normalized}", safe="")
+    url = f"{SEMANTIC_SCHOLAR_BASE}{paper_id}?fields=abstract"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    status, payload = http_get_json(url, headers, timeout)
+    if status is None:
+        return None, "s2_network_error"
+    if status == 404:
+        return None, "s2_not_found"
+    if status == 429:
+        return None, "s2_rate_limited"
+    if 500 <= status < 600:
+        return None, "s2_server_error"
+    if status != 200:
+        return None, f"s2_http_{status}"
+
+    abstract = payload.get("abstract")
+    if isinstance(abstract, str) and abstract.strip():
+        return abstract.strip(), None
+    return None, "s2_no_abstract"
+
+
+def fetch_api_metadata(doi: str, openalex_email: str | None, s2_api_key: str | None, timeout: float) -> ApiFetchResult:
+    normalized = normalize_doi(doi)
+    if not normalized:
+        return ApiFetchResult(ok=False, source=None, text=None, error="invalid_or_surrogate_doi")
+
+    openalex_text, openalex_error = fetch_openalex(normalized, openalex_email, timeout)
+    if openalex_text:
+        return ApiFetchResult(ok=True, source="openalex", text=openalex_text, error=None)
+
+    s2_text, s2_error = fetch_semantic_scholar(normalized, s2_api_key, timeout)
+    if s2_text:
+        return ApiFetchResult(ok=True, source="semanticscholar", text=s2_text, error=None)
+
+    errors = [err for err in [openalex_error, s2_error] if err]
+    return ApiFetchResult(ok=False, source=None, text=None, error="|".join(errors) if errors else "api_missing")
+
+
+def build_extract_result_from_api(doi: str, api_result: ApiFetchResult, min_chars: int) -> ExtractResult:
+    if not api_result.ok or not api_result.text:
+        return ExtractResult(
+            status="failed",
+            source_url=f"https://doi.org/{doi}",
+            final_url=f"https://doi.org/{doi}",
+            http_status=None,
+            extractor=api_result.source or "api",
+            content_kind="abstract",
+            content_text=None,
+            content_hash=None,
+            content_length=0,
+            last_error=api_result.error or "api_missing",
+        )
+
+    text = clean_text(api_result.text)
+    content_length = len(text)
+    if content_length < max(min_chars, 1):
+        return ExtractResult(
+            status="failed",
+            source_url=f"https://doi.org/{doi}",
+            final_url=f"https://doi.org/{doi}",
+            http_status=None,
+            extractor=api_result.source or "api",
+            content_kind="abstract",
+            content_text=None,
+            content_hash=None,
+            content_length=content_length,
+            last_error=f"api_text_too_short:{content_length}",
+        )
+
+    return ExtractResult(
+        status="ready",
+        source_url=f"https://doi.org/{doi}",
+        final_url=f"https://doi.org/{doi}",
+        http_status=200,
+        extractor=api_result.source or "api",
+        content_kind="abstract",
         content_text=text,
         content_hash=sha256_hexdigest(text),
         content_length=content_length,
@@ -498,16 +798,22 @@ def list_candidate_entries(
 ) -> list[sqlite3.Row]:
     sql = """
     SELECT
-        e.id AS entry_id,
+        e.doi,
         e.title,
         e.canonical_url,
         e.url,
+        e.doi_is_surrogate,
+        e.is_relevant,
         ec.status AS content_status,
         ec.fetched_at,
         ec.updated_at
     FROM entries e
-    LEFT JOIN entry_content ec ON ec.entry_id = e.id
-    WHERE COALESCE(NULLIF(e.canonical_url, ''), NULLIF(e.url, '')) IS NOT NULL
+    LEFT JOIN entry_content ec ON ec.doi = e.doi
+    WHERE e.is_relevant = 1
+      AND (
+        (e.doi_is_surrogate = 0 AND e.doi NOT LIKE 'rss-hash:%')
+        OR COALESCE(NULLIF(e.canonical_url, ''), NULLIF(e.url, '')) IS NOT NULL
+      )
     """
     params: list[Any] = []
     now_iso = now_utc_iso()
@@ -525,24 +831,23 @@ def list_candidate_entries(
             threshold = datetime.now(timezone.utc) - timedelta(days=refetch_days)
             threshold_iso = threshold.replace(microsecond=0).isoformat().replace("+00:00", "Z")
             sql += (
-                " AND (ec.entry_id IS NULL "
+                " AND (ec.doi IS NULL "
                 f"OR ({failed_retry_clause}) "
                 "OR (ec.status = 'ready' AND ec.fetched_at < ?))"
             )
             params.extend(failed_retry_params)
             params.append(threshold_iso)
         else:
-            sql += f" AND (ec.entry_id IS NULL OR ({failed_retry_clause}))"
+            sql += f" AND (ec.doi IS NULL OR ({failed_retry_clause}))"
             params.extend(failed_retry_params)
 
     if oldest_first:
-        sql += " ORDER BY COALESCE(ec.updated_at, '') ASC, e.id ASC"
+        sql += " ORDER BY COALESCE(ec.updated_at, '') ASC, e.doi ASC"
     else:
-        # Prioritize fresh/unfetched rows to improve hit-rate under bounded --limit.
         sql += """
         ORDER BY
             CASE
-                WHEN ec.entry_id IS NULL THEN 0
+                WHEN ec.doi IS NULL THEN 0
                 WHEN ec.status = 'failed' THEN 1
                 ELSE 2
             END ASC,
@@ -551,7 +856,7 @@ def list_candidate_entries(
                 ELSE 0
             END ASC,
             COALESCE(e.published_at, e.first_seen_at, e.last_seen_at, '') DESC,
-            e.id DESC
+            e.doi DESC
         """
     if limit > 0:
         sql += " LIMIT ?"
@@ -562,7 +867,7 @@ def list_candidate_entries(
 
 def persist_extract_result(
     conn: sqlite3.Connection,
-    entry_id: int,
+    doi: str,
     result: ExtractResult,
     fetched_at: str,
     max_retries: int,
@@ -572,9 +877,9 @@ def persist_extract_result(
         """
         SELECT status, content_hash, content_text, content_length, retry_count, next_retry_at
         FROM entry_content
-        WHERE entry_id = ?
+        WHERE doi = ?
         """,
-        (entry_id,),
+        (doi,),
     ).fetchone()
 
     if result.status == "ready":
@@ -624,17 +929,18 @@ def persist_extract_result(
         conn.execute(
             """
             INSERT INTO entry_content (
-                entry_id, source_url, final_url, http_status, extractor, content_text,
+                doi, source_url, final_url, http_status, extractor, content_kind, content_text,
                 content_hash, content_length, fetched_at, last_error, retry_count, next_retry_at, status,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                entry_id,
+                doi,
                 result.source_url,
                 result.final_url,
                 result.http_status,
                 result.extractor,
+                result.content_kind,
                 content_text,
                 content_hash,
                 content_length,
@@ -656,6 +962,7 @@ def persist_extract_result(
             final_url = ?,
             http_status = ?,
             extractor = ?,
+            content_kind = ?,
             content_text = ?,
             content_hash = ?,
             content_length = ?,
@@ -665,13 +972,14 @@ def persist_extract_result(
             next_retry_at = ?,
             status = ?,
             updated_at = ?
-        WHERE entry_id = ?
+        WHERE doi = ?
         """,
         (
             result.source_url,
             result.final_url,
             result.http_status,
             result.extractor,
+            result.content_kind,
             content_text,
             content_hash,
             content_length,
@@ -681,25 +989,57 @@ def persist_extract_result(
             next_retry_at,
             status_value,
             fetched_at,
-            entry_id,
+            doi,
         ),
     )
     return state
 
 
 def process_entry(conn: sqlite3.Connection, row: sqlite3.Row, args: argparse.Namespace) -> tuple[str, ExtractResult]:
+    doi = normalize_space(str(row["doi"] or ""))
     source_url = choose_entry_url(row)
+
+    api_error = ""
+    result: ExtractResult | None = None
+    if not args.disable_api_metadata:
+        api_result = fetch_api_metadata(
+            doi=doi,
+            openalex_email=resolve_openalex_email(args.openalex_email),
+            s2_api_key=resolve_s2_api_key(args.s2_api_key),
+            timeout=args.api_timeout,
+        )
+        if api_result.ok:
+            result = build_extract_result_from_api(doi, api_result, min_chars=args.api_min_chars)
+            if result.status == "ready":
+                fetched_at = now_utc_iso()
+                state = persist_extract_result(
+                    conn=conn,
+                    doi=doi,
+                    result=result,
+                    fetched_at=fetched_at,
+                    max_retries=args.max_retries,
+                    retry_backoff_minutes=args.retry_backoff_minutes,
+                )
+                return state, result
+            api_error = result.last_error or "api_failed"
+        else:
+            api_error = api_result.error or "api_failed"
+
     if not source_url:
+        err = "missing_source_url"
+        if api_error:
+            err = f"{api_error}|{err}"
         result = ExtractResult(
             status="failed",
             source_url="",
             final_url=None,
             http_status=None,
             extractor="none",
+            content_kind="fulltext",
             content_text=None,
             content_hash=None,
             content_length=0,
-            last_error="missing_source_url",
+            last_error=err,
         )
     else:
         fetch_response = fetch_html(
@@ -708,16 +1048,18 @@ def process_entry(conn: sqlite3.Connection, row: sqlite3.Row, args: argparse.Nam
             max_bytes=args.max_bytes,
             user_agent=args.user_agent,
         )
-        result = build_extract_result(
+        result = build_extract_result_from_html(
             fetch_response=fetch_response,
             min_chars=args.min_chars,
             disable_trafilatura=args.disable_trafilatura,
         )
+        if result.status != "ready" and api_error:
+            result.last_error = f"{api_error}|{result.last_error or 'web_failed'}"
 
     fetched_at = now_utc_iso()
     state = persist_extract_result(
         conn=conn,
-        entry_id=int(row["entry_id"]),
+        doi=doi,
         result=result,
         fetched_at=fetched_at,
         max_retries=args.max_retries,
@@ -731,6 +1073,14 @@ def validate_retry_args(args: argparse.Namespace) -> None:
         raise ValueError("invalid_max_retries")
     if int(args.retry_backoff_minutes) < 0:
         raise ValueError("invalid_retry_backoff_minutes")
+
+
+def resolve_openalex_email(value: str | None) -> str | None:
+    return value or os.getenv("OPENALEX_EMAIL")
+
+
+def resolve_s2_api_key(value: str | None) -> str | None:
+    return value or os.getenv("S2_API_KEY")
 
 
 def cmd_init_db(args: argparse.Namespace) -> int:
@@ -747,14 +1097,17 @@ def cmd_fetch_entry(args: argparse.Namespace) -> int:
         init_db(conn)
         row = conn.execute(
             """
-            SELECT id AS entry_id, title, canonical_url, url
+            SELECT doi, title, canonical_url, url, doi_is_surrogate, is_relevant
             FROM entries
-            WHERE id = ?
+            WHERE doi = ?
             """,
-            (args.entry_id,),
+            (normalize_space(args.doi),),
         ).fetchone()
         if not row:
-            print(f"FULLTEXT_ERR reason=entry_not_found entry_id={args.entry_id}", file=sys.stderr)
+            print(f"FULLTEXT_ERR reason=entry_not_found doi={args.doi}", file=sys.stderr)
+            return 1
+        if row["is_relevant"] != 1:
+            print(f"FULLTEXT_ERR reason=entry_not_relevant doi={args.doi}", file=sys.stderr)
             return 1
 
         state, result = process_entry(conn, row, args)
@@ -763,11 +1116,12 @@ def cmd_fetch_entry(args: argparse.Namespace) -> int:
     error_text = normalize_space(str(result.last_error or ""))
     print(
         "FT_FETCH_OK "
-        f"entry_id={args.entry_id} "
+        f"doi={args.doi} "
         f"state={state} "
         f"status={result.status} "
         f"http_status={result.http_status or ''} "
         f"extractor={result.extractor} "
+        f"kind={result.content_kind} "
         f"chars={result.content_length} "
         f"error={error_text}"
     )
@@ -835,8 +1189,9 @@ def cmd_list_content(args: argparse.Namespace) -> int:
         init_db(conn)
         sql = """
         SELECT
-            ec.entry_id,
+            ec.doi,
             ec.status,
+            ec.content_kind,
             ec.content_length,
             ec.retry_count,
             ec.next_retry_at,
@@ -847,23 +1202,23 @@ def cmd_list_content(args: argparse.Namespace) -> int:
             ec.last_error,
             e.title
         FROM entry_content ec
-        JOIN entries e ON e.id = ec.entry_id
+        LEFT JOIN entries e ON e.doi = ec.doi
         """
         params: list[Any] = []
         if args.status != "all":
             sql += " WHERE ec.status = ?"
             params.append(args.status)
-        sql += " ORDER BY ec.updated_at DESC, ec.entry_id DESC LIMIT ?"
+        sql += " ORDER BY ec.updated_at DESC, ec.doi DESC LIMIT ?"
         params.append(args.limit)
         rows = conn.execute(sql, tuple(params)).fetchall()
 
-    print("entry_id\tstatus\tchars\tretry\tnext_retry_at\thttp_status\textractor\tfetched_at\ttitle\turl\tlast_error")
+    print("doi\tstatus\tkind\tchars\tretry\tnext_retry_at\thttp_status\textractor\tfetched_at\ttitle\turl\tlast_error")
     for row in rows:
         title = (str(row["title"] or "")).replace("\t", " ").replace("\n", " ").strip()
         url = (str(row["url"] or "")).replace("\t", " ").replace("\n", " ").strip()
         error_text = (str(row["last_error"] or "")).replace("\t", " ").replace("\n", " ").strip()
         print(
-            f"{row['entry_id']}\t{row['status']}\t{row['content_length']}\t{row['retry_count']}\t"
+            f"{row['doi']}\t{row['status']}\t{row['content_kind']}\t{row['content_length']}\t{row['retry_count']}\t"
             f"{row['next_retry_at'] or ''}\t"
             f"{row['http_status'] or ''}\t{row['extractor']}\t{row['fetched_at']}\t"
             f"{title}\t{url}\t{error_text}"
@@ -873,7 +1228,7 @@ def cmd_list_content(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Fetch full text from entries in SQLite and store results in entry_content.",
+        description="Fetch API metadata first, then webpage full text fallback, and store by DOI.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -881,7 +1236,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_init.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser_init.set_defaults(func=cmd_init_db)
 
-    parser_sync = subparsers.add_parser("sync", help="Fetch full text for pending entries.")
+    parser_sync = subparsers.add_parser("sync", help="Fetch content for pending relevant entries.")
     parser_sync.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser_sync.add_argument("--limit", type=int, default=50, help="Max entries per run. 0 means no limit.")
     parser_sync.add_argument("--force", action="store_true", help="Refetch entries even when status is ready.")
@@ -897,9 +1252,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use historical queue order (oldest first). Default prioritizes freshest rows.",
     )
-    parser_sync.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds.")
-    parser_sync.add_argument("--max-bytes", type=int, default=2_000_000, help="Max bytes to read per response.")
-    parser_sync.add_argument("--min-chars", type=int, default=300, help="Minimum extracted characters for ready.")
+    parser_sync.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds for webpage fallback.")
+    parser_sync.add_argument("--max-bytes", type=int, default=2_000_000, help="Max bytes to read per webpage response.")
+    parser_sync.add_argument("--min-chars", type=int, default=300, help="Minimum extracted chars for webpage-ready rows.")
+    parser_sync.add_argument(
+        "--openalex-email",
+        default=None,
+        help="Email for OpenAlex User-Agent; falls back to OPENALEX_EMAIL.",
+    )
+    parser_sync.add_argument(
+        "--s2-api-key",
+        default=None,
+        help="Semantic Scholar API key; falls back to S2_API_KEY.",
+    )
+    parser_sync.add_argument(
+        "--api-timeout",
+        type=float,
+        default=DEFAULT_API_TIMEOUT_SECONDS,
+        help=f"API timeout seconds (default: {DEFAULT_API_TIMEOUT_SECONDS}).",
+    )
+    parser_sync.add_argument(
+        "--api-min-chars",
+        type=int,
+        default=80,
+        help="Minimum chars for API abstract acceptance.",
+    )
+    parser_sync.add_argument(
+        "--disable-api-metadata",
+        action="store_true",
+        help="Disable API-first (OpenAlex/S2) and use webpage extraction only.",
+    )
     parser_sync.add_argument(
         "--max-retries",
         type=int,
@@ -918,7 +1300,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_sync.add_argument(
         "--user-agent",
         default=DEFAULT_USER_AGENT,
-        help=f"HTTP User-Agent (default: {DEFAULT_USER_AGENT})",
+        help=f"HTTP User-Agent for webpage fallback (default: {DEFAULT_USER_AGENT})",
     )
     parser_sync.add_argument(
         "--disable-trafilatura",
@@ -932,12 +1314,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_sync.set_defaults(func=cmd_sync)
 
-    parser_fetch_entry = subparsers.add_parser("fetch-entry", help="Fetch one entry by id.")
+    parser_fetch_entry = subparsers.add_parser("fetch-entry", help="Fetch one entry by DOI.")
     parser_fetch_entry.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
-    parser_fetch_entry.add_argument("--entry-id", type=int, required=True, help="Entry id from entries table.")
-    parser_fetch_entry.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds.")
-    parser_fetch_entry.add_argument("--max-bytes", type=int, default=2_000_000, help="Max bytes to read per response.")
-    parser_fetch_entry.add_argument("--min-chars", type=int, default=300, help="Minimum extracted characters for ready.")
+    parser_fetch_entry.add_argument("--doi", required=True, help="DOI value from entries table.")
+    parser_fetch_entry.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds for webpage fallback.")
+    parser_fetch_entry.add_argument("--max-bytes", type=int, default=2_000_000, help="Max bytes to read per webpage response.")
+    parser_fetch_entry.add_argument("--min-chars", type=int, default=300, help="Minimum extracted chars for webpage-ready rows.")
+    parser_fetch_entry.add_argument(
+        "--openalex-email",
+        default=None,
+        help="Email for OpenAlex User-Agent; falls back to OPENALEX_EMAIL.",
+    )
+    parser_fetch_entry.add_argument(
+        "--s2-api-key",
+        default=None,
+        help="Semantic Scholar API key; falls back to S2_API_KEY.",
+    )
+    parser_fetch_entry.add_argument(
+        "--api-timeout",
+        type=float,
+        default=DEFAULT_API_TIMEOUT_SECONDS,
+        help=f"API timeout seconds (default: {DEFAULT_API_TIMEOUT_SECONDS}).",
+    )
+    parser_fetch_entry.add_argument(
+        "--api-min-chars",
+        type=int,
+        default=80,
+        help="Minimum chars for API abstract acceptance.",
+    )
+    parser_fetch_entry.add_argument(
+        "--disable-api-metadata",
+        action="store_true",
+        help="Disable API-first (OpenAlex/S2) and use webpage extraction only.",
+    )
     parser_fetch_entry.add_argument(
         "--max-retries",
         type=int,
@@ -956,7 +1365,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_fetch_entry.add_argument(
         "--user-agent",
         default=DEFAULT_USER_AGENT,
-        help=f"HTTP User-Agent (default: {DEFAULT_USER_AGENT})",
+        help=f"HTTP User-Agent for webpage fallback (default: {DEFAULT_USER_AGENT})",
     )
     parser_fetch_entry.add_argument(
         "--disable-trafilatura",
@@ -965,7 +1374,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_fetch_entry.set_defaults(func=cmd_fetch_entry)
 
-    parser_list = subparsers.add_parser("list-content", help="List stored fulltext rows.")
+    parser_list = subparsers.add_parser("list-content", help="List stored content rows.")
     parser_list.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite db path (default: {DEFAULT_DB_PATH})")
     parser_list.add_argument("--status", choices=["all", "ready", "failed"], default="all", help="Status filter.")
     parser_list.add_argument("--limit", type=int, default=100, help="Max rows to print.")
@@ -985,10 +1394,10 @@ def main() -> int:
         return 1
     except ValueError as exc:
         reason = str(exc)
-        if reason == "entries_table_missing":
+        if reason in {"entries_table_missing", "entries_table_missing_doi"}:
             print(
                 "FULLTEXT_ERR reason=entries_table_missing "
-                "detail='Run sustainability-rss-fetch init-db and insert-selected first.'",
+                "detail='Run sustainability-rss-fetch init-db and collect-window first.'",
                 file=sys.stderr,
             )
             return 2
