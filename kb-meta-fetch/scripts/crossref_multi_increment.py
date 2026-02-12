@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import psycopg2
@@ -16,13 +17,26 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-log_filename = f"crossref-{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
-logging.basicConfig(
-    filename=log_filename,
-    level=logging.INFO,
-    format="%(asctime)s:%(levelname)s:%(message)s",
-    force=True,
-)
+LOG_DIR_ENV = "KB_LOG_DIR"
+
+
+def configure_logging():
+    log_dir_raw = os.environ.get(LOG_DIR_ENV, "").strip()
+    if not log_dir_raw:
+        raise RuntimeError(f"Missing required environment variable: {LOG_DIR_ENV}")
+    log_dir = Path(log_dir_raw)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_filename = f"crossref-{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
+    log_path = log_dir / log_filename
+
+    logging.basicConfig(
+        filename=str(log_path),
+        level=logging.INFO,
+        format="%(asctime)s:%(levelname)s:%(message)s",
+        force=True,
+    )
+    return log_path
 
 
 @retry(wait=wait_fixed(3), stop=stop_after_attempt(30))
@@ -112,16 +126,16 @@ def create_dataframe(papers, journal_title):
 def get_db_config():
     load_dotenv()
     required_keys = ["KB_DB_HOST", "KB_DB_PORT", "KB_DB_NAME", "KB_DB_USER", "KB_DB_PASSWORD"]
-    missing = [key for key in required_keys if not os.getenv(key)]
+    missing = [key for key in required_keys if not os.environ.get(key)]
     if missing:
         raise RuntimeError(f"Missing database env variables: {', '.join(missing)}")
 
     return {
-        "host": os.getenv("KB_DB_HOST"),
-        "port": os.getenv("KB_DB_PORT"),
-        "database": os.getenv("KB_DB_NAME"),
-        "user": os.getenv("KB_DB_USER"),
-        "password": os.getenv("KB_DB_PASSWORD"),
+        "host": os.environ.get("KB_DB_HOST"),
+        "port": os.environ.get("KB_DB_PORT"),
+        "database": os.environ.get("KB_DB_NAME"),
+        "user": os.environ.get("KB_DB_USER"),
+        "password": os.environ.get("KB_DB_PASSWORD"),
     }
 
 
@@ -157,10 +171,14 @@ def parse_args():
 
 
 def main():
+    load_dotenv()
+    log_path = configure_logging()
+
     args = parse_args()
     rows_per_journal = 1000
 
     db_cfg = get_db_config()
+    logging.info("Log file: %s", log_path)
 
     engine = create_engine_pg()
 

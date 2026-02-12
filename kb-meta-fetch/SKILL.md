@@ -18,6 +18,7 @@ description: Fetch journal articles from Crossref published after a user-specifi
 - `KB_DB_NAME`
 - `KB_DB_USER`
 - `KB_DB_PASSWORD`
+- `KB_LOG_DIR` (required, log output directory)
 
 2. Run incremental fetch with a required date:
 
@@ -26,7 +27,7 @@ python3 scripts/crossref_multi_increment.py --from-date 2024-05-01
 ```
 
 3. Check logs in:
-- `crossref.log`
+- `${KB_LOG_DIR}/crossref-YYYYMMDD.log` (UTC date)
 
 ## Behavior Contract
 - Query Crossref endpoint: `https://api.crossref.org/journals/{issn}/works`.
