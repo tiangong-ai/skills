@@ -26,7 +26,8 @@ def configure_logging():
     log_dir = Path(log_dir_raw)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    log_filename = f"crossref-{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    log_filename = f"crossref-{run_ts}.log"
     log_path = log_dir / log_filename
 
     logging.basicConfig(

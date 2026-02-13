@@ -26,8 +26,15 @@ description: Fetch journal articles from Crossref published after a user-specifi
 python3 scripts/crossref_multi_increment.py --from-date 2024-05-01
 ```
 
+- If executing through an `exec` tool call, set timeout to **1800 seconds (30 minutes)**.
+
 3. Check logs in:
-- `${KB_LOG_DIR}/crossref-YYYYMMDD.log` (UTC date)
+- `${KB_LOG_DIR}/crossref-YYYYMMDD-HHMMSS.log` (UTC timestamp, one file per run)
+
+4. Build user-facing summary strictly from the current run output:
+- Prefer `RUN_SUMMARY_JSON` emitted by `crossref_multi_increment.py`.
+- If JSON is unavailable, parse only this run's `${KB_LOG_DIR}/crossref-YYYYMMDD-HHMMSS.log`.
+- `total_inserted` must mean rows inserted in this run (after DOI dedup), not cumulative rows in table.
 
 ## Behavior Contract
 - Query Crossref endpoint: `https://api.crossref.org/journals/{issn}/works`.
@@ -35,6 +42,8 @@ python3 scripts/crossref_multi_increment.py --from-date 2024-05-01
 - Keep only items whose `container-title` equals target journal title (case-insensitive).
 - Continue pagination with cursor until no matching items remain.
 - Store fields in `journals`: `title`, `doi`, `journal`, `authors`, `date`.
+- Reporting/announcement metrics must use current-run log/summary only.
+- Do **not** compute announcement counts via database-wide or time-window SQL such as `WHERE date >= ...`.
 
 ## Scope Boundary
 - Implement only Crossref incremental fetch + insert into `journals`.
