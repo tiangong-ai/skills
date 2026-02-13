@@ -206,7 +206,7 @@ def main():
 
     insert_query = (
         "INSERT INTO journals (title, doi, journal, authors, date) "
-        "VALUES %s ON CONFLICT (doi) DO NOTHING"
+        "VALUES %s ON CONFLICT (doi) DO NOTHING RETURNING 1"
     )
     total_inserted = 0
 
@@ -242,10 +242,10 @@ def main():
             if not data_to_insert:
                 logging.info("No insertable papers (all missing authors) for %s", issn_row["journal"])
                 continue
-            psycopg2.extras.execute_values(
-                cur, insert_query, data_to_insert, template=None, page_size=1000
+            inserted_rows = psycopg2.extras.execute_values(
+                cur, insert_query, data_to_insert, template=None, page_size=1000, fetch=True
             )
-            inserted_count = max(cur.rowcount, 0)
+            inserted_count = len(inserted_rows)
 
         total_inserted += inserted_count
         logging.info("Inserted %s papers for %s", inserted_count, issn_row["journal"])
