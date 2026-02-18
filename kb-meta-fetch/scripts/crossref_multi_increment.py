@@ -53,7 +53,7 @@ def fetch_journal_data(issn, journal_title, num_results, from_date):
         "rows": num_results,
         "filter": f"type:journal-article,from-pub-date:{from_date}",
         "cursor": "*",
-        "select": "title,DOI,container-title,author,issued",
+        "select": "title,DOI,container-title,author,issued,abstract",
     }
 
     all_papers = []
@@ -121,9 +121,15 @@ def create_dataframe(papers, journal_title):
         else:
             publication_date = None
 
-        data.append([title, doi, journal, authors, publication_date])
+        raw_abstract = paper.get("abstract")
+        if isinstance(raw_abstract, str):
+            abstract = html.unescape(raw_abstract).strip() or None
+        else:
+            abstract = None
 
-    df = pd.DataFrame(data, columns=["title", "doi", "journal", "authors", "date"])
+        data.append([title, doi, journal, authors, publication_date, abstract])
+
+    df = pd.DataFrame(data, columns=["title", "doi", "journal", "authors", "date", "abstract"])
 
     return df
 
@@ -205,7 +211,7 @@ def main():
     )
 
     insert_query = (
-        "INSERT INTO journals (title, doi, journal, authors, date) "
+        "INSERT INTO journals (title, doi, journal, authors, date, abstract) "
         "VALUES %s ON CONFLICT (doi) DO NOTHING RETURNING 1"
     )
     total_inserted = 0
@@ -236,6 +242,7 @@ def main():
                         paper_row["journal"],
                         psycopg2.extras.Json(authors),
                         paper_row["date"],
+                        paper_row["abstract"] if isinstance(paper_row["abstract"], str) else None,
                     )
                 )
 

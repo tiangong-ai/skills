@@ -41,7 +41,7 @@ python3 scripts/crossref_multi_increment.py --from-date 2024-05-01
 - Filter with `type:journal-article,from-pub-date:<from-date>`.
 - Keep only items whose `container-title` equals target journal title (case-insensitive).
 - Continue pagination with cursor until no matching items remain.
-- Store fields in `journals`: `title`, `doi`, `journal`, `authors`, `date`.
+- Store fields in `journals`: `title`, `doi`, `journal`, `authors`, `date`, `abstract` (nullable when Crossref has no abstract).
 - Reporting/announcement metrics must use current-run log/summary only.
 - Do **not** compute announcement counts via database-wide or time-window SQL such as `WHERE date >= ...`.
 
