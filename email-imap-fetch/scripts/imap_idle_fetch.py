@@ -823,12 +823,12 @@ def build_parser() -> argparse.ArgumentParser:
     default_cycles = parse_env_int("IMAP_CYCLES", default=0, minimum=0)
     default_idle_mode = parse_idle_mode(os.environ.get("IMAP_IDLE_MODE", "poll"))
     default_idle_seconds = parse_env_int("IMAP_IDLE_SECONDS", default=120, minimum=1)
-    default_poll_seconds = parse_env_int("IMAP_POLL_SECONDS", default=60, minimum=1)
+    default_poll_seconds = parse_env_int("IMAP_POLL_SECONDS", default=300, minimum=1)
     default_max_messages = parse_env_int("IMAP_MAX_MESSAGES", default=10, minimum=1)
     default_mark_seen = parse_env_bool("IMAP_MARK_SEEN", default=False)
     default_snippet_chars = parse_env_int("IMAP_SNIPPET_CHARS", default=240, minimum=1)
     default_connect_timeout = parse_env_int("IMAP_CONNECT_TIMEOUT", default=20, minimum=1)
-    default_retry_seconds = parse_env_int("IMAP_RETRY_SECONDS", default=5, minimum=1)
+    default_retry_seconds = parse_env_int("IMAP_RETRY_SECONDS", default=15, minimum=1)
 
     parser = argparse.ArgumentParser(
         description="Listen for new emails with IMAP IDLE and fetch unread messages as JSONL.",
@@ -915,7 +915,7 @@ def command_check_config(
     webhook_config: OpenClawWebhookConfig | None,
 ) -> int:
     idle_mode = parse_idle_mode(os.environ.get("IMAP_IDLE_MODE", "poll"))
-    poll_seconds = parse_env_int("IMAP_POLL_SECONDS", default=60, minimum=1)
+    poll_seconds = parse_env_int("IMAP_POLL_SECONDS", default=300, minimum=1)
 
     payload = {
         "account_count": len(accounts),

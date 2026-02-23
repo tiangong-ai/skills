@@ -69,12 +69,12 @@ Naming rules:
 - `IMAP_CYCLES`: default cycles per account (`0`, `0` means forever)
 - `IMAP_IDLE_MODE`: `poll` (default) or `idle`
 - `IMAP_IDLE_SECONDS`: default IDLE wait seconds (`120`)
-- `IMAP_POLL_SECONDS`: polling interval when mode is `poll` (`60`)
+- `IMAP_POLL_SECONDS`: polling interval when mode is `poll` (`300`)
 - `IMAP_MAX_MESSAGES`: max unread fetch per cycle (`10`)
 - `IMAP_MARK_SEEN`: `true|false` (`false`)
 - `IMAP_SNIPPET_CHARS`: preview length limit (`240`)
 - `IMAP_CONNECT_TIMEOUT`: IMAP connect timeout seconds (`20`)
-- `IMAP_RETRY_SECONDS`: delay between retries (`5`)
+- `IMAP_RETRY_SECONDS`: delay between retries (`15`)
 
 ## IDLE Support Mode
 
