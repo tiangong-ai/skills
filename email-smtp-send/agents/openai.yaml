@@ -1,0 +1,4 @@
+interface:
+  display_name: "Email SMTP Send"
+  short_description: "Send email via env-configured SMTP"
+  default_prompt: "Use $email-smtp-send to validate SMTP settings and send an email via environment-configured credentials."
