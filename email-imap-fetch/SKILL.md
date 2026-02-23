@@ -40,7 +40,8 @@ python3 scripts/imap_idle_fetch.py listen
 - If the process exits, push events are missed; next run can still fetch existing unread emails with `UNSEEN`.
 - Default runtime is resident mode (`IMAP_CYCLES=0` by default).
 - Default IDLE mode is `poll` (safe for servers without IDLE support).
-- For always-on behavior in production, manage the process with `systemd`, `launchd`, `supervisor`, or an equivalent daemon manager.
+- In production, always-on deployment must run under `systemd`, `launchd`, `supervisor`, or an equivalent daemon manager.
+- Do not run the listener as a foreground process bound to an interactive exec session; once that session exits, the listener will stop.
 
 ## Output Contract
 - Output format is JSONL (one JSON object per line).

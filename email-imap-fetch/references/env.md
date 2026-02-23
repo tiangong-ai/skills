@@ -118,9 +118,9 @@ Wake mode payload (`/hooks/wake`):
 
 ## Always-On Operation
 
-Use IMAP IDLE in long-running mode to keep receiving near-real-time push notifications.
+Use long-running mode to keep receiving near-real-time notifications.
 
-Recommended command:
+Foreground smoke-test command:
 
 ```bash
 python3 scripts/imap_idle_fetch.py listen
@@ -129,7 +129,8 @@ python3 scripts/imap_idle_fetch.py listen
 Notes:
 - `--cycles 0` (or `IMAP_CYCLES=0`) keeps listener running.
 - If process exits, server cannot push to this client until process starts again.
-- Use `systemd`, `launchd`, `supervisor`, or equivalent process manager for restart and log collection.
+- In production, you must run this listener under `systemd`, `launchd`, `supervisor`, or an equivalent daemon manager.
+- Do not keep production listener processes attached to interactive exec/shell sessions; ending the session stops the process.
 
 ## Legacy Single-Account Fallback
 
