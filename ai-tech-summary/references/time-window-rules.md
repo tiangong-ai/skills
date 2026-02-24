@@ -35,9 +35,9 @@
 
 ## Timestamp Selection
 
-For each entry in RAG retrieval, choose timestamp in this order:
-1. `published_at` if parseable
-2. `first_seen_at`
-3. `last_seen_at`
+For each entry in RAG retrieval, always use `first_seen_at` for:
+- time-range filtering
+- sort order
+- output `timestamp_utc`/`timestamp_source`
 
-If all fail to parse, skip that entry from time-range filtering.
+If `first_seen_at` fails to parse, skip that entry from retrieval output.

@@ -8,7 +8,7 @@ description: Subscribe to AI and tech RSS feeds and persist normalized metadata 
 ## Core Goal
 - Subscribe to RSS/Atom sources.
 - Persist feed and entry metadata to SQLite.
-- Deduplicate entries with stable keys across runs.
+- Deduplicate entries with layered identity keys plus content fingerprints.
 - Keep only metadata; do not fetch full article bodies and do not summarize.
 
 ## Triggering Conditions
@@ -80,8 +80,12 @@ python3 scripts/rss_subscribe.py list-entries --db "$AI_RSS_DB_PATH" --limit 100
 - Persist `feeds` metadata to SQLite:
   - `feed_url`, `feed_title`, `site_url`, `etag`, `last_modified`, status fields.
 - Persist `entries` metadata to SQLite:
-  - `dedupe_key`, `guid`, `url`, `canonical_url`, `title`, `author`,
-    `published_at`, `updated_at`, `summary`, `categories`, timestamps.
+  - `id`, `dedupe_key` (compat primary identity snapshot), `guid`, `url`,
+    `canonical_url`, `title`, `author`, `published_at`, `updated_at`, `summary`,
+    `categories`, `content_hash`, `match_confidence`, timestamps.
+- Persist `entry_identities` mapping table to SQLite:
+  - `entry_id`, `key_type`, `key_value`, `created_at`.
+  - Supported key types: `guid`, `canonical_url`, `legacy_guid`, `fallback_hash`.
 - Do not store generated summaries and do not create archive markdown files.
 
 ## Configurable Parameters
@@ -99,7 +103,7 @@ python3 scripts/rss_subscribe.py list-entries --db "$AI_RSS_DB_PATH" --limit 100
 ## Error and Boundary Handling
 - Feed HTTP/network failure: keep syncing other feeds and record `last_error`.
 - Feed `304 Not Modified`: skip entry parsing and keep state.
-- Missing `guid` and `link`: use hashed fallback dedupe key.
+- Missing `guid` and `link`: use hashed fallback identity and set `match_confidence=low`.
 - Dependency missing (`feedparser`): return install guidance.
 
 ## Final Output Checklist (Required)

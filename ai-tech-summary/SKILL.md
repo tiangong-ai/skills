@@ -55,6 +55,7 @@ python3 scripts/time_report.py \
 - `--period weekly --date YYYY-MM-DD`
 - `--period monthly --date YYYY-MM-DD`
 - `--period custom --start ... --end ...`
+- Time filtering is always based on `entries.first_seen_at` (UTC).
 
 Custom boundaries support both `YYYY-MM-DD` and ISO datetime.
 

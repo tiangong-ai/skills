@@ -58,11 +58,7 @@ ALL_FIELDS = {
 }
 
 EVENT_TS_SQL_EXPR = (
-    "COALESCE("
-    "CASE WHEN e.published_at GLOB '????-??-??T*Z' THEN e.published_at END, "
-    "e.first_seen_at, "
-    "e.last_seen_at"
-    ")"
+    "e.first_seen_at"
 )
 
 STOPWORDS = {
@@ -313,15 +309,9 @@ def ensure_required_tables(conn: sqlite3.Connection) -> bool:
 
 
 def choose_entry_timestamp(row: sqlite3.Row) -> tuple[datetime | None, str]:
-    published = parse_datetime_utc(row["published_at"])
-    if published:
-        return published, "published_at"
     first_seen = parse_datetime_utc(row["first_seen_at"])
     if first_seen:
         return first_seen, "first_seen_at"
-    last_seen = parse_datetime_utc(row["last_seen_at"])
-    if last_seen:
-        return last_seen, "last_seen_at"
     return None, "none"
 
 

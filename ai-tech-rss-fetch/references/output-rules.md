@@ -1,16 +1,22 @@
 # Output Rules
 
-## URL Canonicalization and Dedupe Key
+## URL Canonicalization and Identity Keys
 Canonicalize URL before dedupe:
 - Lowercase scheme and host.
 - Remove fragment (`#...`).
 - Remove common tracking params (`utm_*`, `ref`, `source`, `fbclid`, `gclid`).
 - Keep path and semantic query params.
 
-Build `dedupe_key` priority:
-- Feed-scoped `guid`/`id` from feed item (`guid:<feed_url>:<guid>`), to avoid cross-feed collisions.
-- `canonical_url(link)`.
-- `sha256(feed_url + normalized_title + published_at + summary_head_200)`.
+Build identity keys per entry:
+- `guid`: feed-scoped item id (`<feed_url>:<guid>`) to avoid cross-feed collisions.
+- `canonical_url`: canonicalized `link`.
+- `legacy_guid`: historical key format `guid:<guid>` for compatibility.
+- `fallback_hash`: only when both `guid` and `link` are missing.
+
+Build compatibility `dedupe_key` snapshot (for legacy/readability):
+- `guid:<feed_url>:<guid>` if guid exists.
+- `url:<canonical_url>` if guid missing but URL exists.
+- `hash:<sha256(...)>` only as fallback.
 
 ## Persistent Dedupe (Frequency-Agnostic)
 1. Keep per-feed cache state:
@@ -26,20 +32,20 @@ Build `dedupe_key` priority:
 - Mark feed as `no_change`.
 - Skip item parsing for this feed.
 
-4. Build `dedupe_key` for every parsed item using this priority:
-- Use the "URL Canonicalization and Dedupe Key" section above.
-- Keep backward compatibility when historical rows used legacy key format (`guid:<guid>`).
+4. Resolve existing entries in this order:
+- Match any `(key_type, key_value)` in `entry_identities`.
+- Fallback to legacy `entries.dedupe_key` lookup for backward compatibility.
 
-5. Persist into seen store (SQLite/kv) with unique key:
-- `dedupe_key`
-- `content_hash`
-- `first_seen_at`
-- `last_seen_at`
+5. Persist identity and content state:
+- `entry_identities`: unique `(key_type, key_value)` for stable identity mapping.
+- `entries.content_hash`: fingerprint for update detection.
+- `entries.first_seen_at` / `entries.last_seen_at`.
+- `entries.match_confidence`: `high` for guid/url identity, `low` for fallback hash only.
 
 6. De-dup behavior:
-- Existing `dedupe_key` + same `content_hash`: skip as duplicate.
-- Existing `dedupe_key` + changed `content_hash`: update metadata row.
-- New `dedupe_key`: insert a new metadata row.
+- Existing identity + same `content_hash`: skip as duplicate (touch `last_seen_at`).
+- Existing identity + changed `content_hash`: update metadata row.
+- No identity match: insert a new metadata row and register identity keys.
 
 7. Retention:
 - Delete seen records older than `seen_ttl_days` (default `30`).
@@ -47,12 +53,12 @@ Build `dedupe_key` priority:
 
 ## Error Handling
 - Invalid feed/input format: report failed source and continue with valid sources.
-- Missing `guid` and `link`: use hash fallback dedupe key.
+- Missing `guid` and `link`: use hash fallback identity and mark low confidence.
 - Seen store unavailable: use in-memory dedupe for current run and emit warning.
 
 ## Quality Control Checklist
 - URL canonicalization was applied before dedupe.
 - Conditional request state was applied when available.
-- Every output item has a stable `dedupe_key`.
+- Every output item has at least one stable identity key.
 - Feed and entry metadata were persisted successfully.
 - No full-text extraction and no summarization were performed.

@@ -19,7 +19,8 @@ Persist feed-level and entry-level metadata in SQLite.
     "last_status": 200
   },
   "entry": {
-    "dedupe_key": "guid:<id> | url:<canonical_url> | hash:<sha256>",
+    "id": 123,
+    "dedupe_key": "compat snapshot: guid:<feed_url>:<guid> | url:<canonical_url> | hash:<sha256>",
     "guid": "optional guid/id",
     "url": "https://example.com/post",
     "canonical_url": "https://example.com/post",
@@ -30,8 +31,15 @@ Persist feed-level and entry-level metadata in SQLite.
     "summary": "feed summary/description",
     "categories": ["ai", "llm"],
     "content_hash": "sha256(title+summary+timestamps+url)",
+    "match_confidence": "high | low",
     "first_seen_at": "2026-02-10T10:05:00Z",
     "last_seen_at": "2026-02-10T10:05:00Z"
+  },
+  "entry_identity": {
+    "entry_id": 123,
+    "key_type": "guid | canonical_url | legacy_guid | fallback_hash",
+    "key_value": "identity value",
+    "created_at": "2026-02-10T10:05:00Z"
   }
 }
 ```
@@ -40,6 +48,11 @@ Persist feed-level and entry-level metadata in SQLite.
 - RSS XML/Atom:
   - Parse feed metadata: `title`, `link`, HTTP caching headers, status.
   - Parse entry metadata: `id/guid`, `link`, `title`, `author`, `published`, `updated`, `summary`, tags.
+  - Build identity keys in `entry_identities` for robust matching across runs:
+    - `guid` (feed-scoped id)
+    - `canonical_url`
+    - `legacy_guid` (historical compatibility key)
+    - `fallback_hash` only when guid/link are unavailable
 - OPML:
   - Parse every `<outline xmlUrl="...">` as a feed URL and insert into subscriptions.
 

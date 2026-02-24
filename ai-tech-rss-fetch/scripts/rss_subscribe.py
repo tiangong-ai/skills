@@ -33,6 +33,7 @@ TRACKING_QUERY_PARAMS = {
     "mc_cid",
     "mc_eid",
 }
+IdentityKey = tuple[str, str]
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -68,11 +69,21 @@ CREATE TABLE IF NOT EXISTS entries (
     summary TEXT,
     categories TEXT,
     content_hash TEXT NOT NULL,
+    match_confidence TEXT NOT NULL DEFAULT 'high',
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     raw_entry_json TEXT,
     FOREIGN KEY(first_feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
     FOREIGN KEY(last_feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS entry_identities (
+    entry_id INTEGER NOT NULL,
+    key_type TEXT NOT NULL,
+    key_value TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(key_type, key_value),
+    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_feeds_active ON feeds(is_active);
@@ -84,6 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_entries_event_ts_id
     ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at, last_seen_at), id);
 CREATE INDEX IF NOT EXISTS idx_entries_sort_pub_seen_id
     ON entries(COALESCE(CASE WHEN published_at GLOB '????-??-??T*Z' THEN published_at END, first_seen_at), id);
+CREATE INDEX IF NOT EXISTS idx_entry_identities_entry_id ON entry_identities(entry_id);
 """
 
 
@@ -215,8 +227,20 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def table_has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row["name"]) == column_name for row in rows)
+
+
+def ensure_entries_match_confidence_column(conn: sqlite3.Connection) -> None:
+    if table_has_column(conn, "entries", "match_confidence"):
+        return
+    conn.execute("ALTER TABLE entries ADD COLUMN match_confidence TEXT NOT NULL DEFAULT 'high'")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    ensure_entries_match_confidence_column(conn)
     conn.commit()
 
 
@@ -285,16 +309,46 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
             category_terms.append(term)
     categories = sorted(set(category_terms))
 
-    legacy_guid_dedupe_key = None
+    identity_keys: list[IdentityKey] = []
+    legacy_dedupe_keys: list[str] = []
+    match_confidence = "high"
+    dedupe_key: str
+
+    feed_scope = canonicalize_url(feed_url) or normalize_space(feed_url)
     if guid:
-        feed_scope = canonicalize_url(feed_url) or normalize_space(feed_url)
-        dedupe_key = f"guid:{feed_scope}:{guid}"
-        legacy_guid_dedupe_key = f"guid:{guid}"
+        guid_value = f"{feed_scope}:{guid}"
+        dedupe_key = f"guid:{guid_value}"
+        identity_keys.append(("guid", guid_value))
+        legacy_dedupe_keys.append(dedupe_key)
+        legacy_dedupe_keys.append(f"guid:{guid}")
+        identity_keys.append(("legacy_guid", f"guid:{guid}"))
     elif canonical_url:
         dedupe_key = f"url:{canonical_url}"
+        legacy_dedupe_keys.append(dedupe_key)
     else:
         fallback = "|".join([feed_url, title, published_at or "", summary[:200]])
-        dedupe_key = f"hash:{sha256_hexdigest(fallback)}"
+        fallback_hash = sha256_hexdigest(fallback)
+        dedupe_key = f"hash:{fallback_hash}"
+        match_confidence = "low"
+        identity_keys.append(("fallback_hash", fallback_hash))
+        legacy_dedupe_keys.append(dedupe_key)
+
+    if canonical_url:
+        identity_keys.append(("canonical_url", canonical_url))
+        url_dedupe_key = f"url:{canonical_url}"
+        if url_dedupe_key not in legacy_dedupe_keys:
+            legacy_dedupe_keys.append(url_dedupe_key)
+
+    identity_seen: set[IdentityKey] = set()
+    normalized_identity_keys: list[IdentityKey] = []
+    for key_type, key_value in identity_keys:
+        if not key_value:
+            continue
+        key = (key_type, key_value)
+        if key in identity_seen:
+            continue
+        identity_seen.add(key)
+        normalized_identity_keys.append(key)
 
     content_basis = "|".join(
         [
@@ -324,7 +378,8 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
 
     return {
         "dedupe_key": dedupe_key,
-        "legacy_guid_dedupe_key": legacy_guid_dedupe_key,
+        "legacy_dedupe_keys": legacy_dedupe_keys,
+        "identity_keys": normalized_identity_keys,
         "guid": guid or None,
         "url": raw_url or None,
         "canonical_url": canonical_url or None,
@@ -335,30 +390,83 @@ def build_entry_record(feed_url: str, entry: Any) -> dict[str, Any]:
         "summary": summary or None,
         "categories": json.dumps(categories, ensure_ascii=True),
         "content_hash": content_hash,
+        "match_confidence": match_confidence,
         "raw_entry_json": raw_entry_json,
     }
 
 
+def merge_match_confidence(existing_value: Any, incoming_value: str) -> str:
+    existing = normalize_space(str(existing_value or "")).lower()
+    incoming = normalize_space(str(incoming_value or "")).lower()
+    if existing == "high" or incoming == "high":
+        return "high"
+    return "low"
+
+
+def find_existing_entry_by_identity_keys(
+    conn: sqlite3.Connection,
+    identity_keys: list[IdentityKey],
+) -> sqlite3.Row | None:
+    for key_type, key_value in identity_keys:
+        row = conn.execute(
+            """
+            SELECT e.id, e.content_hash, e.match_confidence
+            FROM entry_identities i
+            JOIN entries e ON e.id = i.entry_id
+            WHERE i.key_type = ? AND i.key_value = ?
+            LIMIT 1
+            """,
+            (key_type, key_value),
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def find_existing_entry_by_legacy_dedupe_keys(
+    conn: sqlite3.Connection,
+    legacy_dedupe_keys: list[str],
+) -> sqlite3.Row | None:
+    for dedupe_key in legacy_dedupe_keys:
+        row = conn.execute(
+            "SELECT id, content_hash, match_confidence FROM entries WHERE dedupe_key = ?",
+            (dedupe_key,),
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def ensure_entry_identity_keys(
+    conn: sqlite3.Connection,
+    entry_id: int,
+    identity_keys: list[IdentityKey],
+    seen_at: str,
+) -> None:
+    for key_type, key_value in identity_keys:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO entry_identities (entry_id, key_type, key_value, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (entry_id, key_type, key_value, seen_at),
+        )
+
+
 def upsert_entry(conn: sqlite3.Connection, feed_id: int, feed_url: str, entry: Any, seen_at: str) -> str:
     record = build_entry_record(feed_url, entry)
-    existing = conn.execute(
-        "SELECT id, content_hash FROM entries WHERE dedupe_key = ?",
-        (record["dedupe_key"],),
-    ).fetchone()
-    if not existing and record["legacy_guid_dedupe_key"]:
-        existing = conn.execute(
-            "SELECT id, content_hash FROM entries WHERE dedupe_key = ?",
-            (record["legacy_guid_dedupe_key"],),
-        ).fetchone()
+    existing = find_existing_entry_by_identity_keys(conn, record["identity_keys"])
+    if not existing:
+        existing = find_existing_entry_by_legacy_dedupe_keys(conn, record["legacy_dedupe_keys"])
 
     if not existing:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO entries (
                 dedupe_key, first_feed_id, last_feed_id, guid, url, canonical_url,
                 title, author, published_at, updated_at, summary, categories,
-                content_hash, first_seen_at, last_seen_at, raw_entry_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                content_hash, match_confidence, first_seen_at, last_seen_at, raw_entry_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["dedupe_key"],
@@ -374,22 +482,27 @@ def upsert_entry(conn: sqlite3.Connection, feed_id: int, feed_url: str, entry: A
                 record["summary"],
                 record["categories"],
                 record["content_hash"],
+                record["match_confidence"],
                 seen_at,
                 seen_at,
                 record["raw_entry_json"],
             ),
         )
+        ensure_entry_identity_keys(conn, int(cursor.lastrowid), record["identity_keys"], seen_at)
         return "new"
 
     entry_id = int(existing["id"])
+    match_confidence = merge_match_confidence(existing["match_confidence"], str(record["match_confidence"]))
+    ensure_entry_identity_keys(conn, entry_id, record["identity_keys"], seen_at)
+
     if existing["content_hash"] == record["content_hash"]:
         conn.execute(
             """
             UPDATE entries
-            SET last_feed_id = ?, last_seen_at = ?
+            SET last_feed_id = ?, last_seen_at = ?, match_confidence = ?
             WHERE id = ?
             """,
-            (feed_id, seen_at, entry_id),
+            (feed_id, seen_at, match_confidence, entry_id),
         )
         return "unchanged"
 
@@ -398,7 +511,7 @@ def upsert_entry(conn: sqlite3.Connection, feed_id: int, feed_url: str, entry: A
         UPDATE entries
         SET last_feed_id = ?, guid = ?, url = ?, canonical_url = ?, title = ?,
             author = ?, published_at = ?, updated_at = ?, summary = ?, categories = ?,
-            content_hash = ?, last_seen_at = ?, raw_entry_json = ?
+            content_hash = ?, match_confidence = ?, last_seen_at = ?, raw_entry_json = ?
         WHERE id = ?
         """,
         (
@@ -413,6 +526,7 @@ def upsert_entry(conn: sqlite3.Connection, feed_id: int, feed_url: str, entry: A
             record["summary"],
             record["categories"],
             record["content_hash"],
+            match_confidence,
             seen_at,
             record["raw_entry_json"],
             entry_id,
