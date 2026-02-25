@@ -378,6 +378,52 @@ def decode_part_text(part: email.message.Message) -> str:
     return payload.decode("utf-8", errors="replace")
 
 
+def normalize_message_id(raw_message_id: str | None) -> str:
+    value = str(raw_message_id or "").strip()
+    if not value:
+        return ""
+    return value.replace("<", "").replace(">", "").strip().lower()
+
+
+def extract_attachment_manifest(message: email.message.Message) -> list[dict[str, Any]]:
+    manifest: list[dict[str, Any]] = []
+    for part in message.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        disposition = (part.get_content_disposition() or "").strip().lower()
+        filename = part.get_filename()
+        if disposition not in {"attachment", "inline"} and not filename:
+            continue
+        payload = part.get_payload(decode=True)
+        manifest.append(
+            {
+                "filename": str(filename or ""),
+                "content_type": part.get_content_type(),
+                "bytes": len(payload) if isinstance(payload, (bytes, bytearray)) else 0,
+                "disposition": disposition,
+            }
+        )
+    return manifest
+
+
+def build_mail_ref(
+    account: str,
+    mailbox: str,
+    uid: str | None,
+    message_id_raw: str,
+    message_id_norm: str,
+    date_value: str,
+) -> dict[str, str]:
+    return {
+        "account": account,
+        "mailbox": mailbox,
+        "uid": str(uid or ""),
+        "message_id_raw": message_id_raw,
+        "message_id_norm": message_id_norm,
+        "date": date_value,
+    }
+
+
 def extract_snippet(message: email.message.Message, limit: int) -> str:
     plain_text = ""
     html_text = ""
@@ -530,6 +576,18 @@ def fetch_unseen_messages(
                 raise RuntimeError("FETCH returned no message payload")
 
             message = email.message_from_bytes(raw_payload, policy=policy.default)
+            message_id_raw = str(message.get("Message-Id", ""))
+            message_id_norm = normalize_message_id(message_id_raw)
+            date_value = str(message.get("Date", ""))
+            attachment_manifest = extract_attachment_manifest(message)
+            mail_ref = build_mail_ref(
+                account=account.name,
+                mailbox=account.mailbox,
+                uid=uid,
+                message_id_raw=message_id_raw,
+                message_id_norm=message_id_norm,
+                date_value=date_value,
+            )
             messages.append(
                 {
                     "type": "message",
@@ -541,9 +599,14 @@ def fetch_unseen_messages(
                     "subject": str(message.get("Subject", "")),
                     "from": str(message.get("From", "")),
                     "to": str(message.get("To", "")),
-                    "date": str(message.get("Date", "")),
-                    "message_id": str(message.get("Message-Id", "")),
+                    "date": date_value,
+                    "message_id": message_id_raw,
+                    "message_id_raw": message_id_raw,
+                    "message_id_norm": message_id_norm,
                     "snippet": extract_snippet(message, snippet_chars),
+                    "attachment_count": len(attachment_manifest),
+                    "attachment_manifest": attachment_manifest,
+                    "mail_ref": mail_ref,
                 }
             )
         except Exception as exc:
@@ -561,6 +624,45 @@ def fetch_unseen_messages(
 
 
 def compose_webhook_message(record: Mapping[str, Any]) -> str:
+    mail_ref_data = record.get("mail_ref")
+    if isinstance(mail_ref_data, Mapping):
+        mail_ref = {
+            "account": str(mail_ref_data.get("account") or ""),
+            "mailbox": str(mail_ref_data.get("mailbox") or ""),
+            "uid": str(mail_ref_data.get("uid") or ""),
+            "message_id_raw": str(mail_ref_data.get("message_id_raw") or ""),
+            "message_id_norm": str(mail_ref_data.get("message_id_norm") or ""),
+            "date": str(mail_ref_data.get("date") or ""),
+        }
+    else:
+        message_id_raw = str(record.get("message_id_raw") or record.get("message_id") or "")
+        mail_ref = build_mail_ref(
+            account=str(record.get("account") or ""),
+            mailbox=str(record.get("mailbox") or ""),
+            uid=str(record.get("uid") or ""),
+            message_id_raw=message_id_raw,
+            message_id_norm=normalize_message_id(message_id_raw),
+            date_value=str(record.get("date") or ""),
+        )
+
+    manifest_data = record.get("attachment_manifest")
+    attachment_manifest: list[dict[str, Any]] = []
+    if isinstance(manifest_data, list):
+        for item in manifest_data:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                bytes_value = int(item.get("bytes") or 0)
+            except Exception:
+                bytes_value = 0
+            attachment_manifest.append(
+                {
+                    "filename": str(item.get("filename") or ""),
+                    "content_type": str(item.get("content_type") or ""),
+                    "bytes": bytes_value,
+                }
+            )
+
     lines = [
         "New email received via IMAP mailbox listener.",
         f"Account: {record.get('account') or ''}",
@@ -570,7 +672,13 @@ def compose_webhook_message(record: Mapping[str, Any]) -> str:
         f"Subject: {record.get('subject') or ''}",
         f"Date: {record.get('date') or ''}",
         f"UID: {record.get('uid') or ''}",
-        f"Message-Id: {record.get('message_id') or ''}",
+        f"Message-Id: {mail_ref['message_id_raw']}",
+        "<<<MAIL_REF_JSON>>>",
+        json.dumps(mail_ref, ensure_ascii=False, separators=(",", ":")),
+        "<<<END_MAIL_REF_JSON>>>",
+        "<<<ATTACHMENT_MANIFEST_JSON>>>",
+        json.dumps(attachment_manifest, ensure_ascii=False, separators=(",", ":")),
+        "<<<END_ATTACHMENT_MANIFEST_JSON>>>",
     ]
     snippet = str(record.get("snippet") or "").strip()
     if snippet:
@@ -581,7 +689,8 @@ def compose_webhook_message(record: Mapping[str, Any]) -> str:
 
 def build_session_key(record: Mapping[str, Any], prefix: str) -> str:
     raw_component = (
-        str(record.get("message_id") or "").strip("<> ")
+        str(record.get("message_id_norm") or "").strip()
+        or normalize_message_id(str(record.get("message_id_raw") or record.get("message_id") or ""))
         or str(record.get("uid") or "").strip()
         or str(record.get("seq") or "").strip()
         or str(int(time.time()))

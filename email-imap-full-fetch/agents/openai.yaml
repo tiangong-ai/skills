@@ -1,0 +1,4 @@
+interface:
+  display_name: "Email IMAP Full Fetch"
+  short_description: "Stage-2 full MIME and attachment fetch by mail_ref"
+  default_prompt: "Use $email-imap-full-fetch to fetch full MIME body and attachments by message_id_norm (uid only as fallback)."

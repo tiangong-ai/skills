@@ -12,6 +12,7 @@ description: Listen for one or more IMAP inboxes with the IDLE command, fetch un
 - Control IDLE support strictly with env mode (`idle` or `poll`) without runtime probing.
 - Forward each fetched email to OpenClaw webhooks.
 - Emit machine-readable JSON lines for downstream steps.
+- Keep this skill strictly in stage-1 routing mode: send snippet + structured refs only, never send full raw message body, and never send attachment binary/content.
 
 ## Workflow
 1. Configure account env variables and OpenClaw webhook env variables (see `references/env.md` and `assets/config.example.env`).
@@ -48,8 +49,14 @@ python3 scripts/imap_idle_fetch.py listen
 - `type=status` for lifecycle events.
 - `type=message` for fetched emails with:
   - `account`, `mailbox`, `seq`, `uid`
-  - `subject`, `from`, `to`, `date`, `message_id`
-  - `snippet` (plain-text preview)
+  - `subject`, `from`, `to`, `date`
+  - `message_id_raw`, `message_id_norm` (and compatibility field `message_id`)
+  - `snippet` (plain-text preview only)
+  - `attachment_count`, `attachment_manifest` (summary only, no attachment content)
+  - `mail_ref` machine-readable object (`account`, `mailbox`, `uid`, `message_id_raw`, `message_id_norm`, `date`)
+- Webhook message includes two fixed machine-readable blocks for deterministic dispatch extraction:
+  - `<<<MAIL_REF_JSON>>> ... <<<END_MAIL_REF_JSON>>>`
+  - `<<<ATTACHMENT_MANIFEST_JSON>>> ... <<<END_ATTACHMENT_MANIFEST_JSON>>>`
 - `wait_mode` is `idle` or `poll` in cycle status output.
 - `wait_events` records the active wait strategy details.
 - `event=webhook_delivered` status events when OpenClaw webhook POST succeeds.
