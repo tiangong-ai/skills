@@ -1,0 +1,4 @@
+interface:
+  display_name: "KB Abstract Fetch"
+  short_description: "Backfill DOI abstracts to Postgres"
+  default_prompt: "Use $kb-abstract-fetch to select newest rows with empty abstract, fetch abstract from https://doi.org/{doi} via OpenClaw Browser, and write back safely to PostgreSQL."
