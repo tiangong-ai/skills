@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import imaplib
 import json
+import mimetypes
 import os
 import re
 import sys
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import format_datetime, make_msgid
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
@@ -20,6 +22,7 @@ TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}
 CONTENT_TYPES = {"plain", "html"}
 APPENDUID_RE = re.compile(r"\[APPENDUID\s+(\d+)\s+(\d+)\]", re.IGNORECASE)
+DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -44,7 +47,17 @@ class DraftDefaults:
     subject: str
     body: str
     content_type: str
+    max_attachment_bytes: int
     connect_timeout: int
+
+
+@dataclass(frozen=True)
+class AttachmentPayload:
+    source_path: Path
+    filename: str
+    content_type: str
+    bytes_size: int
+    payload: bytes
 
 
 def utc_now_iso() -> str:
@@ -82,6 +95,60 @@ def parse_content_type(raw: str, label: str) -> str:
     if value not in CONTENT_TYPES:
         raise ValueError(f"{label} must be one of {sorted(CONTENT_TYPES)}, got {raw!r}")
     return value
+
+
+def parse_attachment_paths(values: Sequence[str]) -> list[Path]:
+    attachments: list[Path] = []
+    seen: set[str] = set()
+    for item in values:
+        parts = [value.strip() for value in item.split(",")]
+        for part in parts:
+            if not part:
+                continue
+            path = Path(part).expanduser().resolve()
+            path_key = str(path)
+            if path_key in seen:
+                continue
+            if not path.exists():
+                raise ValueError(f"Attachment file not found: {path}")
+            if not path.is_file():
+                raise ValueError(f"Attachment path must be a file: {path}")
+            attachments.append(path)
+            seen.add(path_key)
+    return attachments
+
+
+def parse_mime_type(content_type: str) -> tuple[str, str]:
+    normalized = str(content_type or "").strip().lower()
+    if "/" not in normalized:
+        return "application", "octet-stream"
+    maintype, subtype = normalized.split("/", 1)
+    maintype = maintype.strip() or "application"
+    subtype = subtype.strip() or "octet-stream"
+    return maintype, subtype
+
+
+def read_attachments(attachment_paths: Sequence[Path], max_attachment_bytes: int) -> list[AttachmentPayload]:
+    payloads: list[AttachmentPayload] = []
+    for path in attachment_paths:
+        stat = path.stat()
+        size = int(stat.st_size)
+        if size > max_attachment_bytes:
+            raise ValueError(
+                f"Attachment exceeds max bytes ({size} > {max_attachment_bytes}): {path}"
+            )
+        content_type, _ = mimetypes.guess_type(path.name)
+        normalized_content_type = (content_type or "application/octet-stream").lower()
+        payloads.append(
+            AttachmentPayload(
+                source_path=path,
+                filename=path.name,
+                content_type=normalized_content_type,
+                bytes_size=size,
+                payload=path.read_bytes(),
+            )
+        )
+    return payloads
 
 
 def parse_recipients(values: Sequence[str]) -> list[str]:
@@ -172,6 +239,11 @@ def load_draft_defaults(account: AccountConfig, env: Mapping[str, str] | None = 
             str(env_map.get("IMAP_APPEND_CONTENT_TYPE") or "plain"),
             "IMAP_APPEND_CONTENT_TYPE",
         ),
+        max_attachment_bytes=parse_int_value(
+            env_map.get("IMAP_APPEND_MAX_ATTACHMENT_BYTES", str(DEFAULT_MAX_ATTACHMENT_BYTES)),
+            "IMAP_APPEND_MAX_ATTACHMENT_BYTES",
+            minimum=1,
+        ),
         connect_timeout=parse_int_value(
             env_map.get("IMAP_CONNECT_TIMEOUT", "20"),
             "IMAP_CONNECT_TIMEOUT",
@@ -204,6 +276,17 @@ def build_parser() -> argparse.ArgumentParser:
     append_parser.add_argument("--message-id", default=None, help="Optional Message-ID header.")
     append_parser.add_argument("--in-reply-to", default=None, help="Optional In-Reply-To header.")
     append_parser.add_argument("--references", default=None, help="Optional References header.")
+    append_parser.add_argument(
+        "--attach",
+        action="append",
+        default=[],
+        help="Attachment file path. Repeat or use comma-separated values.",
+    )
+    append_parser.add_argument(
+        "--max-attachment-bytes",
+        default=None,
+        help="Maximum allowed bytes per attachment.",
+    )
 
     return parser
 
@@ -254,6 +337,7 @@ def build_draft_message(
     message_id: str | None,
     in_reply_to: str | None,
     references: str | None,
+    attachments: Sequence[AttachmentPayload],
 ) -> EmailMessage:
     message = EmailMessage()
     message["From"] = from_addr
@@ -271,6 +355,14 @@ def build_draft_message(
     if references:
         message["References"] = references.strip()
     message.set_content(body, subtype=content_type)
+    for attachment in attachments:
+        maintype, subtype = parse_mime_type(attachment.content_type)
+        message.add_attachment(
+            attachment.payload,
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment.filename,
+        )
     return message
 
 
@@ -293,6 +385,7 @@ def command_check_config(account: AccountConfig, defaults: DraftDefaults) -> int
             "bcc_count": len(defaults.bcc_addrs),
             "subject": defaults.subject,
             "content_type": defaults.content_type,
+            "max_attachment_bytes": defaults.max_attachment_bytes,
             "connect_timeout": defaults.connect_timeout,
         },
     }
@@ -314,21 +407,33 @@ def command_append_draft(account: AccountConfig, defaults: DraftDefaults, args: 
     body = args.body if args.body is not None else defaults.body
     content_type = args.content_type if args.content_type is not None else defaults.content_type
 
-    message = build_draft_message(
-        from_addr=from_addr,
-        to_addrs=to_addrs,
-        cc_addrs=cc_addrs,
-        bcc_addrs=bcc_addrs,
-        subject=subject,
-        body=body,
-        content_type=content_type,
-        message_id=args.message_id,
-        in_reply_to=args.in_reply_to,
-        references=args.references,
-    )
-
     client: imaplib.IMAP4 | None = None
+    attachments: list[AttachmentPayload] = []
     try:
+        max_attachment_bytes = defaults.max_attachment_bytes
+        if args.max_attachment_bytes is not None:
+            max_attachment_bytes = parse_int_value(
+                args.max_attachment_bytes,
+                "--max-attachment-bytes",
+                minimum=1,
+            )
+        attachment_paths = parse_attachment_paths(args.attach) if args.attach else []
+        attachments = read_attachments(attachment_paths, max_attachment_bytes)
+
+        message = build_draft_message(
+            from_addr=from_addr,
+            to_addrs=to_addrs,
+            cc_addrs=cc_addrs,
+            bcc_addrs=bcc_addrs,
+            subject=subject,
+            body=body,
+            content_type=content_type,
+            message_id=args.message_id,
+            in_reply_to=args.in_reply_to,
+            references=args.references,
+            attachments=attachments,
+        )
+
         client = open_imap_connection(account, defaults.connect_timeout)
         status, _ = client.select(mailbox, readonly=False)
         if status != "OK":
@@ -377,6 +482,16 @@ def command_append_draft(account: AccountConfig, defaults: DraftDefaults, args: 
                 "subject": subject,
                 "message_id": message.get("Message-ID"),
                 "flags": flags,
+                "attachment_count": len(attachments),
+                "attachments": [
+                    {
+                        "filename": item.filename,
+                        "bytes": item.bytes_size,
+                        "content_type": item.content_type,
+                        "source_path": str(item.source_path),
+                    }
+                    for item in attachments
+                ],
                 "append_uidvalidity": append_uidvalidity,
                 "append_uid": append_uid,
                 "not_sent": True,

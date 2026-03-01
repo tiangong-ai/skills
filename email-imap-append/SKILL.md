@@ -1,6 +1,6 @@
 ---
 name: email-imap-append
-description: Compose unsent email drafts and append them to an IMAP mailbox via APPEND (typically Drafts) without sending. Use when tasks need to save draft messages for human review, prefill reply templates, or stage outbound content inside mailbox folders before manual send.
+description: Compose unsent email drafts (with optional attachments) and append them to an IMAP mailbox via APPEND (typically Drafts) without sending. Use when tasks need to save draft messages for human review, prefill reply templates, stage outbound content inside mailbox folders before manual send, or prepare draft attachments in mailbox-native format.
 ---
 
 # Email IMAP Append
@@ -8,6 +8,7 @@ description: Compose unsent email drafts and append them to an IMAP mailbox via 
 ## Core Goal
 
 - Build RFC 5322 draft messages with subject/body/recipients.
+- Attach local files into draft MIME payload when requested.
 - Append the draft MIME into an IMAP mailbox using `APPEND`.
 - Set draft flags (default `\\Draft`) and keep the message unsent.
 - Return machine-readable JSON with append status and server response metadata.
@@ -40,6 +41,17 @@ python3 scripts/imap_append.py append-draft \
   --body "<p>Release note draft for approval.</p>"
 ```
 
+5. Append draft with attachments:
+
+```bash
+python3 scripts/imap_append.py append-draft \
+  --to reviewer@example.com \
+  --subject "Draft: WG2 package" \
+  --body "See attached draft tables." \
+  --attach ./wg2-table.xlsx \
+  --attach ./notes.docx
+```
+
 ## Output Contract
 - `check-config` prints sanitized IMAP + append defaults as JSON.
 - `append-draft` success prints one `type=status` JSON object containing:
@@ -47,6 +59,7 @@ python3 scripts/imap_append.py append-draft \
   - `account`, `mailbox`, `subject`, `message_id`
   - recipient lists and counts
   - `flags`
+  - `attachment_count` and `attachments[]` metadata
   - `append_uidvalidity` and `append_uid` when server returns `APPENDUID`
 - `append-draft` failure prints `type=error` JSON to stderr with `event=imap_append_failed`.
 
@@ -63,6 +76,8 @@ python3 scripts/imap_append.py append-draft \
 - `append-draft --message-id`: explicit Message-ID header.
 - `append-draft --in-reply-to`: optional In-Reply-To header.
 - `append-draft --references`: optional References header.
+- `append-draft --attach`: local attachment path, repeatable or comma-separated.
+- `append-draft --max-attachment-bytes`: max bytes allowed per attachment.
 
 ## Required Environment
 - `IMAP_HOST`
@@ -84,6 +99,7 @@ Optional defaults:
 - `IMAP_APPEND_SUBJECT`
 - `IMAP_APPEND_BODY`
 - `IMAP_APPEND_CONTENT_TYPE`
+- `IMAP_APPEND_MAX_ATTACHMENT_BYTES`
 
 ## References
 - `references/env.md`

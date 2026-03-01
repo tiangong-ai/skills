@@ -29,6 +29,7 @@ These values are used when `append-draft` arguments are not provided:
 - `IMAP_APPEND_SUBJECT`: default draft subject.
 - `IMAP_APPEND_BODY`: default draft body.
 - `IMAP_APPEND_CONTENT_TYPE`: `plain` or `html`, default `plain`.
+- `IMAP_APPEND_MAX_ATTACHMENT_BYTES`: max bytes per attachment, default `26214400` (25 MiB).
 
 ## Commands
 
@@ -54,4 +55,15 @@ python3 scripts/imap_append.py append-draft \
   --content-type html \
   --subject "Draft: release note" \
   --body "<p>Release note draft.</p>"
+```
+
+Append draft with attachments:
+
+```bash
+python3 scripts/imap_append.py append-draft \
+  --to reviewer@example.com \
+  --subject "Draft: WG2 table package" \
+  --body "Please review attached files." \
+  --attach ./wg2-table.xlsx \
+  --attach ./wg2-summary.docx
 ```
