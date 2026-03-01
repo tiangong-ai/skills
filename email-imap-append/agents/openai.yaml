@@ -1,0 +1,4 @@
+interface:
+  display_name: "Email IMAP Append"
+  short_description: "Append unsent drafts to IMAP mailbox"
+  default_prompt: "Use $email-imap-append to compose an unsent email draft and append it to an IMAP Drafts mailbox via APPEND."
