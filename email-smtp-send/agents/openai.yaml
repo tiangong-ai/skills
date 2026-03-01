@@ -1,4 +1,4 @@
 interface:
   display_name: "Email SMTP Send"
-  short_description: "Send email via env-configured SMTP"
-  default_prompt: "Use $email-smtp-send to validate SMTP settings and send an email via environment-configured credentials."
+  short_description: "Send SMTP mail with attachments and Sent sync"
+  default_prompt: "Use $email-smtp-send to validate SMTP settings, send an email with optional attachments, and append a copy to Sent Items via IMAP APPEND when needed."
