@@ -1,0 +1,19 @@
+{
+  "db": "./eceee_news.db",
+  "index_url": "https://www.eceee.org/all-news/",
+  "sync": {
+    "limit": 50,
+    "min_chars": 180,
+    "timeout": 20,
+    "max_bytes": 2000000,
+    "max_retries": 3,
+    "retry_backoff_minutes": 30,
+    "since_date": "",
+    "refetch_days": 0,
+    "force": false,
+    "only_failed": false,
+    "oldest_first": false,
+    "disable_trafilatura": false,
+    "fail_on_errors": false
+  }
+}

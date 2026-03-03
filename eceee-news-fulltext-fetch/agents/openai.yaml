@@ -1,0 +1,4 @@
+interface:
+  display_name: "eceee News Fulltext Fetch"
+  short_description: "Extract full text from eceee news pages"
+  default_prompt: "Use $eceee-news-fulltext-fetch to discover article URLs from https://www.eceee.org/all-news/ and persist extracted full text into SQLite with retry-safe incremental sync."
