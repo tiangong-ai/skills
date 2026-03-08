@@ -1,0 +1,4 @@
+interface:
+  display_name: "Figshare Data Download"
+  short_description: "Download Figshare files via browser-only flow"
+  default_prompt: "Use $figshare-data-download to download a Figshare DOI/item/ndownloader file via browser-only workflow: optionally open the link, wait/poll for completed download in ~/Downloads, then copy to target path with basic verification."
