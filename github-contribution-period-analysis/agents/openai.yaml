@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Contribution Analysis"
+  short_description: "Analyze GitHub code contribution by time window"
+  default_prompt: "Use $github-contribution-period-analysis to generate a Markdown report of one user's merged PR and commit contributions for a specific UTC time range."
