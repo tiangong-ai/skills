@@ -1,16 +1,14 @@
 ---
 name: fetch-abstract-to-kb
-description: Fetch and backfill missing `abstract` values from PostgreSQL `journals` by opening DOI redirect pages (`https://doi.org/{doi}`) with OpenClaw Browser and extracting page abstracts. Use when `fetch-meta-to-kb` has inserted metadata rows with empty abstract and you need latest-created rows processed in controlled batches (default 100) with dry-run and safe-write guards.
+description: "Fetch DOI candidates from PostgreSQL `journals` and batch write `abstract` by DOI. Use when you need DB-only backfill workflow: (1) select newest rows where doi is not empty, author is not empty, and abstract is empty (default limit 10), then (2) write prepared abstract values back in batch by DOI."
 ---
 
 # Fetch Abstract to KB
 
 ## Core Goal
-- Reuse the same PostgreSQL connection env variables as `fetch-meta-to-kb`.
-- Select rows whose `abstract` is empty and order by newest `created_at` first.
-- Open `https://doi.org/<doi>` in OpenClaw Browser and extract abstract text.
-- Write back only when the row is still empty at update time.
-- Default to dry run; require explicit `--apply` to write.
+- Provide only two DB operations:
+  1. Fetch DOI candidates from `journals`.
+  2. Batch update `abstract` by DOI.
 
 ## Required Environment
 - `KB_DB_HOST`
@@ -18,55 +16,55 @@ description: Fetch and backfill missing `abstract` values from PostgreSQL `journ
 - `KB_DB_NAME`
 - `KB_DB_USER`
 - `KB_DB_PASSWORD`
-- `KB_LOG_DIR` (required run log directory)
 
 ## Workflow
-1. Run local self-test first (no DB/browser required):
+1. Fetch DOI list (default 10 rows):
 
 ```bash
-python3 scripts/fetch_abstract_to_kb.py --self-test
+python3 scripts/fetch_abstract_to_kb.py fetch-doi
 ```
 
-2. Dry run first (default mode; no DB write):
+2. Optionally override row limit:
 
 ```bash
-python3 scripts/fetch_abstract_to_kb.py --limit 100
+python3 scripts/fetch_abstract_to_kb.py fetch-doi --limit 10
 ```
 
-3. Apply updates after review:
+3. Prepare JSON input for batch update (one of the two formats):
+
+```json
+[
+  {"doi": "10.1000/a", "abstract": "text A"},
+  {"doi": "10.1000/b", "abstract": "text B"}
+]
+```
+
+or
+
+```json
+{
+  "10.1000/a": "text A",
+  "10.1000/b": "text B"
+}
+```
+
+4. Batch write abstract by DOI:
 
 ```bash
-python3 scripts/fetch_abstract_to_kb.py --limit 100 --apply
+python3 scripts/fetch_abstract_to_kb.py write-abstracts --input abstracts.json
 ```
 
-4. Override table/column names when needed (`created_at` is fixed and required):
-
-```bash
-python3 scripts/fetch_abstract_to_kb.py \
-  --table journals \
-  --doi-column doi \
-  --abstract-column abstract \
-  --limit 100 \
-  --apply
-```
-
-## Safety Contract
-- Selection filter:
-  - DOI not empty
+## Query/Write Contract
+- Fetch filter:
+  - `doi` not empty
+  - `author` not empty (fall back to `authors` when `author` is unavailable)
   - `abstract` empty (`NULL` or blank)
-- Selection order:
-  - newest `created_at` first (`ORDER BY created_at DESC NULLS LAST LIMIT n`)
-- Update filter (second guard):
-  - `WHERE doi = ? AND abstract is still empty`
-- Run summary:
-  - emit `RUN_SUMMARY_JSON=<json>` for current run only.
-- Abort behavior:
-  - stop early when errors exceed `--max-errors`.
-
-## Browser Requirement
-- `openclaw` CLI must be installed.
-- Script checks `openclaw browser status`; if browser is not running, it tries `openclaw browser start`.
-- If start fails (for example extension tab not attached), attach OpenClaw browser session first, then rerun.
+- Fetch order:
+  - `ORDER BY created_at DESC NULLS LAST`
+- Fetch default limit:
+  - `10`
+- Write guard:
+  - Update only when target row `abstract` is still empty.
 
 ## Script
 - `scripts/fetch_abstract_to_kb.py`
