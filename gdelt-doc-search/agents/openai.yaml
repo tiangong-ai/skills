@@ -1,0 +1,4 @@
+interface:
+  display_name: "GDELT DOC Search"
+  short_description: "Search GDELT DOC API with retries and logs"
+  default_prompt: "Use $gdelt-doc-search to run atomic GDELT DOC API searches with query, mode, format, and time-window parameters."

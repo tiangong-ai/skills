@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch GDELT 2.0 GKG or Global Mentions export files with retries and rich logs."""
+"""Fetch GDELT 2.0 events export files with retries, throttling, and rich logs."""
 
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ from typing import Any, Iterable
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
-ENV_BASE_URL = "GDELT_GKG_MENTIONS_BASE_URL"
-ENV_TIMEOUT_SECONDS = "GDELT_GKG_MENTIONS_TIMEOUT_SECONDS"
-ENV_MAX_RETRIES = "GDELT_GKG_MENTIONS_MAX_RETRIES"
-ENV_RETRY_BACKOFF_SECONDS = "GDELT_GKG_MENTIONS_RETRY_BACKOFF_SECONDS"
-ENV_RETRY_BACKOFF_MULTIPLIER = "GDELT_GKG_MENTIONS_RETRY_BACKOFF_MULTIPLIER"
-ENV_MIN_REQUEST_INTERVAL_SECONDS = "GDELT_GKG_MENTIONS_MIN_REQUEST_INTERVAL_SECONDS"
-ENV_MAX_FILES_PER_RUN = "GDELT_GKG_MENTIONS_MAX_FILES_PER_RUN"
-ENV_USER_AGENT = "GDELT_GKG_MENTIONS_USER_AGENT"
+ENV_BASE_URL = "GDELT_EVENTS_BASE_URL"
+ENV_TIMEOUT_SECONDS = "GDELT_TIMEOUT_SECONDS"
+ENV_MAX_RETRIES = "GDELT_MAX_RETRIES"
+ENV_RETRY_BACKOFF_SECONDS = "GDELT_RETRY_BACKOFF_SECONDS"
+ENV_RETRY_BACKOFF_MULTIPLIER = "GDELT_RETRY_BACKOFF_MULTIPLIER"
+ENV_MIN_REQUEST_INTERVAL_SECONDS = "GDELT_MIN_REQUEST_INTERVAL_SECONDS"
+ENV_MAX_FILES_PER_RUN = "GDELT_MAX_FILES_PER_RUN"
+ENV_USER_AGENT = "GDELT_USER_AGENT"
 
 DEFAULT_BASE_URL = "http://data.gdeltproject.org/gdeltv2"
 DEFAULT_TIMEOUT_SECONDS = 60
@@ -35,36 +35,20 @@ DEFAULT_RETRY_BACKOFF_SECONDS = 1.5
 DEFAULT_RETRY_BACKOFF_MULTIPLIER = 2.0
 DEFAULT_MIN_REQUEST_INTERVAL_SECONDS = 0.4
 DEFAULT_MAX_FILES_PER_RUN = 20
-DEFAULT_USER_AGENT = "gdelt-gkg-mentions-fetch/1.0"
+DEFAULT_USER_AGENT = "gdelt-events-fetch/1.0"
 
 LASTUPDATE_PATH = "lastupdate.txt"
 MASTERFILELIST_PATH = "masterfilelist.txt"
+EVENT_URL_PATTERN = re.compile(r"/(?P<ts>\d{14})\.export\.CSV\.zip$")
 TS_FORMAT = "%Y%m%d%H%M%S"
 TS_FORMAT_HELP = "YYYYMMDDHHMMSS"
 RETRIABLE_HTTP_CODES = {429, 500, 502, 503, 504}
+DEFAULT_EVENT_EXPECTED_COLUMNS = 61
 DEFAULT_MAX_VALIDATION_ISSUES = 20
-
-DATASETS: dict[str, dict[str, Any]] = {
-    "mentions": {
-        "label": "Global Mentions",
-        "file_suffix": ".mentions.CSV.zip",
-        "pattern": re.compile(r"/(?P<ts>\d{14})\.mentions\.CSV\.zip$"),
-        "expected_columns": 16,
-        "default_output_dir": "./data/gdelt-mentions",
-    },
-    "gkg": {
-        "label": "Global Knowledge Graph",
-        "file_suffix": ".gkg.csv.zip",
-        "pattern": re.compile(r"/(?P<ts>\d{14})\.gkg\.csv\.zip$"),
-        "expected_columns": 27,
-        "default_output_dir": "./data/gdelt-gkg",
-    },
-}
 
 
 @dataclass(frozen=True)
 class ExportFileEntry:
-    dataset: str
     timestamp: datetime
     timestamp_raw: str
     url: str
@@ -136,17 +120,6 @@ def normalize_base_url(value: str) -> str:
     if not normalized.startswith("http://") and not normalized.startswith("https://"):
         raise ValueError(f"Base URL must start with http:// or https://, got: {normalized}")
     return normalized
-
-
-def validate_dataset(name: str) -> str:
-    dataset = name.strip().lower()
-    if dataset not in DATASETS:
-        raise ValueError(f"Unsupported dataset: {name!r}. Choose from: {', '.join(sorted(DATASETS))}")
-    return dataset
-
-
-def dataset_info(dataset: str) -> dict[str, Any]:
-    return DATASETS[validate_dataset(dataset)]
 
 
 def build_runtime_config(args: argparse.Namespace) -> RuntimeConfig:
@@ -226,7 +199,7 @@ def build_runtime_config(args: argparse.Namespace) -> RuntimeConfig:
 
 
 def build_logger(level: str, log_file: str) -> logging.Logger:
-    logger = logging.getLogger("gdelt-gkg-mentions-fetch")
+    logger = logging.getLogger("gdelt-events-fetch")
     logger.handlers.clear()
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
@@ -378,14 +351,12 @@ def parse_filelist_line(line: str, logger: logging.Logger) -> tuple[int | None, 
     return size, md5, url
 
 
-def as_dataset_entry(dataset: str, size: int | None, md5: str, url: str) -> ExportFileEntry | None:
-    info = dataset_info(dataset)
-    match = info["pattern"].search(url)
+def as_event_entry(size: int | None, md5: str, url: str) -> ExportFileEntry | None:
+    match = EVENT_URL_PATTERN.search(url)
     if not match:
         return None
     ts_raw = match.group("ts")
     return ExportFileEntry(
-        dataset=dataset,
         timestamp=parse_timestamp(ts_raw),
         timestamp_raw=ts_raw,
         url=url,
@@ -394,25 +365,21 @@ def as_dataset_entry(dataset: str, size: int | None, md5: str, url: str) -> Expo
     )
 
 
-def parse_lastupdate_entries(dataset: str, text: str, logger: logging.Logger) -> list[ExportFileEntry]:
+def parse_lastupdate_events(text: str, logger: logging.Logger) -> list[ExportFileEntry]:
     results: list[ExportFileEntry] = []
     for line in text.splitlines():
         parsed = parse_filelist_line(line, logger)
         if not parsed:
             continue
         size, md5, url = parsed
-        entry = as_dataset_entry(dataset=dataset, size=size, md5=md5, url=url)
+        entry = as_event_entry(size=size, md5=md5, url=url)
         if entry is not None:
             results.append(entry)
     return sorted(results, key=lambda x: x.timestamp)
 
 
-def iter_masterfile_entries(
-    dataset: str,
-    text: str,
-    start: datetime,
-    end: datetime,
-    logger: logging.Logger,
+def iter_masterfile_events(
+    text: str, start: datetime, end: datetime, logger: logging.Logger
 ) -> Iterable[ExportFileEntry]:
     scanned = 0
     matched = 0
@@ -422,20 +389,15 @@ def iter_masterfile_entries(
         if not parsed:
             continue
         size, md5, url = parsed
-        entry = as_dataset_entry(dataset=dataset, size=size, md5=md5, url=url)
+        entry = as_event_entry(size=size, md5=md5, url=url)
         if entry is None:
             continue
         if start <= entry.timestamp <= end:
             matched += 1
             yield entry
         if scanned % 100000 == 0:
-            logger.info(
-                "masterfile-progress dataset=%s scanned=%d matched=%d",
-                dataset,
-                scanned,
-                matched,
-            )
-    logger.info("masterfile-finished dataset=%s scanned=%d matched=%d", dataset, scanned, matched)
+            logger.info("masterfile-progress scanned=%d matched=%d", scanned, matched)
+    logger.info("masterfile-finished scanned=%d matched=%d", scanned, matched)
 
 
 def lastupdate_url(config: RuntimeConfig) -> str:
@@ -464,7 +426,7 @@ def preview_zip_lines(raw: bytes, limit: int) -> tuple[str | None, list[str]]:
         return first_member, preview
 
 
-def validate_zip_payload(
+def validate_zip_event_payload(
     *,
     payload: bytes,
     expected_columns: int,
@@ -564,7 +526,6 @@ def write_quarantine_issues(
 
 def serialize_entry(entry: ExportFileEntry) -> dict[str, Any]:
     return {
-        "dataset": entry.dataset,
         "timestamp_utc": entry.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "timestamp_raw": entry.timestamp_raw,
         "url": entry.url,
@@ -585,18 +546,17 @@ def validate_max_files(max_files: int, config: RuntimeConfig) -> None:
 
 def resolve_latest_entries(
     *,
-    dataset: str,
     max_files: int,
     config: RuntimeConfig,
     client: RetryableHttpClient,
     logger: logging.Logger,
 ) -> list[ExportFileEntry]:
     text = client.get_text(lastupdate_url(config))
-    entries = parse_lastupdate_entries(dataset=dataset, text=text, logger=logger)
+    entries = parse_lastupdate_events(text=text, logger=logger)
     if not entries:
-        raise RuntimeError(f"No {dataset} export entry found in lastupdate.txt.")
+        raise RuntimeError("No events export entry found in lastupdate.txt.")
     selected = entries[-max_files:]
-    logger.info("selected-latest dataset=%s count=%d", dataset, len(selected))
+    logger.info("selected-latest count=%d", len(selected))
     return selected
 
 
@@ -607,7 +567,6 @@ def save_bytes(content: bytes, target_path: Path) -> None:
 
 def download_entries(
     *,
-    dataset: str,
     entries: list[ExportFileEntry],
     output_dir: Path,
     overwrite: bool,
@@ -628,7 +587,7 @@ def download_entries(
         filename = Path(parse.urlparse(item.url).path).name
         output_path = output_dir / filename
         if output_path.exists() and not overwrite:
-            logger.info("skip-existing dataset=%s path=%s", dataset, output_path)
+            logger.info("skip-existing path=%s", output_path)
             skipped.append(
                 {
                     "path": str(output_path),
@@ -643,7 +602,7 @@ def download_entries(
 
         validation: dict[str, Any] | None = None
         if validate_structure:
-            validation = validate_zip_payload(
+            validation = validate_zip_event_payload(
                 payload=payload,
                 expected_columns=expected_columns,
                 max_lines=validation_max_lines,
@@ -652,8 +611,7 @@ def download_entries(
 
             if validation["issue_count"] > 0:
                 logger.warning(
-                    "structure-validation-issues dataset=%s path=%s issues=%d decode_errors=%d column_mismatch=%d scan_complete=%s",
-                    dataset,
+                    "structure-validation-issues path=%s issues=%d decode_errors=%d column_mismatch=%d scan_complete=%s",
                     output_path,
                     validation["issue_count"],
                     validation["decode_error_count"],
@@ -678,8 +636,7 @@ def download_entries(
             else:
                 validation["quarantine_path"] = None
                 logger.info(
-                    "structure-validation-ok dataset=%s path=%s scanned_lines=%d scan_complete=%s",
-                    dataset,
+                    "structure-validation-ok path=%s scanned_lines=%d scan_complete=%s",
                     output_path,
                     validation["scanned_lines"],
                     validation["scan_complete"],
@@ -699,8 +656,7 @@ def download_entries(
             }
         )
         logger.info(
-            "downloaded dataset=%s path=%s bytes=%d preview_lines=%d",
-            dataset,
+            "downloaded path=%s bytes=%d preview_lines=%d",
             output_path,
             len(payload),
             len(line_preview),
@@ -721,12 +677,8 @@ def print_json(payload: dict[str, Any], pretty: bool) -> None:
 
 def command_check_config(args: argparse.Namespace) -> int:
     config = build_runtime_config(args)
-    dataset = validate_dataset(args.dataset)
-    info = dataset_info(dataset)
     payload = {
         "ok": True,
-        "dataset": dataset,
-        "dataset_label": info["label"],
         "config": {
             "base_url": config.base_url,
             "timeout_seconds": config.timeout_seconds,
@@ -736,9 +688,6 @@ def command_check_config(args: argparse.Namespace) -> int:
             "min_request_interval_seconds": config.min_request_interval_seconds,
             "max_files_per_run": config.max_files_per_run,
             "user_agent": config.user_agent,
-            "default_expected_columns": info["expected_columns"],
-            "file_suffix": info["file_suffix"],
-            "default_output_dir": info["default_output_dir"],
         },
         "source_urls": {
             "lastupdate": lastupdate_url(config),
@@ -762,20 +711,18 @@ def command_check_config(args: argparse.Namespace) -> int:
 def command_resolve_latest(args: argparse.Namespace) -> int:
     logger = build_logger(level=args.log_level, log_file=args.log_file)
     config = build_runtime_config(args)
-    dataset = validate_dataset(args.dataset)
     client = RetryableHttpClient(config=config, logger=logger)
 
     text = client.get_text(lastupdate_url(config))
-    entries = parse_lastupdate_entries(dataset=dataset, text=text, logger=logger)
+    entries = parse_lastupdate_events(text=text, logger=logger)
     if not entries:
-        raise RuntimeError(f"No {dataset} export entry found in lastupdate.txt.")
+        raise RuntimeError("No events export entry found in lastupdate.txt.")
 
     latest = entries[-1]
     payload = {
         "ok": True,
         "source": "lastupdate",
-        "dataset": dataset,
-        "latest_export": serialize_entry(latest),
+        "latest_event_export": serialize_entry(latest),
         "candidate_count": len(entries),
     }
     print_json(payload, pretty=args.pretty)
@@ -783,13 +730,11 @@ def command_resolve_latest(args: argparse.Namespace) -> int:
 
 
 def select_entries(args: argparse.Namespace, config: RuntimeConfig, logger: logging.Logger) -> list[ExportFileEntry]:
-    dataset = validate_dataset(args.dataset)
     client = RetryableHttpClient(config=config, logger=logger)
     validate_max_files(max_files=args.max_files, config=config)
 
     if args.mode == "latest":
         return resolve_latest_entries(
-            dataset=dataset,
             max_files=args.max_files,
             config=config,
             client=client,
@@ -809,13 +754,12 @@ def select_entries(args: argparse.Namespace, config: RuntimeConfig, logger: logg
 
     text = client.get_text(masterfilelist_url(config))
     candidates = sorted(
-        iter_masterfile_entries(dataset=dataset, text=text, start=start, end=end, logger=logger),
+        iter_masterfile_events(text=text, start=start, end=end, logger=logger),
         key=lambda x: x.timestamp,
     )
     selected = candidates[: args.max_files]
     logger.info(
-        "selected-range dataset=%s candidates=%d selected=%d start=%s end=%s",
-        dataset,
+        "selected-range candidates=%d selected=%d start=%s end=%s",
         len(candidates),
         len(selected),
         args.start_datetime,
@@ -827,11 +771,7 @@ def select_entries(args: argparse.Namespace, config: RuntimeConfig, logger: logg
 def command_fetch(args: argparse.Namespace) -> int:
     logger = build_logger(level=args.log_level, log_file=args.log_file)
     config = build_runtime_config(args)
-    dataset = validate_dataset(args.dataset)
-    info = dataset_info(dataset)
-
-    expected_columns = args.expected_columns or info["expected_columns"]
-    if expected_columns < 1:
+    if args.expected_columns < 1:
         raise ValueError("--expected-columns must be >= 1.")
     if args.validation_max_lines < 0:
         raise ValueError("--validation-max-lines must be >= 0.")
@@ -846,7 +786,6 @@ def command_fetch(args: argparse.Namespace) -> int:
         payload = {
             "ok": True,
             "dry_run": True,
-            "dataset": dataset,
             "mode": args.mode,
             "selected_count": len(selected),
             "files": [serialize_entry(item) for item in selected],
@@ -854,9 +793,8 @@ def command_fetch(args: argparse.Namespace) -> int:
         print_json(payload, pretty=args.pretty)
         return 0
 
-    output_dir_raw = args.output_dir or info["default_output_dir"]
-    out_dir = Path(output_dir_raw).expanduser().resolve()
-    logger.info("dataset=%s output-dir=%s", dataset, out_dir)
+    out_dir = Path(args.output_dir).expanduser().resolve()
+    logger.info("output-dir=%s", out_dir)
 
     quarantine_dir = None
     if args.quarantine_dir.strip():
@@ -864,13 +802,12 @@ def command_fetch(args: argparse.Namespace) -> int:
 
     client = RetryableHttpClient(config=config, logger=logger)
     downloads, skipped = download_entries(
-        dataset=dataset,
         entries=selected,
         output_dir=out_dir,
         overwrite=args.overwrite,
         preview_lines=args.preview_lines,
         validate_structure=args.validate_structure,
-        expected_columns=expected_columns,
+        expected_columns=args.expected_columns,
         validation_max_lines=args.validation_max_lines,
         max_validation_issues=args.max_validation_issues,
         fail_on_structure_error=args.fail_on_structure_error,
@@ -881,7 +818,6 @@ def command_fetch(args: argparse.Namespace) -> int:
 
     result = {
         "ok": True,
-        "dataset": dataset,
         "mode": args.mode,
         "selected_count": len(selected),
         "downloaded_count": len(downloads),
@@ -952,34 +888,22 @@ def add_logging_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_dataset_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--dataset",
-        choices=sorted(DATASETS),
-        required=True,
-        help="Dataset to resolve or fetch.",
-    )
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Fetch GDELT 2.0 GKG or Global Mentions export files via lastupdate/masterfilelist."
+        description="Fetch GDELT 2.0 events export files via lastupdate/masterfilelist."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    check = sub.add_parser("check-config", help="Show effective runtime config and dataset defaults.")
-    add_dataset_arg(check)
+    check = sub.add_parser("check-config", help="Show effective runtime config and source URLs.")
     add_runtime_config_args(check)
     check.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
-    latest = sub.add_parser("resolve-latest", help="Resolve the latest export file for one dataset.")
-    add_dataset_arg(latest)
+    latest = sub.add_parser("resolve-latest", help="Resolve the latest events export file.")
     add_runtime_config_args(latest)
     add_logging_args(latest)
     latest.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
-    fetch = sub.add_parser("fetch", help="Download GKG or mentions export file(s).")
-    add_dataset_arg(fetch)
+    fetch = sub.add_parser("fetch", help="Download events export file(s).")
     add_runtime_config_args(fetch)
     add_logging_args(fetch)
     fetch.add_argument(
@@ -1006,8 +930,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch.add_argument(
         "--output-dir",
-        default="",
-        help="Directory for downloaded files. Defaults by dataset.",
+        default="./data/gdelt-events",
+        help="Directory for downloaded .export.CSV.zip files.",
     )
     fetch.add_argument(
         "--overwrite",
@@ -1029,8 +953,8 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--expected-columns",
         type=int,
-        default=0,
-        help="Expected tab-separated column count for selected dataset rows. 0 means dataset default.",
+        default=DEFAULT_EVENT_EXPECTED_COLUMNS,
+        help=f"Expected tab-separated column count for events rows. Default: {DEFAULT_EVENT_EXPECTED_COLUMNS}.",
     )
     fetch.add_argument(
         "--validation-max-lines",

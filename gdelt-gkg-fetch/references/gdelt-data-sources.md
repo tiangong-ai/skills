@@ -1,6 +1,6 @@
 # GDELT Data Sources Overview
 
-This note summarizes official GDELT source families and the tables selected by this skill.
+This note summarizes official GDELT source families and the table selected by this skill.
 
 ## Official Source Families
 
@@ -16,18 +16,17 @@ From GDELT 2.0 documentation and public endpoints:
   - `lastupdate.txt` for latest snapshots.
   - `masterfilelist.txt` for full historical list.
 
-## Tables Chosen in This Skill
+## Table Chosen in This Skill
 
 This skill intentionally implements only:
 
-- `Global Mentions` files matching `YYYYMMDDHHMMSS.mentions.CSV.zip`
 - `GKG` files matching `YYYYMMDDHHMMSS.gkg.csv.zip`
 
-Why these tables:
+Why this table:
 
-- They are canonical GDELT 2.0 incremental 15-minute feeds.
-- They map cleanly to ingestion pipelines that need deterministic file-level checkpoints.
-- GKG and mentions are often consumed independently from Events, so keeping this skill separate stays atomic.
+- It is the canonical GDELT knowledge graph feed.
+- It provides stable, incremental 15-minute snapshots.
+- It maps cleanly to ingestion pipelines that need deterministic file-level checkpoints.
 
 ## Official Links
 
@@ -41,7 +40,5 @@ Why these tables:
   - `http://data.gdeltproject.org/gdeltv2/masterfilelist.txt`
 - Translation master list:
   - `http://data.gdeltproject.org/gdeltv2/masterfilelist-translation.txt`
-- Mentions codebook:
-  - `http://data.gdeltproject.org/documentation/GDELT-Global_Mentions_Codebook-V2.1.pdf`
 - GKG codebook:
   - `http://data.gdeltproject.org/documentation/GDELT-Global_Knowledge_Graph_Codebook-V2.1.pdf`

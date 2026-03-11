@@ -1,0 +1,4 @@
+interface:
+  display_name: "GDELT Mentions Fetch"
+  short_description: "Fetch GDELT mentions files with retries and logs"
+  default_prompt: "Use $gdelt-mentions-fetch to resolve and fetch GDELT Global Mentions export files by latest or historical time range with validation and logs."

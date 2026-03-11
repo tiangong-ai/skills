@@ -1,16 +1,6 @@
-# GDELT Mentions and GKG Schema Notes
+# GDELT GKG Schema Note
 
 This skill uses line-level column-count validation as a lightweight structural guardrail.
-
-## Global Mentions
-
-- Official codebook: `GDELT-Global_Mentions_Codebook-V2.1.pdf`
-- File pattern: `YYYYMMDDHHMMSS.mentions.CSV.zip`
-- Default expected columns in this skill: `16`
-
-Validation basis:
-- Live inspection of current public files shows 16 tab-separated columns.
-- The count matches the standard Global Mentions V2.1 field layout used in current GDELT 2.0 feeds.
 
 ## GKG
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "GDELT Events Fetch"
+  short_description: "Fetch GDELT Events files with retries and logs"
+  default_prompt: "Use $gdelt-events-fetch to resolve and fetch GDELT Events export files by latest or historical time range with robust retries and logs."
