@@ -94,3 +94,48 @@ python3 scripts/gdelt_doc_search.py search \
 - Keep the skill atomic: one query execution per invocation.
 - Use script parameters for retrieval conditions (`--query`, `--mode`, `--format`, `--timespan` or `--start-datetime/--end-datetime`).
 - If you need polling, let OpenClaw agent orchestrate repeated invocations externally (scheduler/loop), not inside this skill.
+
+## OpenClaw Prompt Templates
+
+Use these templates directly in OpenClaw and only replace bracketed placeholders.
+
+1. Recon (config and endpoint check)
+
+```text
+Use $gdelt-doc-search.
+Run:
+python3 scripts/gdelt_doc_search.py check-config --pretty
+Return only the JSON result.
+```
+
+2. Search (relative window)
+
+```text
+Use $gdelt-doc-search.
+Run:
+python3 scripts/gdelt_doc_search.py search \
+  --query '[QUERY_EXPRESSION]' \
+  --mode [MODE] \
+  --format json \
+  --timespan [TIMESPAN] \
+  --max-records [N] \
+  --pretty
+Return only the JSON result.
+```
+
+3. Validate (absolute window and output persistence)
+
+```text
+Use $gdelt-doc-search.
+Run:
+python3 scripts/gdelt_doc_search.py search \
+  --query '[QUERY_EXPRESSION]' \
+  --mode [MODE] \
+  --format json \
+  --start-datetime [YYYYMMDDHHMMSS] \
+  --end-datetime [YYYYMMDDHHMMSS] \
+  --output [OUTPUT_FILE] \
+  --pretty
+Check command exit code and bytes_written > 0.
+Return JSON plus one-line pass/fail verdict.
+```

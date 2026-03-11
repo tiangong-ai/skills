@@ -96,3 +96,54 @@ python3 scripts/gdelt_gkg_fetch.py fetch \
 - Keep the skill atomic: only resolve/fetch on demand.
 - Use script parameters for fetch conditions (`--mode range --start-datetime --end-datetime`).
 - If you need polling, let OpenClaw orchestrate repeated invocations externally, not inside this skill.
+
+## OpenClaw Prompt Templates
+
+Use these templates directly in OpenClaw and only replace bracketed placeholders.
+
+1. Recon (latest availability)
+
+```text
+Use $gdelt-gkg-fetch.
+Run:
+python3 scripts/gdelt_gkg_fetch.py resolve-latest --pretty
+Return only the JSON result.
+```
+
+2. Fetch (historical window, dry-run first)
+
+```text
+Use $gdelt-gkg-fetch.
+Run:
+python3 scripts/gdelt_gkg_fetch.py fetch \
+  --mode range \
+  --start-datetime [YYYYMMDDHHMMSS] \
+  --end-datetime [YYYYMMDDHHMMSS] \
+  --max-files [N] \
+  --dry-run \
+  --pretty
+
+Then run without --dry-run using:
+  --output-dir [OUTPUT_DIR]
+  --validate-structure
+  --expected-columns 27
+  --quarantine-dir [QUARANTINE_DIR]
+Return only the JSON result.
+```
+
+3. Validate (download quality gate)
+
+```text
+Use $gdelt-gkg-fetch.
+Run:
+python3 scripts/gdelt_gkg_fetch.py fetch \
+  --mode latest \
+  --max-files 1 \
+  --output-dir [OUTPUT_DIR] \
+  --validate-structure \
+  --expected-columns 27 \
+  --quarantine-dir [QUARANTINE_DIR] \
+  --pretty
+Check validation.issue_count, decode_error_count, column_mismatch_count.
+Return JSON plus one-line pass/fail verdict.
+```
