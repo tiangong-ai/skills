@@ -85,6 +85,7 @@ python3 scripts/gdelt_events_fetch.py fetch \
 - `references/gdelt-data-sources.md`
 - `references/gdelt-limitations.md`
 - `references/env.md`
+- `references/openclaw-chaining-templates.md`
 
 ## Script
 - `scripts/gdelt_events_fetch.py`

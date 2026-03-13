@@ -84,6 +84,7 @@ python3 scripts/gdelt_doc_search.py search \
 - `references/gdelt-data-sources.md`
 - `references/gdelt-doc-search.md`
 - `references/gdelt-limitations.md`
+- `references/openclaw-chaining-templates.md`
 
 ## Script
 - `scripts/gdelt_doc_search.py`

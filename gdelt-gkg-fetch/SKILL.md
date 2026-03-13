@@ -86,6 +86,7 @@ python3 scripts/gdelt_gkg_fetch.py fetch \
 - `references/gdelt-limitations.md`
 - `references/gdelt-schema.md`
 - `references/env.md`
+- `references/openclaw-chaining-templates.md`
 
 ## Script
 - `scripts/gdelt_gkg_fetch.py`

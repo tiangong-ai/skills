@@ -1,0 +1,4 @@
+interface:
+  display_name: "Regulations.gov Comment Detail Fetch"
+  short_description: "Fetch Regulations.gov comment details with retries"
+  default_prompt: "Use $regulationsgov-comment-detail-fetch to fetch Regulations.gov comment details by IDs with retries, validation, and JSONL output."
