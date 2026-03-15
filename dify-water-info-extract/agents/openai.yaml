@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dify Water Extract"
+  short_description: "Run 智水大师 Dify on local files"
+  default_prompt: "Use $dify-water-info-extract to run the 智水大师信息萃取 Dify workflow on local transcript and image files, optionally pass filename, and return the Dify response or data.outputs."
