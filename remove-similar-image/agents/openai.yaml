@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remove Similar Image"
+  short_description: "Find similar or blurry local photos"
+  default_prompt: "Use $remove-similar-image to find similar local photos with ImageHash + OpenCV and delete duplicates or blurry shots when requested."
