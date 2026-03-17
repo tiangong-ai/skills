@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload a local file to a Dify dataset and optionally write document metadata."""
+"""Upload a local file through a published Dify pipeline and optionally write metadata."""
 
 from __future__ import annotations
 
@@ -8,21 +8,35 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, NoReturn
+
+TERMINAL_INDEXING_STATUSES = {
+    "cancelled",
+    "completed",
+    "error",
+    "failed",
+    "stopped",
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Upload a file to an existing Dify dataset and optionally update "
-            "document metadata using existing dataset metadata fields."
+            "Upload a file to a published Dify pipeline knowledge base, poll "
+            "indexing status, and optionally update document metadata."
         )
     )
     parser.add_argument("--file", required=True, help="Local file path to upload")
     parser.add_argument(
+        "--inputs-json",
+        help="Optional JSON file for the pipeline 'inputs' object. Defaults to {}.",
+    )
+    parser.add_argument(
         "--data-json",
-        help="Optional JSON file for the upload 'data' form field",
+        dest="data_json",
+        help="Deprecated alias for --inputs-json.",
     )
     parser.add_argument(
         "--metadata-json",
@@ -44,6 +58,43 @@ def parse_args() -> argparse.Namespace:
         help="Dify API key. Defaults to env DIFY_API_KEY.",
     )
     parser.add_argument(
+        "--pipeline-start-node-id",
+        help=(
+            "Optional published pipeline start node id. Defaults to env "
+            "DIFY_PIPELINE_START_NODE_ID or live datasource discovery."
+        ),
+    )
+    parser.add_argument(
+        "--pipeline-datasource-type",
+        help=(
+            "Optional pipeline datasource type. Defaults to env "
+            "DIFY_PIPELINE_DATASOURCE_TYPE or live datasource discovery."
+        ),
+    )
+    parser.add_argument(
+        "--response-mode",
+        help=(
+            "Pipeline response_mode. Defaults to env "
+            "DIFY_PIPELINE_RESPONSE_MODE or 'blocking'."
+        ),
+    )
+    parser.add_argument(
+        "--poll-interval-seconds",
+        type=float,
+        help=(
+            "Seconds between indexing-status polls. Defaults to env "
+            "DIFY_POLL_INTERVAL_SECONDS or 2."
+        ),
+    )
+    parser.add_argument(
+        "--poll-timeout-seconds",
+        type=float,
+        help=(
+            "Maximum seconds to wait for completed indexing. Defaults to env "
+            "DIFY_POLL_TIMEOUT_SECONDS or 300."
+        ),
+    )
+    parser.add_argument(
         "--metadata-page-size",
         type=int,
         default=100,
@@ -55,6 +106,44 @@ def parse_args() -> argparse.Namespace:
         help="Validate inputs and print the planned requests without calling Dify",
     )
     return parser.parse_args()
+
+
+def load_dotenv_if_exists() -> None:
+    candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parents[2] / ".env",
+    ]
+    seen: set[Path] = set()
+
+    for env_path in candidates:
+        if env_path in seen or not env_path.is_file():
+            continue
+        seen.add(env_path)
+
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            if len(value) >= 2 and (
+                (value[0] == '"' and value[-1] == '"')
+                or (value[0] == "'" and value[-1] == "'")
+            ):
+                value = value[1:-1]
+            if value == "":
+                continue
+            if key not in os.environ:
+                os.environ[key] = value
 
 
 def fail(message: str, *, exit_code: int = 1) -> NoReturn:
@@ -77,6 +166,13 @@ def require_setting(
     fail(f"Missing setting. Provide {cli_flag} or set {env_name}.")
 
 
+def optional_setting(explicit_value: str | None, *, env_name: str) -> str | None:
+    value = explicit_value or os.getenv(env_name)
+    if value:
+        return value
+    return None
+
+
 def load_json_file(path_str: str) -> Any:
     path = Path(path_str).expanduser().resolve()
     if not path.is_file():
@@ -88,24 +184,16 @@ def load_json_file(path_str: str) -> Any:
         fail(f"Invalid JSON in {path}: {exc}")
 
 
-def default_upload_data() -> dict[str, Any]:
-    return {
-        "indexing_technique": "high_quality",
-        "process_rule": {
-            "mode": "automatic",
-        },
-    }
+def default_pipeline_inputs() -> dict[str, Any]:
+    return {}
 
 
 def normalize_metadata_input(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, dict):
-        items: list[dict[str, Any]] = []
-        for name, value in raw.items():
-            items.append({"name": name, "value": value})
-        return items
+        return [{"name": name, "value": value} for name, value in raw.items()]
 
     if isinstance(raw, list):
-        items = []
+        items: list[dict[str, Any]] = []
         for index, item in enumerate(raw, start=1):
             if not isinstance(item, dict):
                 fail(f"metadata list item {index} must be an object")
@@ -117,6 +205,69 @@ def normalize_metadata_input(raw: Any) -> list[dict[str, Any]]:
         return items
 
     fail("metadata JSON must be an object or a list")
+
+
+def api_base(base_url: str) -> str:
+    return base_url.rstrip("/")
+
+
+def print_json(data: Any) -> None:
+    print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def coerce_nonempty_str(value: Any, *, field_name: str) -> str:
+    if value is None:
+        fail(f"Response is missing {field_name}")
+    text = str(value).strip()
+    if not text:
+        fail(f"Response is missing {field_name}")
+    return text
+
+
+def coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def require_positive_float(value: float, *, flag_name: str) -> float:
+    if value <= 0:
+        fail(f"{flag_name} must be greater than 0")
+    return value
+
+
+def resolve_float_setting(
+    explicit_value: float | None,
+    *,
+    env_name: str,
+    flag_name: str,
+    fallback: float,
+) -> float:
+    if explicit_value is not None:
+        return require_positive_float(explicit_value, flag_name=flag_name)
+
+    raw = os.getenv(env_name, "").strip()
+    if raw:
+        try:
+            return require_positive_float(float(raw), flag_name=env_name)
+        except ValueError:
+            fail(f"{env_name} must be a number, got: {raw!r}")
+
+    return require_positive_float(fallback, flag_name=flag_name)
 
 
 def run_curl_json(command: list[str]) -> Any:
@@ -138,19 +289,111 @@ def run_curl_json(command: list[str]) -> Any:
         fail(f"Expected JSON response from Dify, got parse error: {exc}")
 
 
-def api_base(base_url: str) -> str:
-    return base_url.rstrip("/")
-
-
-def upload_document(
+def discover_datasource_plugin(
     *,
     base_url: str,
     dataset_id: str,
     api_key: str,
+    requested_start_node_id: str | None,
+    requested_datasource_type: str | None,
+) -> tuple[dict[str, Any], Any]:
+    endpoint = f"{api_base(base_url)}/datasets/{dataset_id}/pipeline/datasource-plugins"
+    command = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
+        "--location",
+        "--get",
+        endpoint,
+        "--header",
+        f"Authorization: Bearer {api_key}",
+        "--data-urlencode",
+        "is_published=true",
+    ]
+    response = run_curl_json(command)
+
+    raw_items: list[Any]
+    if isinstance(response, list):
+        raw_items = response
+    elif isinstance(response, dict):
+        if isinstance(response.get("data"), list):
+            raw_items = response["data"]
+        elif isinstance(response.get("datasource_plugins"), list):
+            raw_items = response["datasource_plugins"]
+        else:
+            fail("Datasource discovery response is missing a datasource plugin list")
+    else:
+        fail("Datasource discovery response must be a JSON array or object")
+
+    items = [item for item in raw_items if isinstance(item, dict)]
+    if not items:
+        fail("No published datasource plugin found for this dataset")
+
+    candidates = items
+    if requested_start_node_id:
+        candidates = [
+            item for item in candidates if str(item.get("node_id", "")).strip() == requested_start_node_id
+        ]
+    if requested_datasource_type:
+        candidates = [
+            item
+            for item in candidates
+            if str(item.get("datasource_type", "")).strip() == requested_datasource_type
+        ]
+
+    if not candidates:
+        filters: list[str] = []
+        if requested_start_node_id:
+            filters.append(f"start_node_id={requested_start_node_id}")
+        if requested_datasource_type:
+            filters.append(f"datasource_type={requested_datasource_type}")
+        suffix = f" matching {' and '.join(filters)}" if filters else ""
+        fail(f"No published datasource plugin found{suffix}")
+
+    selected: dict[str, Any]
+    if len(candidates) == 1:
+        selected = candidates[0]
+    else:
+        local_file_candidates = [
+            item
+            for item in candidates
+            if str(item.get("datasource_type", "")).strip() == "local_file"
+        ]
+        if len(local_file_candidates) == 1:
+            selected = local_file_candidates[0]
+        else:
+            fail(
+                "Multiple published datasource plugins match this dataset. "
+                "Provide --pipeline-start-node-id and/or --pipeline-datasource-type."
+            )
+
+    datasource_type = requested_datasource_type or str(selected.get("datasource_type", "")).strip()
+    start_node_id = requested_start_node_id or str(selected.get("node_id", "")).strip()
+    if not datasource_type:
+        fail("Published datasource plugin is missing datasource_type")
+    if not start_node_id:
+        fail("Published datasource plugin is missing node_id")
+
+    return (
+        {
+            "datasource_type": datasource_type,
+            "plugin_id": selected.get("plugin_id"),
+            "provider_name": selected.get("provider_name"),
+            "start_node_id": start_node_id,
+            "title": selected.get("title"),
+            "user_input_variables": selected.get("user_input_variables"),
+        },
+        response,
+    )
+
+
+def upload_pipeline_file(
+    *,
+    base_url: str,
+    api_key: str,
     file_path: Path,
-    upload_data: dict[str, Any],
 ) -> dict[str, Any]:
-    endpoint = f"{api_base(base_url)}/datasets/{dataset_id}/document/create-by-file"
+    endpoint = f"{api_base(base_url)}/datasets/pipeline/file-upload"
     command = [
         "curl",
         "-sS",
@@ -162,13 +405,150 @@ def upload_document(
         "--header",
         f"Authorization: Bearer {api_key}",
         "--form",
-        f"data={json.dumps(upload_data, ensure_ascii=False)}",
-        "--form",
         f"file=@{file_path}",
     ]
     response = run_curl_json(command)
     if not isinstance(response, dict):
-        fail("Upload response must be a JSON object")
+        fail("Pipeline file-upload response must be a JSON object")
+    return response
+
+
+def run_pipeline(
+    *,
+    base_url: str,
+    dataset_id: str,
+    api_key: str,
+    inputs: dict[str, Any],
+    datasource_type: str,
+    file_id: str,
+    file_name: str,
+    start_node_id: str,
+    response_mode: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    endpoint = f"{api_base(base_url)}/datasets/{dataset_id}/pipeline/run"
+    payload = {
+        "inputs": inputs,
+        "datasource_type": datasource_type,
+        "datasource_info_list": [
+            {
+                "related_id": file_id,
+                "name": file_name,
+                "transfer_method": datasource_type,
+            }
+        ],
+        "start_node_id": start_node_id,
+        "is_published": True,
+        "response_mode": response_mode,
+    }
+    command = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
+        "--location",
+        "--request",
+        "POST",
+        endpoint,
+        "--header",
+        "Content-Type: application/json",
+        "--header",
+        f"Authorization: Bearer {api_key}",
+        "--data-binary",
+        json.dumps(payload, ensure_ascii=False),
+    ]
+    response = run_curl_json(command)
+    if not isinstance(response, dict):
+        fail("Pipeline run response must be a JSON object")
+    return response, payload
+
+
+def extract_batch_and_document_id(run_response: dict[str, Any]) -> tuple[str, str]:
+    batch = coerce_nonempty_str(run_response.get("batch"), field_name="batch")
+
+    documents = run_response.get("documents")
+    if isinstance(documents, list):
+        for item in documents:
+            if isinstance(item, dict) and item.get("id") is not None:
+                return batch, coerce_nonempty_str(item.get("id"), field_name="documents[0].id")
+
+    document = run_response.get("document")
+    if isinstance(document, dict) and document.get("id") is not None:
+        return batch, coerce_nonempty_str(document.get("id"), field_name="document.id")
+
+    fail("Pipeline run response is missing documents[0].id")
+
+
+def get_indexing_status(
+    *,
+    base_url: str,
+    dataset_id: str,
+    api_key: str,
+    batch: str,
+) -> dict[str, Any]:
+    endpoint = f"{api_base(base_url)}/datasets/{dataset_id}/documents/{batch}/indexing-status"
+    command = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
+        "--location",
+        endpoint,
+        "--header",
+        f"Authorization: Bearer {api_key}",
+    ]
+    response = run_curl_json(command)
+    if not isinstance(response, dict):
+        fail("Indexing-status response must be a JSON object")
+    return response
+
+
+def poll_indexing_status(
+    *,
+    base_url: str,
+    dataset_id: str,
+    api_key: str,
+    batch: str,
+    interval_seconds: float,
+    timeout_seconds: float,
+) -> tuple[dict[str, Any], bool]:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        response = get_indexing_status(
+            base_url=base_url,
+            dataset_id=dataset_id,
+            api_key=api_key,
+            batch=batch,
+        )
+        payload = unwrap_indexing_status_payload(response)
+        status = str(payload.get("indexing_status", "")).strip().lower()
+        if status in TERMINAL_INDEXING_STATUSES:
+            return response, False
+        if time.monotonic() >= deadline:
+            return response, True
+        time.sleep(interval_seconds)
+
+
+def get_document_details(
+    *,
+    base_url: str,
+    dataset_id: str,
+    api_key: str,
+    document_id: str,
+) -> dict[str, Any]:
+    endpoint = f"{api_base(base_url)}/datasets/{dataset_id}/documents/{document_id}"
+    command = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
+        "--location",
+        "--get",
+        endpoint,
+        "--header",
+        f"Authorization: Bearer {api_key}",
+        "--data-urlencode",
+        "metadata=without",
+    ]
+    response = run_curl_json(command)
+    if not isinstance(response, dict):
+        fail("Document detail response must be a JSON object")
     return response
 
 
@@ -335,11 +715,72 @@ def write_document_metadata(
     return response
 
 
-def print_json(data: Any) -> None:
-    print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+def unwrap_document_payload(document_response: dict[str, Any]) -> dict[str, Any]:
+    for key in ("document", "data"):
+        nested = document_response.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return document_response
+
+
+def unwrap_indexing_status_payload(indexing_status_response: dict[str, Any]) -> dict[str, Any]:
+    data = indexing_status_response.get("data")
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                return item
+    return indexing_status_response
+
+
+def build_validation_issues(
+    *,
+    indexing_status_response: dict[str, Any],
+    indexing_timed_out: bool,
+    timeout_seconds: float,
+    document_response: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    indexing_payload = unwrap_indexing_status_payload(indexing_status_response)
+    indexing_status = str(indexing_payload.get("indexing_status", "")).strip()
+    indexing_error = indexing_payload.get("error")
+    total_segments = coerce_int(indexing_payload.get("total_segments"))
+
+    document_payload = unwrap_document_payload(document_response)
+    segment_count = coerce_int(document_payload.get("segment_count"))
+    tokens = coerce_int(document_payload.get("tokens"))
+
+    if indexing_timed_out:
+        issues.append(
+            f"indexing-status polling timed out after {timeout_seconds:g} seconds"
+        )
+    elif indexing_status != "completed":
+        message = f"indexing_status is {indexing_status!r}, expected 'completed'"
+        if indexing_error:
+            message += f" (error: {indexing_error})"
+        issues.append(message)
+
+    if total_segments is None:
+        issues.append("indexing-status response is missing total_segments")
+    elif total_segments <= 0:
+        issues.append(f"indexing-status total_segments is {total_segments}, expected > 0")
+
+    if segment_count is None:
+        issues.append("document detail response is missing segment_count")
+    elif segment_count <= 0:
+        issues.append(f"document segment_count is {segment_count}, expected > 0")
+
+    if tokens is None:
+        warnings.append("document detail response is missing tokens")
+    elif tokens <= 0:
+        issues.append(f"document tokens is {tokens}, expected > 0")
+
+    return issues, warnings
 
 
 def main() -> None:
+    load_dotenv_if_exists()
     args = parse_args()
 
     file_path = Path(args.file).expanduser().resolve()
@@ -368,56 +809,133 @@ def main() -> None:
     if args.metadata_page_size <= 0:
         fail("--metadata-page-size must be greater than 0")
 
-    upload_data = default_upload_data()
-    if args.data_json:
-        loaded_data = load_json_file(args.data_json)
-        if not isinstance(loaded_data, dict):
-            fail("upload data JSON must be an object")
-        upload_data = loaded_data
+    poll_interval_seconds = resolve_float_setting(
+        args.poll_interval_seconds,
+        env_name="DIFY_POLL_INTERVAL_SECONDS",
+        flag_name="--poll-interval-seconds",
+        fallback=2.0,
+    )
+    poll_timeout_seconds = resolve_float_setting(
+        args.poll_timeout_seconds,
+        env_name="DIFY_POLL_TIMEOUT_SECONDS",
+        flag_name="--poll-timeout-seconds",
+        fallback=300.0,
+    )
+
+    inputs_json_path = args.inputs_json or args.data_json
+    pipeline_inputs = default_pipeline_inputs()
+    if inputs_json_path:
+        loaded_inputs = load_json_file(inputs_json_path)
+        if not isinstance(loaded_inputs, dict):
+            fail("pipeline inputs JSON must be an object")
+        pipeline_inputs = loaded_inputs
 
     metadata_requested: list[dict[str, Any]] = []
     if args.metadata_json:
         metadata_requested = normalize_metadata_input(load_json_file(args.metadata_json))
+
+    pipeline_start_node_id = optional_setting(
+        args.pipeline_start_node_id,
+        env_name="DIFY_PIPELINE_START_NODE_ID",
+    )
+    pipeline_datasource_type = optional_setting(
+        args.pipeline_datasource_type,
+        env_name="DIFY_PIPELINE_DATASOURCE_TYPE",
+    )
+    response_mode = require_setting(
+        args.response_mode,
+        env_name="DIFY_PIPELINE_RESPONSE_MODE",
+        cli_flag="--response-mode",
+        fallback="blocking",
+    )
+
+    discovery_endpoint = (
+        f"{api_base(base_url)}/datasets/{dataset_id}/pipeline/datasource-plugins?is_published=true"
+    )
 
     if args.dry_run:
         print_json(
             {
                 "dry_run": True,
                 "endpoints": {
-                    "upload": f"{api_base(base_url)}/datasets/{dataset_id}/document/create-by-file",
+                    "datasource_discovery": discovery_endpoint,
+                    "document_detail": f"{api_base(base_url)}/datasets/{dataset_id}/documents/{{document_id}}?metadata=without",
+                    "file_upload": f"{api_base(base_url)}/datasets/pipeline/file-upload",
+                    "indexing_status": f"{api_base(base_url)}/datasets/{dataset_id}/documents/{{batch}}/indexing-status",
                     "metadata_list": f"{api_base(base_url)}/datasets/{dataset_id}/metadata",
                     "metadata_update": f"{api_base(base_url)}/datasets/{dataset_id}/documents/metadata",
+                    "pipeline_run": f"{api_base(base_url)}/datasets/{dataset_id}/pipeline/run",
                 },
                 "file": {
                     "name": file_path.name,
                     "path": str(file_path),
                     "size_bytes": file_path.stat().st_size,
                 },
-                "upload_data": upload_data,
                 "metadata_requested": metadata_requested,
+                "pipeline_config": {
+                    "datasource_discovery": "runtime",
+                    "requested_datasource_type": pipeline_datasource_type,
+                    "requested_start_node_id": pipeline_start_node_id,
+                    "response_mode": response_mode,
+                },
+                "pipeline_inputs": pipeline_inputs,
+                "poll_interval_seconds": poll_interval_seconds,
+                "poll_timeout_seconds": poll_timeout_seconds,
             }
         )
         return
 
-    upload_response = upload_document(
+    published_pipeline, discovery_response = discover_datasource_plugin(
         base_url=base_url,
         dataset_id=dataset_id,
         api_key=api_key,
+        requested_start_node_id=pipeline_start_node_id,
+        requested_datasource_type=pipeline_datasource_type,
+    )
+    datasource_type = str(published_pipeline["datasource_type"])
+    start_node_id = str(published_pipeline["start_node_id"])
+
+    if datasource_type != "local_file":
+        fail(
+            "This skill only supports published pipeline datasource_type=local_file. "
+            f"Discovered: {datasource_type!r}"
+        )
+
+    file_upload_response = upload_pipeline_file(
+        base_url=base_url,
+        api_key=api_key,
         file_path=file_path,
-        upload_data=upload_data,
+    )
+    file_id = coerce_nonempty_str(file_upload_response.get("id"), field_name="file_upload.id")
+    file_name = coerce_nonempty_str(
+        file_upload_response.get("name") or file_path.name,
+        field_name="file_upload.name",
     )
 
-    document = upload_response.get("document")
-    if not isinstance(document, dict):
-        fail("Upload response is missing 'document' object")
+    pipeline_run_response, pipeline_run_request = run_pipeline(
+        base_url=base_url,
+        dataset_id=dataset_id,
+        api_key=api_key,
+        inputs=pipeline_inputs,
+        datasource_type=datasource_type,
+        file_id=file_id,
+        file_name=file_name,
+        start_node_id=start_node_id,
+        response_mode=response_mode,
+    )
+    batch, document_id = extract_batch_and_document_id(pipeline_run_response)
 
-    document_id = document.get("id")
-    if not isinstance(document_id, str) or not document_id:
-        fail("Upload response is missing document.id")
+    indexing_status_response, indexing_timed_out = poll_indexing_status(
+        base_url=base_url,
+        dataset_id=dataset_id,
+        api_key=api_key,
+        batch=batch,
+        interval_seconds=poll_interval_seconds,
+        timeout_seconds=poll_timeout_seconds,
+    )
 
     metadata_response: dict[str, Any] | None = None
     metadata_applied: list[dict[str, Any]] = []
-
     if metadata_requested:
         available_fields = list_metadata_fields(
             base_url=base_url,
@@ -437,15 +955,48 @@ def main() -> None:
             metadata_items=metadata_applied,
         )
 
+    document_response = get_document_details(
+        base_url=base_url,
+        dataset_id=dataset_id,
+        api_key=api_key,
+        document_id=document_id,
+    )
+
+    validation_issues, validation_warnings = build_validation_issues(
+        indexing_status_response=indexing_status_response,
+        indexing_timed_out=indexing_timed_out,
+        timeout_seconds=poll_timeout_seconds,
+        document_response=document_response,
+    )
+
     print_json(
         {
+            "batch": batch,
             "dataset_id": dataset_id,
+            "discovery_response": discovery_response,
             "document_id": document_id,
+            "document_response": document_response,
+            "file_upload_response": file_upload_response,
+            "indexing_status_response": indexing_status_response,
             "metadata_applied": metadata_applied,
             "metadata_response": metadata_response,
-            "upload_response": upload_response,
+            "pipeline_config": {
+                "datasource_type": datasource_type,
+                "response_mode": response_mode,
+                "start_node_id": start_node_id,
+            },
+            "pipeline_run_request": pipeline_run_request,
+            "pipeline_run_response": pipeline_run_response,
+            "validation": {
+                "issues": validation_issues,
+                "ok": not validation_issues,
+                "warnings": validation_warnings,
+            },
         }
     )
+
+    if validation_issues:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

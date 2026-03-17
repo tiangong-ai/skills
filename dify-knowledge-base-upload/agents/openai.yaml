@@ -1,4 +1,4 @@
 interface:
   display_name: "Dify Knowledge Base Upload"
-  short_description: "Upload files and set Dify metadata"
-  default_prompt: "Use $dify-knowledge-base-upload to upload a local file into an existing Dify dataset and apply existing metadata fields after upload."
+  short_description: "Upload files through a Dify pipeline"
+  default_prompt: "Use $dify-knowledge-base-upload to upload a local file into a published Dify pipeline knowledge base and optionally apply existing metadata fields."
