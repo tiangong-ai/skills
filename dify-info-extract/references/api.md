@@ -29,7 +29,7 @@
 - By default the script prints the full Dify response JSON.
 - When the caller only needs the workflow outputs object, use `--print-outputs-only` to print `data.outputs` when present.
 - When debugging, inspect the full JSON response first because Dify often puts run metadata and error details alongside outputs.
-- For longer runs, pass `--output-file /tmp/<name>.json` so the response is persisted even if the surrounding terminal session is interrupted.
+- For longer runs, pass both `--output-file /tmp/<name>.json` and `--state-file /tmp/<name>.state.json` so the response and progress snapshots are persisted even if the surrounding terminal session is interrupted.
 - The latest exported workflow currently exposes one main output key: `data.outputs.full_info_with_image_des`.
 - In practice this key is typically an array of downloadable file objects.
 

@@ -7,7 +7,7 @@
 
 ## Optional
 - `DIFY_WORKFLOW_USER`: caller identifier forwarded to Dify. If unset, the script uses `codex-dify-info-extract`.
-- `--env-file /path/to/file`: load settings from a dotenv-style file for this run.
+- `--env-file /path/to/.env.workflow.local`: load settings from a dotenv-style file for this run.
 
 ## Recommended local file
 - Keep app-specific secrets in a local `.env.workflow.local` file under this skill directory.

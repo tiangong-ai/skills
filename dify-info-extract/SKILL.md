@@ -24,7 +24,7 @@ description: "Call this Dify workflow by uploading local transcript documents an
 - To avoid changing global environment variables, put app-specific settings in `.env.workflow.local` under this skill.
   - Start from `.env.workflow.local.example`
   - The script auto-loads `.env.workflow.local`
-  - Or pass `--env-file /path/to/file`
+  - Or pass `--env-file /path/to/.env.workflow.local`
 - Pass local transcript or document files with `--raw-script` and local images with `--photo`. Both flags are repeatable.
 - If the caller already has a research context, pass it with `--scene` so the workflow receives it as `inputs.scene`.
 - The script uses blocking mode and prints the full JSON response by default. Use `--print-outputs-only` when only the workflow outputs object is needed.
