@@ -1,0 +1,35 @@
+# Open-Meteo Air Quality Fetch Environment
+
+- `OPEN_METEO_AIR_QUALITY_BASE_URL`
+  - Default: `https://air-quality-api.open-meteo.com/v1/air-quality`
+- `OPEN_METEO_AIR_QUALITY_API_KEY`
+  - Optional for development and evaluation.
+  - Commercial customer endpoints may require `apikey`.
+- `OPEN_METEO_AIR_QUALITY_TIMEOUT_SECONDS`
+  - Per-request timeout.
+- `OPEN_METEO_AIR_QUALITY_MAX_RETRIES`
+  - Retry count for transient HTTP and network failures.
+- `OPEN_METEO_AIR_QUALITY_RETRY_BACKOFF_SECONDS`
+  - Initial retry delay.
+- `OPEN_METEO_AIR_QUALITY_RETRY_BACKOFF_MULTIPLIER`
+  - Exponential backoff factor.
+- `OPEN_METEO_AIR_QUALITY_MIN_REQUEST_INTERVAL_SECONDS`
+  - Minimum sleep between outbound requests.
+- `OPEN_METEO_AIR_QUALITY_MAX_LOCATIONS_PER_RUN`
+  - Local safety cap for repeated `--location`.
+- `OPEN_METEO_AIR_QUALITY_MAX_DAYS_PER_RUN`
+  - Local safety cap for inclusive `start_date` to `end_date`.
+- `OPEN_METEO_AIR_QUALITY_MAX_HOURLY_VARIABLES_PER_RUN`
+  - Local safety cap for repeated `--hourly-var`.
+- `OPEN_METEO_AIR_QUALITY_MAX_RETRY_AFTER_SECONDS`
+  - Fail if server `Retry-After` exceeds this value.
+- `OPEN_METEO_AIR_QUALITY_DEFAULT_TIMEZONE`
+  - Default timezone when `--timezone` is omitted.
+- `OPEN_METEO_AIR_QUALITY_DEFAULT_DOMAIN`
+  - Default domain selector.
+  - Valid values used by this skill: `auto`, `cams_europe`, `cams_global`.
+- `OPEN_METEO_AIR_QUALITY_DEFAULT_CELL_SELECTION`
+  - Default grid-cell selection.
+  - Valid values used by this skill: `nearest`, `land`, `sea`.
+- `OPEN_METEO_AIR_QUALITY_USER_AGENT`
+  - User-Agent sent on every request.

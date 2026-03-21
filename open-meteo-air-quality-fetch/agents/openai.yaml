@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open-Meteo Air Quality Fetch"
+  short_description: "Fetch hourly air-quality background"
+  default_prompt: "Use $open-meteo-air-quality-fetch to fetch Open-Meteo air-quality data for a specified date window, coordinates, and hourly variable set with validation and logs."

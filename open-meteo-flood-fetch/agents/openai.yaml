@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open-Meteo Flood Fetch"
+  short_description: "Fetch historical and forecast flood signals"
+  default_prompt: "Use $open-meteo-flood-fetch to fetch Open-Meteo river discharge data for a specified date window and coordinates."
