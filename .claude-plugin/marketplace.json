@@ -1,0 +1,107 @@
+{
+    "name": "tiangong-ai-skills",
+    "owner": {
+        "name": "Tiangong AI",
+        "email": "li-nan@tsinghua.edu.cn"
+    },
+    "metadata": {
+        "description": "Tiangong AI skill collections for news and journal pipelines, public-opinion intelligence, environmental monitoring, knowledge-base workflows, email automation, file utilities, and engineering analysis",
+        "version": "1.0.0"
+    },
+    "plugins": [
+        {
+            "name": "news-and-journal-pipelines",
+            "description": "News, RSS, and journal ingestion pipelines for fetching metadata, enriching full text, and generating grounded summaries.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./ai-tech-rss-fetch",
+                "./ai-tech-fulltext-fetch",
+                "./ai-tech-summary",
+                "./sustainability-rss-fetch",
+                "./sustainability-fulltext-fetch",
+                "./sustainability-summary",
+                "./eceee-news-fulltext-fetch"
+            ]
+        },
+        {
+            "name": "public-opinion-and-media-intelligence",
+            "description": "Public-opinion, social-media, policy-comment, and news-intelligence skills across GDELT, Regulations.gov, YouTube, and Bluesky.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./gdelt-doc-search",
+                "./gdelt-events-fetch",
+                "./gdelt-gkg-fetch",
+                "./gdelt-mentions-fetch",
+                "./regulationsgov-comments-fetch",
+                "./regulationsgov-comment-detail-fetch",
+                "./youtube-video-search",
+                "./youtube-comments-fetch",
+                "./bluesky-cascade-fetch"
+            ]
+        },
+        {
+            "name": "environment-and-geospatial-monitoring",
+            "description": "Environmental and geospatial monitoring skills for weather, air quality, floods, fires, and observational datasets.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./open-meteo-historical-fetch",
+                "./open-meteo-air-quality-fetch",
+                "./open-meteo-flood-fetch",
+                "./openaq-data-fetch",
+                "./nasa-firms-fire-fetch"
+            ]
+        },
+        {
+            "name": "knowledge-base-and-research-ops",
+            "description": "Knowledge-base, literature, document parsing, and research workflow skills for ingestion, retrieval, metadata backfill, and notebook operations.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./dify-knowledge-base-search",
+                "./dify-knowledge-base-upload",
+                "./sci-journals-hybrid-search",
+                "./fetch-meta-to-kb",
+                "./fetch-meta-from-kb",
+                "./fetch-abstract-to-kb",
+                "./document-granular-decompose",
+                "./notebooklm-Invoke",
+                "./figshare-data-download"
+            ]
+        },
+        {
+            "name": "email-and-mailbox-automation",
+            "description": "Mailbox monitoring, message retrieval, draft staging, and outbound email delivery skills built around IMAP and SMTP workflows.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./email-imap-fetch",
+                "./email-imap-full-fetch",
+                "./email-imap-append",
+                "./email-smtp-send"
+            ]
+        },
+        {
+            "name": "file-and-image-utilities",
+            "description": "Utility skills for local file workflows, NAS file operations, image conversion, and image deduplication or cleanup.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./synology-file-station",
+                "./convert-image-to-jpg",
+                "./remove-similar-image"
+            ]
+        },
+        {
+            "name": "engineering-analysis",
+            "description": "Engineering and repository analysis skills for contribution evaluation and evidence-based reporting.",
+            "source": "./",
+            "strict": false,
+            "skills": [
+                "./github-contribution-period-analysis"
+            ]
+        }
+    ]
+}

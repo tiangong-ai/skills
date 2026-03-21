@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Video Search"
+  short_description: "Search YouTube videos by query and time window"
+  default_prompt: "Use $youtube-video-search to discover YouTube videos for a topic/domain using query terms, channel filters, time windows, retries, and JSON outputs."
