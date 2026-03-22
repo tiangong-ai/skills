@@ -1,5 +1,0 @@
-Current round: round-001
-Current stage: ready-to-prepare-round
-
-Run the next approved shell stage:
-python3 /home/fpddmw/projects/skills/eco-council-supervisor/scripts/eco_council_supervisor.py continue-run --run-dir /home/fpddmw/projects/skills/runs/eco-demo --pretty
