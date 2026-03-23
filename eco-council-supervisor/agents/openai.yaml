@@ -1,4 +1,4 @@
 interface:
   display_name: "Eco Council Supervisor"
-  short_description: "Stage-gated eco council runner and signal corpus"
-  default_prompt: "Use $eco-council-supervisor to run an audited eco-council workflow, search archived cases, or import normalized run outputs into an offline signal corpus."
+  short_description: "Audited eco-council runs with fixed OpenClaw roles"
+  default_prompt: "Use $eco-council-supervisor to initialize a run, provision the fixed OpenClaw moderator, sociologist, and environmentalist agents, and advance the audited workflow."

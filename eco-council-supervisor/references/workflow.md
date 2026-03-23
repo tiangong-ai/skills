@@ -57,7 +57,11 @@ The supervisor keeps a strict split:
 
 ## OpenClaw Note
 
-`provision-openclaw-agents` creates isolated OpenClaw agents, but it does not force a chat channel. That keeps Feishu optional. You can talk to the agents through whatever OpenClaw surface you prefer.
+- `init-run` now provisions the three fixed OpenClaw agents by default unless `--no-provision-openclaw` is used.
+- `provision-openclaw-agents` remains available as a repair/recreate command for the same three agents.
+- Each provisioned workspace now contains `IDENTITY.md` and `OPENCLAW_AGENT_GUIDE.md`.
+- The generated guide tells agents which commands are safe to inspect, which commands are reserved for the supervisor, and why.
+- Provisioning does not force a chat channel. That keeps Feishu optional. You can talk to the agents through whatever OpenClaw surface you prefer.
 
 ## Offline Signal Corpus
 

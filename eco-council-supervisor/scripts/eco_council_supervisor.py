@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,7 @@ AGENT_ID_SAFE = re.compile(r"[^a-z0-9-]+")
 ROLES = ("moderator", "sociologist", "environmentalist")
 SOURCE_SELECTION_ROLES = ("sociologist", "environmentalist")
 REPORT_ROLES = ("sociologist", "environmentalist")
+OPENCLAW_AGENT_GUIDE_FILENAME = "OPENCLAW_AGENT_GUIDE.md"
 
 STAGE_AWAITING_TASK_REVIEW = "awaiting-moderator-task-review"
 STAGE_AWAITING_SOURCE_SELECTION = "awaiting-source-selection"
@@ -374,6 +376,30 @@ def normalize_agent_prefix(value: str) -> str:
     return text or "eco-council"
 
 
+def ensure_openclaw_config(run_dir: Path, state: dict[str, Any], *, workspace_root_text: str = "") -> dict[str, Any]:
+    openclaw_section = state.setdefault("openclaw", {})
+    prefix = normalize_agent_prefix(maybe_text(openclaw_section.get("agent_prefix")) or run_dir.name)
+    openclaw_section["agent_prefix"] = prefix
+    workspace_root = (
+        Path(workspace_root_text).expanduser().resolve()
+        if workspace_root_text
+        else openclaw_workspace_root(run_dir, state)
+    )
+    openclaw_section["workspace_root"] = str(workspace_root)
+    agents = openclaw_section.setdefault("agents", {})
+    for role in ROLES:
+        role_info = agents.setdefault(role, {})
+        role_info["id"] = maybe_text(role_info.get("id")) or f"{prefix}-{role}"
+        workspace = (
+            Path(maybe_text(role_info.get("workspace"))).expanduser().resolve()
+            if maybe_text(role_info.get("workspace"))
+            else (workspace_root / role).resolve()
+        )
+        role_info["workspace"] = str(workspace)
+        role_info["guide_path"] = str((workspace / OPENCLAW_AGENT_GUIDE_FILENAME).resolve())
+    return openclaw_section
+
+
 def normalize_history_top_k(value: Any) -> int:
     try:
         count = int(value)
@@ -564,7 +590,137 @@ def role_display_name(role: str) -> str:
     }[role]
 
 
-def session_prompt_text(*, role: str, agent_id: str) -> str:
+def agent_workspace_path(state: dict[str, Any], role: str) -> Path:
+    workspace_text = maybe_text(state.get("openclaw", {}).get("agents", {}).get(role, {}).get("workspace"))
+    if not workspace_text:
+        raise ValueError(f"Missing OpenClaw workspace for role={role}")
+    return Path(workspace_text).expanduser().resolve()
+
+
+def agent_command_guide_path(*, state: dict[str, Any], role: str) -> Path:
+    workspace = agent_workspace_path(state, role)
+    return workspace / OPENCLAW_AGENT_GUIDE_FILENAME
+
+
+def supervisor_status_command(run_dir: Path) -> str:
+    return shlex.join(
+        [
+            "python3",
+            str(SCRIPT_DIR / "eco_council_supervisor.py"),
+            "status",
+            "--run-dir",
+            str(run_dir),
+            "--pretty",
+        ]
+    )
+
+
+def openclaw_agent_guide_text(*, run_dir: Path, state: dict[str, Any], role: str) -> str:
+    run_dir = run_dir.expanduser().resolve()
+    supervisor_script = SCRIPT_DIR / "eco_council_supervisor.py"
+    status_command = supervisor_status_command(run_dir)
+    continue_command = shlex.join(
+        [
+            "python3",
+            str(supervisor_script),
+            "continue-run",
+            "--run-dir",
+            str(run_dir),
+            "--yes",
+            "--pretty",
+        ]
+    )
+    run_agent_command = shlex.join(
+        [
+            "python3",
+            str(supervisor_script),
+            "run-agent-step",
+            "--run-dir",
+            str(run_dir),
+            "--role",
+            role,
+            "--yes",
+            "--pretty",
+        ]
+    )
+    provision_command = shlex.join(
+        [
+            "python3",
+            str(supervisor_script),
+            "provision-openclaw-agents",
+            "--run-dir",
+            str(run_dir),
+            "--yes",
+            "--pretty",
+        ]
+    )
+    summarize_command = shlex.join(
+        [
+            "python3",
+            str(supervisor_script),
+            "summarize-run",
+            "--run-dir",
+            str(run_dir),
+            "--lang",
+            "zh",
+            "--pretty",
+        ]
+    )
+    init_command = (
+        "python3 "
+        + str(supervisor_script)
+        + " init-run --run-dir NEW_RUN_DIR --mission-input MISSION_JSON --yes --pretty"
+    )
+    return "\n".join(
+        [
+            "# OpenClaw Agent Guide",
+            "",
+            f"Run directory: {run_dir}",
+            f"Role: {role}",
+            "",
+            "The supervisor owns stage transitions, shell stages, and JSON imports.",
+            "Role agents own only the single JSON artifact requested by the current turn.",
+            "",
+            "Local files to trust first:",
+            f"- Current step checklist: {supervisor_current_step_path(run_dir)}",
+            f"- Session prompt for this role: {session_prompt_path(run_dir, role)}",
+            f"- Supervisor outbox directory: {supervisor_outbox_dir(run_dir)}",
+            "",
+            "Command inventory:",
+            f"- `{status_command}`",
+            "  Purpose: inspect current round, current stage, prompt paths, and recommended next command.",
+            f"- `{continue_command}`",
+            "  Purpose: advance one supervisor-owned shell stage such as prepare-round, execute-fetch-plan, run-data-plane, promote-all, or advance-round. Human/supervisor only.",
+            f"- `{run_agent_command}`",
+            "  Purpose: supervisor wrapper that sends the current turn to an OpenClaw agent and imports the validated JSON reply. Do not call this from inside the agent already handling the turn.",
+            "- `python3 ... import-task-review ...` / `import-source-selection ...` / `import-report ...` / `import-decision ...` / `import-fetch-execution ...`",
+            "  Purpose: import canonical JSON after manual edits or external fetch execution. Human/supervisor only.",
+            f"- `{provision_command}`",
+            "  Purpose: create or repair the three fixed OpenClaw agents and workspace support files. Human/supervisor only.",
+            f"- `{summarize_command}`",
+            "  Purpose: render a human-readable meeting record for audit. Usually human-only.",
+            f"- `{init_command}`",
+            "  Purpose: bootstrap a brand-new run and provision agents. Human/supervisor only.",
+            "- Validation commands printed inside the active prompt or packet",
+            "  Purpose: check that the JSON artifact you just edited matches the required eco-council schema. Safe to run when the prompt explicitly asks for validation.",
+            "",
+            "Never do the following unless the human explicitly changes your role to supervisor operator:",
+            "- Do not call `continue-run`, `run-agent-step`, or any `import-*` command from inside a normal role turn.",
+            "- Do not run raw fetch shell commands during task-review, source-selection, report, or decision turns.",
+            "- Do not mutate files other than the target JSON artifact named by the current turn prompt.",
+            "- Do not invent fetch results, evidence cards, or reports outside the current stage contract.",
+        ]
+    )
+
+
+def write_openclaw_workspace_files(*, run_dir: Path, state: dict[str, Any], role: str, agent_id: str) -> None:
+    workspace = agent_workspace_path(state, role)
+    workspace.mkdir(parents=True, exist_ok=True)
+    write_text(workspace / "IDENTITY.md", identity_text(role=role, agent_id=agent_id))
+    write_text(agent_command_guide_path(state=state, role=role), openclaw_agent_guide_text(run_dir=run_dir, state=state, role=role))
+
+
+def session_prompt_text(*, run_dir: Path, state: dict[str, Any], role: str, agent_id: str) -> str:
     header = [
         f"You are the fixed {role_display_name(role)} agent for this eco-council workflow.",
         f"OpenClaw agent id: {agent_id}",
@@ -592,7 +748,16 @@ def session_prompt_text(*, role: str, agent_id: str) -> str:
             "7. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
             "8. `recommended_next_actions` must be a list of objects with `assigned_role`, `objective`, and `reason`; use [] when there are no recommendations.",
         ]
-    return "\n".join(header + rules)
+    command_notes = [
+        "",
+        "Supervisor command boundaries:",
+        f"- Command guide: {agent_command_guide_path(state=state, role=role)}",
+        f"- Safe read-only status command: {supervisor_status_command(run_dir)}",
+        "- Use validation commands from the active prompt or packet when they are explicitly requested.",
+        "- Do not call continue-run, run-agent-step, init-run, provision-openclaw-agents, or any import-* command unless the human explicitly asks you to act as the supervisor operator.",
+        "- Raw fetch shell execution stays under supervisor control. Your role turns return JSON only.",
+    ]
+    return "\n".join(header + rules + command_notes)
 
 
 def role_prompt_outbox_text(*, role: str, round_id: str, prompt_path: Path, history_path: Path | None = None) -> str:
@@ -892,16 +1057,18 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
     if not current_round_id:
         return
 
-    openclaw_section = state.setdefault("openclaw", {})
+    openclaw_section = ensure_openclaw_config(run_dir, state)
     agents = openclaw_section.setdefault("agents", {})
-    prefix = normalize_agent_prefix(maybe_text(openclaw_section.get("agent_prefix")) or run_dir.name)
 
     for role in ROLES:
-        role_agent = agents.setdefault(role, {})
-        role_agent.setdefault("id", f"{prefix}-{role}")
+        role_agent = agents[role]
+        agent_id = maybe_text(role_agent.get("id"))
+        if not agent_id:
+            raise ValueError(f"Missing OpenClaw agent id for role={role}")
+        write_openclaw_workspace_files(run_dir=run_dir, state=state, role=role, agent_id=agent_id)
         write_text(
             session_prompt_path(run_dir, role),
-            session_prompt_text(role=role, agent_id=maybe_text(role_agent.get("id"))),
+            session_prompt_text(run_dir=run_dir, state=state, role=role, agent_id=agent_id),
         )
 
     history_path = write_history_context_file(run_dir, state, current_round_id)
@@ -1008,6 +1175,7 @@ def build_state_payload(*, run_dir: Path, round_id: str, agent_prefix: str) -> d
 
 def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     run_dir = run_dir.expanduser().resolve()
+    ensure_openclaw_config(run_dir, state)
     round_id = maybe_text(state.get("current_round_id"))
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     stage = maybe_text(state.get("stage"))
@@ -2357,9 +2525,36 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
     state = build_state_payload(run_dir=run_dir, round_id=round_id, agent_prefix=args.agent_prefix)
     apply_history_cli_config(state, args)
     apply_signal_corpus_cli_config(state, args)
+    ensure_openclaw_config(run_dir, state, workspace_root_text=args.workspace_root)
+    provision_result: dict[str, Any]
     with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
         save_state(run_dir, state)
-    return build_status_payload(run_dir, state)
+        if args.no_provision_openclaw:
+            provision_result = {
+                "approved": False,
+                "skipped": True,
+                "workspace_root": maybe_text(state.get("openclaw", {}).get("workspace_root")),
+                "created_agents": [],
+            }
+        else:
+            try:
+                provision_result = provision_openclaw_agents_for_run(
+                    run_dir,
+                    state=state,
+                    workspace_root_text=args.workspace_root,
+                    assume_yes=args.yes,
+                    require_approval=True,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "init-run now provisions OpenClaw agents by default. "
+                    "Install/configure OpenClaw, pass --yes in non-interactive mode, or use --no-provision-openclaw to scaffold without agents. "
+                    f"Underlying error: {exc}"
+                ) from exc
+            save_state(run_dir, state)
+    payload = build_status_payload(run_dir, state)
+    payload["openclaw_provision"] = provision_result
+    return payload
 
 
 def command_status(args: argparse.Namespace) -> dict[str, Any]:
@@ -2846,6 +3041,7 @@ def identity_text(*, role: str, agent_id: str) -> str:
             f"- **Creature:** {values['creature']}",
             f"- **Vibe:** {values['vibe']}",
             f"- **Emoji:** {values['emoji']}",
+            f"- **Guide:** {OPENCLAW_AGENT_GUIDE_FILENAME}",
             "- **Avatar:**",
             "",
             f"Agent id: {agent_id}",
@@ -2854,15 +3050,14 @@ def identity_text(*, role: str, agent_id: str) -> str:
 
 
 def ensure_openclaw_agent(run_dir: Path, *, role: str, state: dict[str, Any]) -> dict[str, Any]:
-    openclaw_section = state.setdefault("openclaw", {})
+    openclaw_section = ensure_openclaw_config(run_dir, state)
     agents = openclaw_section.setdefault("agents", {})
     role_info = agents.setdefault(role, {})
     agent_id = maybe_text(role_info.get("id"))
     if not agent_id:
         raise ValueError(f"Missing configured agent id for role {role}")
-    workspace = Path(maybe_text(role_info.get("workspace"))).expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    write_text(workspace / "IDENTITY.md", identity_text(role=role, agent_id=agent_id))
+    write_openclaw_workspace_files(run_dir=run_dir, state=state, role=role, agent_id=agent_id)
+    workspace = agent_workspace_path(state, role)
 
     current_agents = existing_openclaw_agents()
     if agent_id not in current_agents:
@@ -2894,34 +3089,65 @@ def ensure_openclaw_agent(run_dir: Path, *, role: str, state: dict[str, Any]) ->
         cwd=REPO_DIR,
     )
     role_info["workspace"] = str(workspace)
-    return {"role": role, "agent_id": agent_id, "workspace": str(workspace)}
+    role_info["guide_path"] = str(agent_command_guide_path(state=state, role=role))
+    return {
+        "role": role,
+        "agent_id": agent_id,
+        "workspace": str(workspace),
+        "guide_path": maybe_text(role_info.get("guide_path")),
+    }
+
+
+def provision_openclaw_agents_for_run(
+    run_dir: Path,
+    *,
+    state: dict[str, Any],
+    workspace_root_text: str,
+    assume_yes: bool,
+    require_approval: bool = False,
+) -> dict[str, Any]:
+    openclaw_section = ensure_openclaw_config(run_dir, state, workspace_root_text=workspace_root_text)
+    approved = ask_for_approval(
+        "About to create or reuse three OpenClaw isolated agents for moderator/sociologist/environmentalist.",
+        assume_yes=assume_yes,
+    )
+    if not approved:
+        if require_approval:
+            raise ValueError(
+                "OpenClaw agent provisioning was declined. Re-run init-run with --yes or pass --no-provision-openclaw to skip agent creation."
+            )
+        return {
+            "approved": False,
+            "workspace_root": maybe_text(openclaw_section.get("workspace_root")),
+            "created_agents": [],
+        }
+    created = [ensure_openclaw_agent(run_dir, role=role, state=state) for role in ROLES]
+    return {
+        "approved": True,
+        "workspace_root": maybe_text(openclaw_section.get("workspace_root")),
+        "created_agents": created,
+    }
 
 
 def command_provision_openclaw_agents(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     state = load_state(run_dir)
-    workspace_root = Path(args.workspace_root).expanduser().resolve() if args.workspace_root else openclaw_workspace_root(run_dir, state)
-    state.setdefault("openclaw", {})["workspace_root"] = str(workspace_root)
-    for role in ROLES:
-        state.setdefault("openclaw", {}).setdefault("agents", {}).setdefault(role, {})["workspace"] = str(
-            (workspace_root / role).resolve()
-        )
-
-    approved = ask_for_approval(
-        "About to create or reuse three OpenClaw isolated agents for moderator/sociologist/environmentalist.",
+    result = provision_openclaw_agents_for_run(
+        run_dir,
+        state=state,
+        workspace_root_text=args.workspace_root,
         assume_yes=args.yes,
     )
-    if not approved:
+    if not result["approved"]:
         return {
             "approved": False,
             "state": build_status_payload(run_dir, state),
         }
-
-    created = [ensure_openclaw_agent(run_dir, role=role, state=state) for role in ROLES]
     save_state(run_dir, state)
     return {
         "approved": True,
-        "created_agents": created,
+        "workspace_root": result["workspace_root"],
+        "created_agents": result["created_agents"],
         "state": build_status_payload(run_dir, state),
     }
 
@@ -2930,10 +3156,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run an eco-council workflow with approval gates.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    init_run = sub.add_parser("init-run", help="Bootstrap a run and create supervisor state.")
+    init_run = sub.add_parser("init-run", help="Bootstrap a run, create supervisor state, and provision OpenClaw agents.")
     init_run.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     init_run.add_argument("--mission-input", required=True, help="Mission JSON file.")
     init_run.add_argument("--agent-prefix", default="", help="Optional OpenClaw agent id prefix.")
+    init_run.add_argument("--workspace-root", default="", help="Optional workspace root for the three OpenClaw agents.")
+    init_run.add_argument("--no-provision-openclaw", action="store_true", help="Skip automatic OpenClaw agent provisioning during init-run.")
+    init_run.add_argument("--yes", action="store_true", help="Skip interactive approval when provisioning agents.")
     init_run.add_argument("--history-db", default="", help="Optional case-library SQLite path for moderator historical context.")
     init_run.add_argument("--history-top-k", type=int, default=DEFAULT_HISTORY_TOP_K, help="Number of similar historical cases to inject into moderator turns.")
     init_run.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path for automatic post-data-plane imports.")

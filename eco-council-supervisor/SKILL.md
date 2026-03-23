@@ -11,7 +11,8 @@ Use this skill when the eco-council flow should be driven by one deterministic l
 
 1. Initialize one run with `init-run`.
    - Optionally attach one local case-library SQLite database so the moderator receives compact similar-case context automatically.
-2. Optionally create three isolated OpenClaw agents with `provision-openclaw-agents`.
+   - By default, `init-run` also provisions the fixed OpenClaw moderator/sociologist/environmentalist agents and writes their workspace guides.
+2. Use `provision-openclaw-agents` only to repair or recreate the three fixed agents later, or use `--no-provision-openclaw` at `init-run` time when you intentionally want a scaffolded run without live agents.
 3. Let the moderator review or revise `tasks.json`.
 4. Let the sociologist and environmentalist each return one audited `source-selection` object.
 5. Follow `RUN_DIR/supervisor/CURRENT_STEP.txt`.
@@ -26,13 +27,15 @@ Use this skill when the eco-council flow should be driven by one deterministic l
 
 ## Command Surface
 
-- `python3 scripts/eco_council_supervisor.py init-run --run-dir ... --mission-input ... [--history-db ... --history-top-k 3] --pretty`
+- `python3 scripts/eco_council_supervisor.py init-run --run-dir ... --mission-input ... [--workspace-root ...] [--history-db ... --history-top-k 3] [--no-provision-openclaw] [--yes] --pretty`
   - Calls `$eco-council-orchestrate bootstrap-run`.
   - Creates supervisor state plus role/session prompt files.
+  - By default, also creates or reuses the three fixed OpenClaw agents; use `--no-provision-openclaw` to skip that on purpose.
   - When `--history-db` is set, moderator task-review and decision turns also receive a compact similar-case summary from the local history library.
   - When `--signal-corpus-db` is set, every successful `run-data-plane` step also overwrites the corresponding run inside the offline signal corpus automatically.
 - `python3 scripts/eco_council_supervisor.py provision-openclaw-agents --run-dir ... --pretty`
   - Creates or reuses fixed OpenClaw agent ids for moderator, sociologist, and environmentalist.
+  - Refreshes each agent workspace `IDENTITY.md` plus `OPENCLAW_AGENT_GUIDE.md`.
 - `python3 scripts/eco_council_supervisor.py status --run-dir ... [--history-db ... --history-top-k 3] [--disable-history-context] [--signal-corpus-db ...] [--disable-signal-corpus-import] --pretty`
   - Shows current round, stage, outbox prompts, `CURRENT_STEP.txt`, the current historical-context attachment state, and the current automatic offline signal-corpus import attachment state.
 - `python3 scripts/eco_council_supervisor.py summarize-run --run-dir ... --lang zh --pretty`
@@ -90,3 +93,4 @@ Use this skill when the eco-council flow should be driven by one deterministic l
 ## References
 
 - `references/workflow.md`
+- `references/openclaw-agents.md`
