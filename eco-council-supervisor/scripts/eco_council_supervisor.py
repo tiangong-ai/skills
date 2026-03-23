@@ -25,6 +25,7 @@ ORCHESTRATE_SCRIPT = REPO_DIR / "eco-council-orchestrate" / "scripts" / "eco_cou
 REPORTING_SCRIPT = REPO_DIR / "eco-council-reporting" / "scripts" / "eco_council_reporting.py"
 CONTRACT_SCRIPT = REPO_DIR / "eco-council-data-contract" / "scripts" / "eco_council_contract.py"
 CASE_LIBRARY_SCRIPT = SKILL_DIR / "scripts" / "eco_council_case_library.py"
+SIGNAL_CORPUS_SCRIPT = SKILL_DIR / "scripts" / "eco_council_signal_corpus.py"
 
 SCHEMA_VERSION = "1.0.0"
 ROUND_ID_PATTERN = re.compile(r"^round-\d{3}$")
@@ -412,6 +413,41 @@ def history_cli_updates_requested(args: argparse.Namespace) -> bool:
     )
 
 
+def ensure_signal_corpus_config(state: dict[str, Any]) -> dict[str, Any]:
+    signal_corpus = state.get("signal_corpus")
+    if not isinstance(signal_corpus, dict):
+        signal_corpus = {}
+    signal_corpus["db"] = maybe_text(signal_corpus.get("db"))
+    signal_corpus["auto_import"] = bool(signal_corpus.get("auto_import")) if signal_corpus["db"] else False
+    signal_corpus["last_imported_round_id"] = maybe_text(signal_corpus.get("last_imported_round_id"))
+    signal_corpus["last_imported_at_utc"] = maybe_text(signal_corpus.get("last_imported_at_utc"))
+    last_import = signal_corpus.get("last_import")
+    if not isinstance(last_import, dict):
+        last_import = {}
+    signal_corpus["last_import"] = last_import
+    state["signal_corpus"] = signal_corpus
+    return signal_corpus
+
+
+def apply_signal_corpus_cli_config(state: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    signal_corpus = ensure_signal_corpus_config(state)
+    if bool(getattr(args, "disable_signal_corpus_import", False)):
+        signal_corpus["db"] = ""
+        signal_corpus["auto_import"] = False
+    elif maybe_text(getattr(args, "signal_corpus_db", "")):
+        signal_corpus["db"] = str(Path(args.signal_corpus_db).expanduser().resolve())
+        signal_corpus["auto_import"] = True
+    state["signal_corpus"] = signal_corpus
+    return signal_corpus
+
+
+def signal_corpus_cli_updates_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, "disable_signal_corpus_import", False)
+        or maybe_text(getattr(args, "signal_corpus_db", ""))
+    )
+
+
 def render_history_context_text(*, mission: dict[str, Any], search_payload: dict[str, Any]) -> str:
     cases = search_payload.get("cases") if isinstance(search_payload.get("cases"), list) else []
     region = mission.get("region") if isinstance(mission.get("region"), dict) else {}
@@ -629,9 +665,11 @@ def render_source_selection_prompt(run_dir: Path, round_id: str, role: str) -> P
         "2. Keep run_id, round_id, agent_role, task_ids, and allowed_sources aligned with the packet unless the packet itself is stale.",
         "3. selected_sources must be a subset of allowed_sources.",
         "4. Include one source_decisions entry for every allowed source with selected=true or selected=false and one concrete reason.",
-        "5. If no raw fetch is needed, keep selected_sources as [] and explain why in summary.",
-        "6. Treat task.inputs.preferred_sources only as hints. They do not auto-run.",
-        "7. If the moderator explicitly set task.inputs.required_sources upstream, treat those sources as mandatory forced sources.",
+        "4a. In each source_decisions item, use the exact key name source_skill (not source).",
+        "5. status must be exactly one of: complete, pending, blocked. For a finished selection, use complete (not completed).",
+        "6. If no raw fetch is needed, keep selected_sources as [] and explain why in summary.",
+        "7. Treat task.inputs.preferred_sources only as hints. They do not auto-run.",
+        "8. If the moderator explicitly set task.inputs.required_sources upstream, treat those sources as mandatory forced sources.",
         "",
         "After editing, validate with:",
         validate_command,
@@ -957,6 +995,13 @@ def build_state_payload(*, run_dir: Path, round_id: str, agent_prefix: str) -> d
             "db": "",
             "top_k": DEFAULT_HISTORY_TOP_K,
         },
+        "signal_corpus": {
+            "db": "",
+            "auto_import": False,
+            "last_imported_round_id": "",
+            "last_imported_at_utc": "",
+            "last_import": {},
+        },
         "updated_at_utc": utc_now_iso(),
     }
 
@@ -981,6 +1026,7 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
 
     session_paths = {role: str(session_prompt_path(run_dir, role)) for role in ROLES}
     history = ensure_history_context_config(state)
+    signal_corpus = ensure_signal_corpus_config(state)
     history_file = history_context_path(run_dir, round_id) if round_id else None
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1020,6 +1066,13 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
             "db": maybe_text(history.get("db")),
             "top_k": normalize_history_top_k(history.get("top_k")),
             "context_path": str(history_file) if history_file is not None and history_file.exists() else "",
+        },
+        "signal_corpus": {
+            "db": maybe_text(signal_corpus.get("db")),
+            "auto_import": bool(signal_corpus.get("auto_import")),
+            "last_imported_round_id": maybe_text(signal_corpus.get("last_imported_round_id")),
+            "last_imported_at_utc": maybe_text(signal_corpus.get("last_imported_at_utc")),
+            "last_import": signal_corpus.get("last_import", {}),
         },
     }
 
@@ -1733,6 +1786,41 @@ def validate_input_file(kind: str, input_path: Path) -> None:
     raise ValueError(f"Invalid {kind}: {detail}")
 
 
+def normalize_source_selection_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized = json.loads(json.dumps(payload))
+    status = maybe_text(normalized.get("status")).casefold()
+    status_aliases = {
+        "completed": "complete",
+        "complete": "complete",
+        "done": "complete",
+        "finished": "complete",
+        "in_progress": "pending",
+        "in-progress": "pending",
+        "pending": "pending",
+        "blocked": "blocked",
+    }
+    if status in status_aliases:
+        normalized["status"] = status_aliases[status]
+
+    decisions = normalized.get("source_decisions")
+    if isinstance(decisions, list):
+        fixed_decisions: list[Any] = []
+        for item in decisions:
+            if not isinstance(item, dict):
+                fixed_decisions.append(item)
+                continue
+            decision = dict(item)
+            if "source_skill" not in decision and "source" in decision:
+                decision["source_skill"] = decision.pop("source")
+            fixed_decisions.append(decision)
+        normalized["source_decisions"] = fixed_decisions
+
+    return normalized
+
+
 def load_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -2233,6 +2321,8 @@ def run_openclaw_agent_turn(
         )
 
     payload = extract_json_suffix(completed.stdout)
+    if schema_kind == "source-selection":
+        payload = normalize_source_selection_payload(payload)
     write_json(json_path, payload, pretty=True)
     validate_input_file(schema_kind, json_path)
     return {
@@ -2266,6 +2356,7 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
     round_id = latest_round_id(run_dir)
     state = build_state_payload(run_dir=run_dir, round_id=round_id, agent_prefix=args.agent_prefix)
     apply_history_cli_config(state, args)
+    apply_signal_corpus_cli_config(state, args)
     with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
         save_state(run_dir, state)
     return build_status_payload(run_dir, state)
@@ -2273,10 +2364,11 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_status(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
-    if history_cli_updates_requested(args):
+    if history_cli_updates_requested(args) or signal_corpus_cli_updates_requested(args):
         with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
             state = load_state(run_dir)
             apply_history_cli_config(state, args)
+            apply_signal_corpus_cli_config(state, args)
             save_state(run_dir, state)
         return build_status_payload(run_dir, state)
     state = load_state(run_dir)
@@ -2389,6 +2481,56 @@ def continue_execute_fetch(run_dir: Path, state: dict[str, Any], timeout_seconds
     return {"action": "execute-fetch-plan", "payload": payload, "state": build_status_payload(run_dir, state)}
 
 
+def maybe_auto_import_signal_corpus(run_dir: Path, state: dict[str, Any], round_id: str) -> dict[str, Any] | None:
+    signal_corpus = ensure_signal_corpus_config(state)
+    db_text = maybe_text(signal_corpus.get("db"))
+    if not db_text or not bool(signal_corpus.get("auto_import")):
+        return {
+            "enabled": bool(db_text),
+            "attempted": False,
+        }
+    attempted_at_utc = utc_now_iso()
+    try:
+        payload = run_json_command(
+            [
+                "python3",
+                str(SIGNAL_CORPUS_SCRIPT),
+                "import-run",
+                "--db",
+                db_text,
+                "--run-dir",
+                str(run_dir),
+                "--overwrite",
+                "--pretty",
+            ],
+            cwd=REPO_DIR,
+        )
+        result = {
+            "enabled": True,
+            "attempted": True,
+            "ok": True,
+            "db": db_text,
+            "round_id": round_id,
+            "attempted_at_utc": attempted_at_utc,
+            "import_result": payload.get("payload") if isinstance(payload, dict) and isinstance(payload.get("payload"), dict) else payload,
+        }
+        signal_corpus["last_imported_round_id"] = round_id
+        signal_corpus["last_imported_at_utc"] = attempted_at_utc
+    except Exception as exc:  # noqa: BLE001
+        result = {
+            "enabled": True,
+            "attempted": True,
+            "ok": False,
+            "db": db_text,
+            "round_id": round_id,
+            "attempted_at_utc": attempted_at_utc,
+            "error": str(exc),
+        }
+    signal_corpus["last_import"] = result
+    state["signal_corpus"] = signal_corpus
+    return result
+
+
 def continue_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
     payload = run_json_command(
@@ -2404,6 +2546,9 @@ def continue_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, A
         ],
         cwd=REPO_DIR,
     )
+    signal_corpus_import = maybe_auto_import_signal_corpus(run_dir, state, round_id)
+    if signal_corpus_import is not None and isinstance(payload, dict):
+        payload["signal_corpus_import"] = signal_corpus_import
     state["stage"] = STAGE_AWAITING_REPORTS
     state["imports"] = {
         "task_review_received": True,
@@ -2521,8 +2666,10 @@ def command_import_source_selection(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     input_path = Path(args.input).expanduser().resolve()
     role = args.role
+    payload = normalize_source_selection_payload(read_json(input_path))
+    if payload != read_json(input_path):
+        write_json(input_path, payload, pretty=True)
     validate_input_file("source-selection", input_path)
-    payload = read_json(input_path)
     with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
         state = load_state(run_dir)
         if maybe_text(state.get("stage")) != STAGE_AWAITING_SOURCE_SELECTION:
@@ -2789,6 +2936,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_run.add_argument("--agent-prefix", default="", help="Optional OpenClaw agent id prefix.")
     init_run.add_argument("--history-db", default="", help="Optional case-library SQLite path for moderator historical context.")
     init_run.add_argument("--history-top-k", type=int, default=DEFAULT_HISTORY_TOP_K, help="Number of similar historical cases to inject into moderator turns.")
+    init_run.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path for automatic post-data-plane imports.")
     init_run.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     provision = sub.add_parser("provision-openclaw-agents", help="Create or reuse three isolated OpenClaw agents.")
@@ -2802,6 +2950,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--history-db", default="", help="Optional case-library SQLite path to attach for moderator historical context.")
     status.add_argument("--history-top-k", type=int, default=0, help="Optional override for moderator historical-case count.")
     status.add_argument("--disable-history-context", action="store_true", help="Disable moderator historical-case context for this run.")
+    status.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path to attach for automatic post-data-plane imports.")
+    status.add_argument("--disable-signal-corpus-import", action="store_true", help="Disable automatic post-data-plane signal-corpus imports for this run.")
     status.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     summarize = sub.add_parser("summarize-run", help="Render one human-readable run report from the run directory.")
