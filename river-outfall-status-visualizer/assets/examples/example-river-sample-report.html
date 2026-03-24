@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>样例河道A排口状态可视化图</title>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --grid: #dbe4ef;
+      --line: #94a3b8;
+      --safe: #15803d;
+      --partial: #ea580c;
+      --submerged: #b91c1c;
+      --unknown: #64748b;
+      --left-bank: #0f766e;
+      --right-bank: #1d4ed8;
+      --riverbed: #8b5a2b;
+      --levee: #64748b;
+      --water-fill: rgba(59, 130, 246, 0.24);
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f8fbfd 0%, var(--bg) 100%);
+      color: var(--ink);
+      overflow-x: hidden;
+    }
+
+    .page {
+      width: min(1700px, calc(100vw - 32px));
+      margin: 18px auto 28px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .page > *,
+    .panel {
+      min-width: 0;
+      background: var(--panel);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 18px 20px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 12px;
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 32%),
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
+        var(--panel);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0.02em;
+    }
+
+    .hero p,
+    .footer-note,
+    .summary-box p,
+    .summary-box ul {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .note-row,
+    .control-row,
+    .legend-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 12px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .control-row .footer-note,
+    .timeline-head .footer-note {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .control-row .footer-note {
+      flex: 1 1 320px;
+      text-align: right;
+    }
+
+    .chip,
+    .chip-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #dbe4ef;
+      background: #f8fafc;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1;
+      user-select: none;
+    }
+
+    .chip::before,
+    .chip-toggle::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #94a3b8;
+      flex: 0 0 auto;
+    }
+
+    .chip.safe::before { background: var(--safe); }
+    .chip.partial::before { background: var(--partial); }
+    .chip.submerged::before { background: var(--submerged); }
+    .chip.unknown::before { background: var(--unknown); }
+    .chip.line-chip::before {
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .chip.fill-chip::before {
+      width: 12px;
+      height: 12px;
+      border-radius: 4px;
+      background: var(--water-fill);
+      border: 1px solid rgba(37, 99, 235, 0.24);
+    }
+
+    .chip-toggle {
+      cursor: pointer;
+      transition: 140ms ease;
+    }
+
+    .chip-toggle.bank-left::before { background: var(--left-bank); }
+    .chip-toggle.bank-right::before { background: var(--right-bank); }
+    .chip-toggle.bank-unknown::before { background: var(--unknown); }
+    .chip-toggle.off {
+      background: #ffffff;
+      color: #94a3b8;
+      border-style: dashed;
+    }
+    .chip-toggle.off::before { opacity: 0.28; }
+
+    .scenario-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .scenario-bar button {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      color: var(--ink);
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: 160ms ease;
+    }
+
+    .scenario-bar button.active {
+      color: #ffffff;
+      border-color: transparent;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+      transform: translateY(-1px);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat-card {
+      padding: 16px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+      border: 1px solid #e2e8f0;
+      display: grid;
+      gap: 8px;
+    }
+
+    .stat-card strong {
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .stat-card .label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chart-panel {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .chart-host {
+      position: relative;
+      width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid #dbe4ef;
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.96) 100%);
+      cursor: grab;
+      user-select: none;
+    }
+
+    .chart-host.dragging {
+      cursor: grabbing;
+    }
+
+    #chartCanvas,
+    #timelineCanvas {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .timeline-shell {
+      min-width: 0;
+      border: 1px solid #dbe4ef;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      padding: 10px 12px 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .timeline-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .summary-box {
+      display: grid;
+      gap: 12px;
+    }
+
+    .summary-box h2,
+    .table-panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .summary-box ul {
+      padding-left: 20px;
+    }
+
+    .code-list {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: var(--ink);
+      min-height: 48px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      padding: 10px 8px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    thead th {
+      background: #f8fafc;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .table-wrap {
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    @media (max-width: 1200px) {
+      .summary-grid,
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .page {
+        width: calc(100vw - 20px);
+        margin: 10px auto 18px;
+        gap: 12px;
+      }
+
+      .panel {
+        padding: 14px 14px;
+        border-radius: 16px;
+      }
+
+      .hero h1 {
+        font-size: 22px;
+      }
+
+      .control-row {
+        justify-content: flex-start !important;
+      }
+
+      .control-row .footer-note,
+      .timeline-head .footer-note {
+        flex-basis: 100%;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="panel hero">
+      <div>
+        <h1>样例河道A排口状态可视化图</h1>
+        <p id="heroText"></p>
+      </div>
+      <div class="note-row" id="noteRow"></div>
+    </section>
+
+    <section class="panel">
+      <div class="control-row" style="justify-content: space-between;">
+        <div class="scenario-bar" id="scenarioBar"></div>
+        <div class="footer-note">在主图区域滚动鼠标滚轮缩放，按住拖拽可平移，下方总览条用于快速定位。</div>
+      </div>
+    </section>
+
+    <section class="panel stats-grid">
+      <div class="stat-card">
+        <span class="label">当前显示排口数</span>
+        <strong id="totalCount">0</strong>
+      </div>
+      <div class="stat-card">
+        <span class="label">左/右岸分布</span>
+        <strong id="bankCount">0 / 0</strong>
+      </div>
+      <div class="stat-card">
+        <span class="label">未受淹</span>
+        <strong id="safeCount" style="color: var(--safe);">0</strong>
+      </div>
+      <div class="stat-card">
+        <span class="label">部分受淹</span>
+        <strong id="partialCount" style="color: var(--partial);">0</strong>
+      </div>
+      <div class="stat-card">
+        <span class="label">完全淹没</span>
+        <strong id="submergedCount" style="color: var(--submerged);">0</strong>
+      </div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="legend-row" id="legendRow"></div>
+      <div class="chart-host" id="chartHost">
+        <canvas id="chartCanvas"></canvas>
+      </div>
+      <div class="timeline-shell">
+        <div class="timeline-head">
+          <strong>河道总览</strong>
+          <div class="footer-note" id="timelineInfo"></div>
+        </div>
+        <canvas id="timelineCanvas"></canvas>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <section class="panel summary-box">
+        <h2>场景摘要</h2>
+        <p id="scenarioSummary"></p>
+        <div>
+          <div class="footer-note">完全淹没排口</div>
+          <div class="code-list" id="submergedCodes"></div>
+        </div>
+        <div>
+          <div class="footer-note">部分受淹排口</div>
+          <div class="code-list" id="partialCodes"></div>
+        </div>
+      </section>
+
+      <section class="panel summary-box">
+        <h2>数据提示</h2>
+        <ul id="warningList"></ul>
+      </section>
+    </section>
+
+    <section class="panel table-panel">
+      <h2>排口明细</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>名称</th>
+              <th>代码</th>
+              <th>岸别</th>
+              <th>尺寸</th>
+              <th>里程</th>
+              <th>底高程</th>
+              <th>口顶高程</th>
+              <th>河底高程</th>
+              <th>堤顶高程</th>
+              <th id="scenarioLevelHeader">当前水位</th>
+              <th id="scenarioStatusHeader">当前状态</th>
+            </tr>
+          </thead>
+          <tbody id="detailBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const REPORT = {"source_name": "example-river-sample", "river_name": "样例河道A", "outfalls": [{"row_index": 3, "number": "1", "name": "样例排口01", "display_name": "样例排口01", "code": "A0001", "size_text": "1600*1200", "shape": "rect", "width_m": 1.6, "height_m": 1.2, "diameter_mm": null, "width_mm": 1600.0, "height_mm": 1200.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 180.0, "base_elev": 22.65, "crown_elev": 23.849999999999998, "bed_elev": 18.2, "levee_elev": 25.4, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "statuses": {"current": {"level": 22.1, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 21.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 23.05, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.40000000000000213}, "flood50": {"level": 23.85, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "1", "排口名称": "样例排口01", "代码": "A0001", "尺寸": "1600*1200", "底高程": "22.65", "河底高程": "18.2", "堤顶高程": "25.4", "里程": "180", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "22.1", "所属河道常水位": "21.7", "所属河道20年一遇水位": "23.05", "所属河道50年一遇水位": "23.85"}}, {"row_index": 4, "number": "2", "name": "样例排口02", "display_name": "样例排口02", "code": "A0002", "size_text": "800", "shape": "circle", "width_m": 0.8, "height_m": 0.8, "diameter_mm": 800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 430.0, "base_elev": 21.45, "crown_elev": 22.25, "bed_elev": 18.2, "levee_elev": 25.4, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "statuses": {"current": {"level": 22.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.6500000000000021}, "normal": {"level": 21.7, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.25}, "flood20": {"level": 23.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}, "flood50": {"level": 23.85, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "2", "排口名称": "样例排口02", "代码": "A0002", "尺寸": "800", "底高程": "21.45", "河底高程": "18.2", "堤顶高程": "25.4", "里程": "430", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "22.1", "所属河道常水位": "21.7", "所属河道20年一遇水位": "23.05", "所属河道50年一遇水位": "23.85"}}, {"row_index": 5, "number": "3", "name": "样例排口03", "display_name": "样例排口03", "code": "A0003", "size_text": "1000", "shape": "circle", "width_m": 1.0, "height_m": 1.0, "diameter_mm": 1000.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 710.0, "base_elev": 22.05, "crown_elev": 23.05, "bed_elev": 18.2, "levee_elev": 25.4, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "statuses": {"current": {"level": 22.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.05000000000000071}, "normal": {"level": 21.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 23.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}, "flood50": {"level": 23.85, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}}, "reach_name": "", "raw": {"排河口编号": "3", "排口名称": "样例排口03", "代码": "A0003", "尺寸": "1000", "底高程": "22.05", "河底高程": "18.2", "堤顶高程": "25.4", "里程": "710", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "22.1", "所属河道常水位": "21.7", "所属河道20年一遇水位": "23.05", "所属河道50年一遇水位": "23.85"}}, {"row_index": 6, "number": "4", "name": "样例排口04", "display_name": "样例排口04", "code": "A0004", "size_text": "2400*1800", "shape": "rect", "width_m": 2.4, "height_m": 1.8, "diameter_mm": null, "width_mm": 2400.0, "height_mm": 1800.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 980.0, "base_elev": 23.05, "crown_elev": 24.85, "bed_elev": 18.2, "levee_elev": 25.4, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "statuses": {"current": {"level": 22.1, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 21.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 23.05, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood50": {"level": 23.85, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "4", "排口名称": "样例排口04", "代码": "A0004", "尺寸": "2400*1800", "底高程": "23.05", "河底高程": "18.2", "堤顶高程": "25.4", "里程": "980", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "22.1", "所属河道常水位": "21.7", "所属河道20年一遇水位": "23.05", "所属河道50年一遇水位": "23.85"}}, {"row_index": 7, "number": "5", "name": "样例排口05", "display_name": "样例排口05", "code": "A0005", "size_text": "1500", "shape": "circle", "width_m": 1.5, "height_m": 1.5, "diameter_mm": 1500.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 1260.0, "base_elev": 21.0, "crown_elev": 22.5, "bed_elev": 18.2, "levee_elev": 25.4, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "statuses": {"current": {"level": 22.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.1000000000000014}, "normal": {"level": 21.7, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.6999999999999993}, "flood20": {"level": 23.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.5}, "flood50": {"level": 23.85, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.5}}, "reach_name": "", "raw": {"排河口编号": "5", "排口名称": "样例排口05", "代码": "A0005", "尺寸": "1500", "底高程": "21", "河底高程": "18.2", "堤顶高程": "25.4", "里程": "1260", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "22.1", "所属河道常水位": "21.7", "所属河道20年一遇水位": "23.05", "所属河道50年一遇水位": "23.85"}}, {"row_index": 9, "number": "6", "name": "样例排口06", "display_name": "样例排口06", "code": "A0006", "size_text": "1800", "shape": "circle", "width_m": 1.8, "height_m": 1.8, "diameter_mm": 1800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 1580.0, "base_elev": 20.9, "crown_elev": 22.7, "bed_elev": 17.35, "levee_elev": 24.75, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "statuses": {"current": {"level": 21.15, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.25}, "normal": {"level": 20.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 22.5, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.6000000000000014}, "flood50": {"level": 23.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "6", "排口名称": "样例排口06", "代码": "A0006", "尺寸": "1800", "底高程": "20.9", "河底高程": "17.35", "堤顶高程": "24.75", "里程": "1580", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "21.15", "所属河道常水位": "20.75", "所属河道20年一遇水位": "22.5", "所属河道50年一遇水位": "23.2"}}, {"row_index": 10, "number": "7", "name": "样例排口07", "display_name": "样例排口07", "code": "A0007", "size_text": "4200*3000", "shape": "rect", "width_m": 4.2, "height_m": 3.0, "diameter_mm": null, "width_mm": 4200.0, "height_mm": 3000.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 1870.0, "base_elev": 21.6, "crown_elev": 24.6, "bed_elev": 17.35, "levee_elev": 24.75, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "statuses": {"current": {"level": 21.15, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 20.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 22.5, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8999999999999986}, "flood50": {"level": 23.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.5999999999999979}}, "reach_name": "", "raw": {"排河口编号": "7", "排口名称": "样例排口07", "代码": "A0007", "尺寸": "4200*3000", "底高程": "21.6", "河底高程": "17.35", "堤顶高程": "24.75", "里程": "1870", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "21.15", "所属河道常水位": "20.75", "所属河道20年一遇水位": "22.5", "所属河道50年一遇水位": "23.2"}}, {"row_index": 11, "number": "8", "name": "样例排口08", "display_name": "样例排口08", "code": "A0008", "size_text": "2200", "shape": "circle", "width_m": 2.2, "height_m": 2.2, "diameter_mm": 2200.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 2140.0, "base_elev": 19.7, "crown_elev": 21.9, "bed_elev": 17.35, "levee_elev": 24.75, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "statuses": {"current": {"level": 21.15, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.4499999999999993}, "normal": {"level": 20.75, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.0500000000000007}, "flood20": {"level": 22.5, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.1999999999999993}, "flood50": {"level": 23.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "8", "排口名称": "样例排口08", "代码": "A0008", "尺寸": "2200", "底高程": "19.7", "河底高程": "17.35", "堤顶高程": "24.75", "里程": "2140", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "21.15", "所属河道常水位": "20.75", "所属河道20年一遇水位": "22.5", "所属河道50年一遇水位": "23.2"}}, {"row_index": 12, "number": "9", "name": "样例排口09", "display_name": "样例排口09", "code": "A0009", "size_text": "600", "shape": "circle", "width_m": 0.6, "height_m": 0.6, "diameter_mm": 600.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 2430.0, "base_elev": 22.3, "crown_elev": 22.900000000000002, "bed_elev": 17.35, "levee_elev": 24.75, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "statuses": {"current": {"level": 21.15, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 20.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 22.5, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.1999999999999993}, "flood50": {"level": 23.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}}, "reach_name": "", "raw": {"排河口编号": "9", "排口名称": "样例排口09", "代码": "A0009", "尺寸": "600", "底高程": "22.3", "河底高程": "17.35", "堤顶高程": "24.75", "里程": "2430", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "21.15", "所属河道常水位": "20.75", "所属河道20年一遇水位": "22.5", "所属河道50年一遇水位": "23.2"}}, {"row_index": 13, "number": "10", "name": "样例排口10", "display_name": "样例排口10", "code": "A0010", "size_text": "2200*1500", "shape": "rect", "width_m": 2.2, "height_m": 1.5, "diameter_mm": null, "width_mm": 2200.0, "height_mm": 1500.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 2720.0, "base_elev": 21.3, "crown_elev": 22.8, "bed_elev": 17.35, "levee_elev": 24.75, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "statuses": {"current": {"level": 21.15, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 20.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 22.5, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.1999999999999993}, "flood50": {"level": 23.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.5}}, "reach_name": "", "raw": {"排河口编号": "10", "排口名称": "样例排口10", "代码": "A0010", "尺寸": "2200*1500", "底高程": "21.3", "河底高程": "17.35", "堤顶高程": "24.75", "里程": "2720", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "21.15", "所属河道常水位": "20.75", "所属河道20年一遇水位": "22.5", "所属河道50年一遇水位": "23.2"}}, {"row_index": 15, "number": "11", "name": "样例排口11", "display_name": "样例排口11", "code": "A0011", "size_text": "1000", "shape": "circle", "width_m": 1.0, "height_m": 1.0, "diameter_mm": 1000.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 3050.0, "base_elev": 19.35, "crown_elev": 20.35, "bed_elev": 16.4, "levee_elev": 23.9, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "statuses": {"current": {"level": 20.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8499999999999979}, "normal": {"level": 19.75, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.3999999999999986}, "flood20": {"level": 21.55, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}, "flood50": {"level": 22.35, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}}, "reach_name": "", "raw": {"排河口编号": "11", "排口名称": "样例排口11", "代码": "A0011", "尺寸": "1000", "底高程": "19.35", "河底高程": "16.4", "堤顶高程": "23.9", "里程": "3050", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "20.2", "所属河道常水位": "19.75", "所属河道20年一遇水位": "21.55", "所属河道50年一遇水位": "22.35"}}, {"row_index": 16, "number": "12", "name": "样例排口12", "display_name": "样例排口12", "code": "A0012", "size_text": "1200", "shape": "circle", "width_m": 1.2, "height_m": 1.2, "diameter_mm": 1200.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 3340.0, "base_elev": 19.8, "crown_elev": 21.0, "bed_elev": 16.4, "levee_elev": 23.9, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "statuses": {"current": {"level": 20.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.3999999999999986}, "normal": {"level": 19.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 21.55, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "flood50": {"level": 22.35, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "12", "排口名称": "样例排口12", "代码": "A0012", "尺寸": "1200", "底高程": "19.8", "河底高程": "16.4", "堤顶高程": "23.9", "里程": "3340", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "20.2", "所属河道常水位": "19.75", "所属河道20年一遇水位": "21.55", "所属河道50年一遇水位": "22.35"}}, {"row_index": 17, "number": "13", "name": "样例排口13", "display_name": "样例排口13", "code": "A0013", "size_text": "3600*2400", "shape": "rect", "width_m": 3.6, "height_m": 2.4, "diameter_mm": null, "width_mm": 3600.0, "height_mm": 2400.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 3620.0, "base_elev": 20.9, "crown_elev": 23.299999999999997, "bed_elev": 16.4, "levee_elev": 23.9, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "statuses": {"current": {"level": 20.2, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 19.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 21.55, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.6500000000000021}, "flood50": {"level": 22.35, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.4500000000000028}}, "reach_name": "", "raw": {"排河口编号": "13", "排口名称": "样例排口13", "代码": "A0013", "尺寸": "3600*2400", "底高程": "20.9", "河底高程": "16.4", "堤顶高程": "23.9", "里程": "3620", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "20.2", "所属河道常水位": "19.75", "所属河道20年一遇水位": "21.55", "所属河道50年一遇水位": "22.35"}}, {"row_index": 18, "number": "14", "name": "样例排口14", "display_name": "样例排口14", "code": "A0014", "size_text": "1800", "shape": "circle", "width_m": 1.8, "height_m": 1.8, "diameter_mm": 1800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 3890.0, "base_elev": 18.9, "crown_elev": 20.7, "bed_elev": 16.4, "levee_elev": 23.9, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "statuses": {"current": {"level": 20.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.3000000000000007}, "normal": {"level": 19.75, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8500000000000014}, "flood20": {"level": 21.55, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}, "flood50": {"level": 22.35, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "14", "排口名称": "样例排口14", "代码": "A0014", "尺寸": "1800", "底高程": "18.9", "河底高程": "16.4", "堤顶高程": "23.9", "里程": "3890", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "20.2", "所属河道常水位": "19.75", "所属河道20年一遇水位": "21.55", "所属河道50年一遇水位": "22.35"}}, {"row_index": 19, "number": "15", "name": "样例排口15", "display_name": "样例排口15", "code": "A0015", "size_text": "2000", "shape": "circle", "width_m": 2.0, "height_m": 2.0, "diameter_mm": 2000.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 4170.0, "base_elev": 20.2, "crown_elev": 22.2, "bed_elev": 16.4, "levee_elev": 23.9, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "statuses": {"current": {"level": 20.2, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 19.75, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 21.55, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.3500000000000014}, "flood50": {"level": 22.35, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.0}}, "reach_name": "", "raw": {"排河口编号": "15", "排口名称": "样例排口15", "代码": "A0015", "尺寸": "2000", "底高程": "20.2", "河底高程": "16.4", "堤顶高程": "23.9", "里程": "4170", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "20.2", "所属河道常水位": "19.75", "所属河道20年一遇水位": "21.55", "所属河道50年一遇水位": "22.35"}}, {"row_index": 21, "number": "16", "name": "样例排口16", "display_name": "样例排口16", "code": "A0016", "size_text": "1800*1200", "shape": "rect", "width_m": 1.8, "height_m": 1.2, "diameter_mm": null, "width_mm": 1800.0, "height_mm": 1200.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 4470.0, "base_elev": 20.45, "crown_elev": 21.65, "bed_elev": 15.5, "levee_elev": 23.05, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}, "statuses": {"current": {"level": 19.2, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 18.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 20.8, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.3500000000000014}, "flood50": {"level": 21.7, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "16", "排口名称": "样例排口16", "代码": "A0016", "尺寸": "1800*1200", "底高程": "20.45", "河底高程": "15.5", "堤顶高程": "23.05", "里程": "4470", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "19.2", "所属河道常水位": "18.7", "所属河道20年一遇水位": "20.8", "所属河道50年一遇水位": "21.7"}}, {"row_index": 22, "number": "17", "name": "样例排口17", "display_name": "样例排口17", "code": "A0017", "size_text": "600", "shape": "circle", "width_m": 0.6, "height_m": 0.6, "diameter_mm": 600.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 4760.0, "base_elev": 17.5, "crown_elev": 18.1, "bed_elev": 15.5, "levee_elev": 23.05, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}, "statuses": {"current": {"level": 19.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}, "normal": {"level": 18.7, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}, "flood20": {"level": 20.8, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}, "flood50": {"level": 21.7, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}}, "reach_name": "", "raw": {"排河口编号": "17", "排口名称": "样例排口17", "代码": "A0017", "尺寸": "600", "底高程": "17.5", "河底高程": "15.5", "堤顶高程": "23.05", "里程": "4760", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "19.2", "所属河道常水位": "18.7", "所属河道20年一遇水位": "20.8", "所属河道50年一遇水位": "21.7"}}, {"row_index": 23, "number": "18", "name": "样例排口18", "display_name": "样例排口18", "code": "A0018", "size_text": "800", "shape": "circle", "width_m": 0.8, "height_m": 0.8, "diameter_mm": 800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 5060.0, "base_elev": 18.95, "crown_elev": 19.75, "bed_elev": 15.5, "levee_elev": 23.05, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}, "statuses": {"current": {"level": 19.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.25}, "normal": {"level": 18.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 20.8, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}, "flood50": {"level": 21.7, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "18", "排口名称": "样例排口18", "代码": "A0018", "尺寸": "800", "底高程": "18.95", "河底高程": "15.5", "堤顶高程": "23.05", "里程": "5060", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "19.2", "所属河道常水位": "18.7", "所属河道20年一遇水位": "20.8", "所属河道50年一遇水位": "21.7"}}, {"row_index": 24, "number": "19", "name": "样例排口19", "display_name": "样例排口19", "code": "A0019", "size_text": "3000*2000", "shape": "rect", "width_m": 3.0, "height_m": 2.0, "diameter_mm": null, "width_mm": 3000.0, "height_mm": 2000.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 5360.0, "base_elev": 19.45, "crown_elev": 21.45, "bed_elev": 15.5, "levee_elev": 23.05, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}, "statuses": {"current": {"level": 19.2, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 18.7, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 20.8, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.3500000000000014}, "flood50": {"level": 21.7, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.0}}, "reach_name": "", "raw": {"排河口编号": "19", "排口名称": "样例排口19", "代码": "A0019", "尺寸": "3000*2000", "底高程": "19.45", "河底高程": "15.5", "堤顶高程": "23.05", "里程": "5360", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "19.2", "所属河道常水位": "18.7", "所属河道20年一遇水位": "20.8", "所属河道50年一遇水位": "21.7"}}, {"row_index": 26, "number": "20", "name": "样例排口20", "display_name": "样例排口20", "code": "A0020", "size_text": "1200", "shape": "circle", "width_m": 1.2, "height_m": 1.2, "diameter_mm": 1200.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 5660.0, "base_elev": 17.25, "crown_elev": 18.45, "bed_elev": 14.65, "levee_elev": 22.1, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "statuses": {"current": {"level": 18.25, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.0}, "normal": {"level": 17.8, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.5500000000000007}, "flood20": {"level": 19.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "flood50": {"level": 20.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "20", "排口名称": "样例排口20", "代码": "A0020", "尺寸": "1200", "底高程": "17.25", "河底高程": "14.65", "堤顶高程": "22.1", "里程": "5660", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "18.25", "所属河道常水位": "17.8", "所属河道20年一遇水位": "19.95", "所属河道50年一遇水位": "20.9"}}, {"row_index": 27, "number": "21", "name": "样例排口21", "display_name": "样例排口21", "code": "A0021", "size_text": "1500", "shape": "circle", "width_m": 1.5, "height_m": 1.5, "diameter_mm": 1500.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 5960.0, "base_elev": 18.75, "crown_elev": 20.25, "bed_elev": 14.65, "levee_elev": 22.1, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "statuses": {"current": {"level": 18.25, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 17.8, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 19.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.1999999999999993}, "flood50": {"level": 20.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.5}}, "reach_name": "", "raw": {"排河口编号": "21", "排口名称": "样例排口21", "代码": "A0021", "尺寸": "1500", "底高程": "18.75", "河底高程": "14.65", "堤顶高程": "22.1", "里程": "5960", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "18.25", "所属河道常水位": "17.8", "所属河道20年一遇水位": "19.95", "所属河道50年一遇水位": "20.9"}}, {"row_index": 28, "number": "22", "name": "样例排口22", "display_name": "样例排口22", "code": "A0022", "size_text": "1600*1200", "shape": "rect", "width_m": 1.6, "height_m": 1.2, "diameter_mm": null, "width_mm": 1600.0, "height_mm": 1200.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 6260.0, "base_elev": 17.55, "crown_elev": 18.75, "bed_elev": 14.65, "levee_elev": 22.1, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "statuses": {"current": {"level": 18.25, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.6999999999999993}, "normal": {"level": 17.8, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.25}, "flood20": {"level": 19.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "flood50": {"level": 20.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "22", "排口名称": "样例排口22", "代码": "A0022", "尺寸": "1600*1200", "底高程": "17.55", "河底高程": "14.65", "堤顶高程": "22.1", "里程": "6260", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "18.25", "所属河道常水位": "17.8", "所属河道20年一遇水位": "19.95", "所属河道50年一遇水位": "20.9"}}, {"row_index": 29, "number": "23", "name": "样例排口23", "display_name": "样例排口23", "code": "A0023", "size_text": "2000", "shape": "circle", "width_m": 2.0, "height_m": 2.0, "diameter_mm": 2000.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 6560.0, "base_elev": 18.15, "crown_elev": 20.15, "bed_elev": 14.65, "levee_elev": 22.1, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "statuses": {"current": {"level": 18.25, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.10000000000000142}, "normal": {"level": 17.8, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 19.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.8000000000000007}, "flood50": {"level": 20.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.0}}, "reach_name": "", "raw": {"排河口编号": "23", "排口名称": "样例排口23", "代码": "A0023", "尺寸": "2000", "底高程": "18.15", "河底高程": "14.65", "堤顶高程": "22.1", "里程": "6560", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "18.25", "所属河道常水位": "17.8", "所属河道20年一遇水位": "19.95", "所属河道50年一遇水位": "20.9"}}, {"row_index": 30, "number": "24", "name": "样例排口24", "display_name": "样例排口24", "code": "A0024", "size_text": "2200", "shape": "circle", "width_m": 2.2, "height_m": 2.2, "diameter_mm": 2200.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 6860.0, "base_elev": 19.15, "crown_elev": 21.349999999999998, "bed_elev": 14.65, "levee_elev": 22.1, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "statuses": {"current": {"level": 18.25, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 17.8, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 19.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8000000000000007}, "flood50": {"level": 20.9, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.75}}, "reach_name": "", "raw": {"排河口编号": "24", "排口名称": "样例排口24", "代码": "A0024", "尺寸": "2200", "底高程": "19.15", "河底高程": "14.65", "堤顶高程": "22.1", "里程": "6860", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "18.25", "所属河道常水位": "17.8", "所属河道20年一遇水位": "19.95", "所属河道50年一遇水位": "20.9"}}, {"row_index": 32, "number": "25", "name": "样例排口25", "display_name": "样例排口25", "code": "A0025", "size_text": "2400*1800", "shape": "rect", "width_m": 2.4, "height_m": 1.8, "diameter_mm": null, "width_mm": 2400.0, "height_mm": 1800.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 7160.0, "base_elev": 16.25, "crown_elev": 18.05, "bed_elev": 13.9, "levee_elev": 21.15, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "statuses": {"current": {"level": 17.4, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.1499999999999986}, "normal": {"level": 16.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.6999999999999993}, "flood20": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}, "flood50": {"level": 20.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "25", "排口名称": "样例排口25", "代码": "A0025", "尺寸": "2400*1800", "底高程": "16.25", "河底高程": "13.9", "堤顶高程": "21.15", "里程": "7160", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "17.4", "所属河道常水位": "16.95", "所属河道20年一遇水位": "18.95", "所属河道50年一遇水位": "20.05"}}, {"row_index": 33, "number": "26", "name": "样例排口26", "display_name": "样例排口26", "code": "A0026", "size_text": "800", "shape": "circle", "width_m": 0.8, "height_m": 0.8, "diameter_mm": 800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 7460.0, "base_elev": 17.1, "crown_elev": 17.900000000000002, "bed_elev": 13.9, "levee_elev": 21.15, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "statuses": {"current": {"level": 17.4, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.29999999999999716}, "normal": {"level": 16.95, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}, "flood50": {"level": 20.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "26", "排口名称": "样例排口26", "代码": "A0026", "尺寸": "800", "底高程": "17.1", "河底高程": "13.9", "堤顶高程": "21.15", "里程": "7460", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "17.4", "所属河道常水位": "16.95", "所属河道20年一遇水位": "18.95", "所属河道50年一遇水位": "20.05"}}, {"row_index": 34, "number": "27", "name": "样例排口27", "display_name": "样例排口27", "code": "A0027", "size_text": "1000", "shape": "circle", "width_m": 1.0, "height_m": 1.0, "diameter_mm": 1000.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 7760.0, "base_elev": 17.8, "crown_elev": 18.8, "bed_elev": 13.9, "levee_elev": 21.15, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "statuses": {"current": {"level": 17.4, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 16.95, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}, "flood50": {"level": 20.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}}, "reach_name": "", "raw": {"排河口编号": "27", "排口名称": "样例排口27", "代码": "A0027", "尺寸": "1000", "底高程": "17.8", "河底高程": "13.9", "堤顶高程": "21.15", "里程": "7760", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "17.4", "所属河道常水位": "16.95", "所属河道20年一遇水位": "18.95", "所属河道50年一遇水位": "20.05"}}, {"row_index": 35, "number": "28", "name": "样例排口28", "display_name": "样例排口28", "code": "A0028", "size_text": "4200*3000", "shape": "rect", "width_m": 4.2, "height_m": 3.0, "diameter_mm": null, "width_mm": 4200.0, "height_mm": 3000.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 8060.0, "base_elev": 15.9, "crown_elev": 18.9, "bed_elev": 13.9, "levee_elev": 21.15, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "statuses": {"current": {"level": 17.4, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.4999999999999982}, "normal": {"level": 16.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.049999999999999}, "flood20": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.9999999999999982}, "flood50": {"level": 20.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.9999999999999982}}, "reach_name": "", "raw": {"排河口编号": "28", "排口名称": "样例排口28", "代码": "A0028", "尺寸": "4200*3000", "底高程": "15.9", "河底高程": "13.9", "堤顶高程": "21.15", "里程": "8060", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "17.4", "所属河道常水位": "16.95", "所属河道20年一遇水位": "18.95", "所属河道50年一遇水位": "20.05"}}, {"row_index": 36, "number": "29", "name": "样例排口29", "display_name": "样例排口29", "code": "A0029", "size_text": "1500", "shape": "circle", "width_m": 1.5, "height_m": 1.5, "diameter_mm": 1500.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 8360.0, "base_elev": 18.5, "crown_elev": 20.0, "bed_elev": 13.9, "levee_elev": 21.15, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "statuses": {"current": {"level": 17.4, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 16.95, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 18.95, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.4499999999999993}, "flood50": {"level": 20.05, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.5}}, "reach_name": "", "raw": {"排河口编号": "29", "排口名称": "样例排口29", "代码": "A0029", "尺寸": "1500", "底高程": "18.5", "河底高程": "13.9", "堤顶高程": "21.15", "里程": "8360", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "17.4", "所属河道常水位": "16.95", "所属河道20年一遇水位": "18.95", "所属河道50年一遇水位": "20.05"}}, {"row_index": 38, "number": "30", "name": "样例排口30", "display_name": "样例排口30", "code": "A0030", "size_text": "1800", "shape": "circle", "width_m": 1.8, "height_m": 1.8, "diameter_mm": 1800.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 8660.0, "base_elev": 16.6, "crown_elev": 18.400000000000002, "bed_elev": 13.1, "levee_elev": 20.15, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "statuses": {"current": {"level": 16.55, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 16.05, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 17.9, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.2999999999999972}, "flood50": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.8000000000000007}}, "reach_name": "", "raw": {"排河口编号": "30", "排口名称": "样例排口30", "代码": "A0030", "尺寸": "1800", "底高程": "16.6", "河底高程": "13.1", "堤顶高程": "20.15", "里程": "8660", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "16.55", "所属河道常水位": "16.05", "所属河道20年一遇水位": "17.9", "所属河道50年一遇水位": "18.95"}}, {"row_index": 39, "number": "31", "name": "样例排口31", "display_name": "样例排口31", "code": "A0031", "size_text": "2200*1500", "shape": "rect", "width_m": 2.2, "height_m": 1.5, "diameter_mm": null, "width_mm": 2200.0, "height_mm": 1500.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 8980.0, "base_elev": 15.65, "crown_elev": 17.15, "bed_elev": 13.1, "levee_elev": 20.15, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "statuses": {"current": {"level": 16.55, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.9000000000000004}, "normal": {"level": 16.05, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.40000000000000036}, "flood20": {"level": 17.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.4999999999999982}, "flood50": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.4999999999999982}}, "reach_name": "", "raw": {"排河口编号": "31", "排口名称": "样例排口31", "代码": "A0031", "尺寸": "2200*1500", "底高程": "15.65", "河底高程": "13.1", "堤顶高程": "20.15", "里程": "8980", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "16.55", "所属河道常水位": "16.05", "所属河道20年一遇水位": "17.9", "所属河道50年一遇水位": "18.95"}}, {"row_index": 40, "number": "32", "name": "样例排口32", "display_name": "样例排口32", "code": "A0032", "size_text": "2200", "shape": "circle", "width_m": 2.2, "height_m": 2.2, "diameter_mm": 2200.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 9300.0, "base_elev": 16.1, "crown_elev": 18.3, "bed_elev": 13.1, "levee_elev": 20.15, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "statuses": {"current": {"level": 16.55, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.4499999999999993}, "normal": {"level": 16.05, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 17.9, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.7999999999999972}, "flood50": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "32", "排口名称": "样例排口32", "代码": "A0032", "尺寸": "2200", "底高程": "16.1", "河底高程": "13.1", "堤顶高程": "20.15", "里程": "9300", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "16.55", "所属河道常水位": "16.05", "所属河道20年一遇水位": "17.9", "所属河道50年一遇水位": "18.95"}}, {"row_index": 41, "number": "33", "name": "样例排口33", "display_name": "样例排口33", "code": "A0033", "size_text": "600", "shape": "circle", "width_m": 0.6, "height_m": 0.6, "diameter_mm": 600.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 9620.0, "base_elev": 17.2, "crown_elev": 17.8, "bed_elev": 13.1, "levee_elev": 20.15, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "statuses": {"current": {"level": 16.55, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 16.05, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 17.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}, "flood50": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 0.6000000000000014}}, "reach_name": "", "raw": {"排河口编号": "33", "排口名称": "样例排口33", "代码": "A0033", "尺寸": "600", "底高程": "17.2", "河底高程": "13.1", "堤顶高程": "20.15", "里程": "9620", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "16.55", "所属河道常水位": "16.05", "所属河道20年一遇水位": "17.9", "所属河道50年一遇水位": "18.95"}}, {"row_index": 42, "number": "34", "name": "样例排口34", "display_name": "样例排口34", "code": "A0034", "size_text": "3600*2400", "shape": "rect", "width_m": 3.6, "height_m": 2.4, "diameter_mm": null, "width_mm": 3600.0, "height_mm": 2400.0, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 9950.0, "base_elev": 15.2, "crown_elev": 17.599999999999998, "bed_elev": 13.1, "levee_elev": 20.15, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "statuses": {"current": {"level": 16.55, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.3500000000000014}, "normal": {"level": 16.05, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.8500000000000014}, "flood20": {"level": 17.9, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.3999999999999986}, "flood50": {"level": 18.95, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.3999999999999986}}, "reach_name": "", "raw": {"排河口编号": "34", "排口名称": "样例排口34", "代码": "A0034", "尺寸": "3600*2400", "底高程": "15.2", "河底高程": "13.1", "堤顶高程": "20.15", "里程": "9950", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "16.55", "所属河道常水位": "16.05", "所属河道20年一遇水位": "17.9", "所属河道50年一遇水位": "18.95"}}, {"row_index": 44, "number": "35", "name": "样例排口35", "display_name": "样例排口35", "code": "A0035", "size_text": "1000", "shape": "circle", "width_m": 1.0, "height_m": 1.0, "diameter_mm": 1000.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 10280.0, "base_elev": 15.75, "crown_elev": 16.75, "bed_elev": 12.4, "levee_elev": 19.4, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}, "statuses": {"current": {"level": 15.8, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.05000000000000071}, "normal": {"level": 15.3, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 17.1, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}, "flood50": {"level": 18.25, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.0}}, "reach_name": "", "raw": {"排河口编号": "35", "排口名称": "样例排口35", "代码": "A0035", "尺寸": "1000", "底高程": "15.75", "河底高程": "12.4", "堤顶高程": "19.4", "里程": "10280", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.8", "所属河道常水位": "15.3", "所属河道20年一遇水位": "17.1", "所属河道50年一遇水位": "18.25"}}, {"row_index": 45, "number": "36", "name": "样例排口36", "display_name": "样例排口36", "code": "A0036", "size_text": "1200", "shape": "circle", "width_m": 1.2, "height_m": 1.2, "diameter_mm": 1200.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 10610.0, "base_elev": 17.05, "crown_elev": 18.25, "bed_elev": 12.4, "levee_elev": 19.4, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}, "statuses": {"current": {"level": 15.8, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 15.3, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 17.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.05000000000000071}, "flood50": {"level": 18.25, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "36", "排口名称": "样例排口36", "代码": "A0036", "尺寸": "1200", "底高程": "17.05", "河底高程": "12.4", "堤顶高程": "19.4", "里程": "10610", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.8", "所属河道常水位": "15.3", "所属河道20年一遇水位": "17.1", "所属河道50年一遇水位": "18.25"}}, {"row_index": 46, "number": "37", "name": "样例排口37", "display_name": "样例排口37", "code": "A0037", "size_text": "1800*1200", "shape": "rect", "width_m": 1.8, "height_m": 1.2, "diameter_mm": null, "width_mm": 1800.0, "height_mm": 1200.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 10940.0, "base_elev": 14.1, "crown_elev": 15.299999999999999, "bed_elev": 12.4, "levee_elev": 19.4, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}, "statuses": {"current": {"level": 15.8, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "normal": {"level": 15.3, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "flood20": {"level": 17.1, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}, "flood50": {"level": 18.25, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.1999999999999993}}, "reach_name": "", "raw": {"排河口编号": "37", "排口名称": "样例排口37", "代码": "A0037", "尺寸": "1800*1200", "底高程": "14.1", "河底高程": "12.4", "堤顶高程": "19.4", "里程": "10940", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.8", "所属河道常水位": "15.3", "所属河道20年一遇水位": "17.1", "所属河道50年一遇水位": "18.25"}}, {"row_index": 48, "number": "38", "name": "样例排口38", "display_name": "样例排口38", "code": "A0038", "size_text": "1800", "shape": "circle", "width_m": 1.8, "height_m": 1.8, "diameter_mm": 1800.0, "width_mm": null, "height_mm": null, "bank": "right", "bank_label": "右岸", "bank_accent": "#1d4ed8", "mileage": 11270.0, "base_elev": 14.9, "crown_elev": 16.7, "bed_elev": 11.85, "levee_elev": 18.5, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}, "statuses": {"current": {"level": 15.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.1999999999999993}, "normal": {"level": 14.65, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 16.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.200000000000001}, "flood50": {"level": 17.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 1.799999999999999}}, "reach_name": "", "raw": {"排河口编号": "38", "排口名称": "样例排口38", "代码": "A0038", "尺寸": "1800", "底高程": "14.9", "河底高程": "11.85", "堤顶高程": "18.5", "里程": "11270", "位置": "右岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.1", "所属河道常水位": "14.65", "所属河道20年一遇水位": "16.1", "所属河道50年一遇水位": "17.2"}}, {"row_index": 49, "number": "39", "name": "样例排口39", "display_name": "样例排口39", "code": "A0039", "size_text": "2000", "shape": "circle", "width_m": 2.0, "height_m": 2.0, "diameter_mm": 2000.0, "width_mm": null, "height_mm": null, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 11600.0, "base_elev": 15.4, "crown_elev": 17.4, "bed_elev": 11.85, "levee_elev": 18.5, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}, "statuses": {"current": {"level": 15.1, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "normal": {"level": 14.65, "status_key": "safe", "status_label": "未受淹", "covered_height": 0.0}, "flood20": {"level": 16.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.7000000000000011}, "flood50": {"level": 17.2, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.799999999999999}}, "reach_name": "", "raw": {"排河口编号": "39", "排口名称": "样例排口39", "代码": "A0039", "尺寸": "2000", "底高程": "15.4", "河底高程": "11.85", "堤顶高程": "18.5", "里程": "11600", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.1", "所属河道常水位": "14.65", "所属河道20年一遇水位": "16.1", "所属河道50年一遇水位": "17.2"}}, {"row_index": 50, "number": "40", "name": "样例排口40", "display_name": "样例排口40", "code": "A0040", "size_text": "3000*2000", "shape": "rect", "width_m": 3.0, "height_m": 2.0, "diameter_mm": null, "width_mm": 3000.0, "height_mm": 2000.0, "bank": "left", "bank_label": "左岸", "bank_accent": "#0f766e", "mileage": 11880.0, "base_elev": 14.1, "crown_elev": 16.1, "bed_elev": 11.85, "levee_elev": 18.5, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}, "statuses": {"current": {"level": 15.1, "status_key": "partial", "status_label": "部分受淹", "covered_height": 1.0}, "normal": {"level": 14.65, "status_key": "partial", "status_label": "部分受淹", "covered_height": 0.5500000000000007}, "flood20": {"level": 16.1, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.0000000000000018}, "flood50": {"level": 17.2, "status_key": "submerged", "status_label": "完全淹没", "covered_height": 2.0000000000000018}}, "reach_name": "", "raw": {"排河口编号": "40", "排口名称": "样例排口40", "代码": "A0040", "尺寸": "3000*2000", "底高程": "14.1", "河底高程": "11.85", "堤顶高程": "18.5", "里程": "11880", "位置": "左岸", "所属河道名称": "样例河道A", "所属河段名称": "", "所属河道当前水位": "15.1", "所属河道常水位": "14.65", "所属河道20年一遇水位": "16.1", "所属河道50年一遇水位": "17.2"}}], "controls": [{"name": "样例起点", "mileage": 0.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}, "bed_elev": 18.2, "levee_elev": 25.4}, {"name": "样例上游一", "mileage": 1500.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}, "bed_elev": 17.35, "levee_elev": 24.75}, {"name": "样例上游二", "mileage": 2900.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}, "bed_elev": 16.4, "levee_elev": 23.9}, {"name": "样例中上段", "mileage": 4200.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}, "bed_elev": 15.5, "levee_elev": 23.05}, {"name": "样例中段", "mileage": 5600.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}, "bed_elev": 14.65, "levee_elev": 22.1}, {"name": "样例中下段", "mileage": 7100.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}, "bed_elev": 13.9, "levee_elev": 21.15}, {"name": "样例下游一", "mileage": 8600.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}, "bed_elev": 13.1, "levee_elev": 20.15}, {"name": "样例下游二", "mileage": 10050.0, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}, "bed_elev": 12.4, "levee_elev": 19.4}, {"name": "样例出口前", "mileage": 11250.0, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}, "bed_elev": 11.85, "levee_elev": 18.5}, {"name": "样例出口", "mileage": 12000.0, "levels": {"current": 14.9, "normal": 14.4, "flood20": 15.8, "flood50": 16.9}, "bed_elev": 11.6, "levee_elev": 18.15}], "profile_points": [{"mileage": 0.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 180.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 430.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 710.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 980.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 1260.0, "levels": {"current": 22.1, "normal": 21.7, "flood20": 23.05, "flood50": 23.85}}, {"mileage": 1500.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 1580.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 1870.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 2140.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 2430.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 2720.0, "levels": {"current": 21.15, "normal": 20.75, "flood20": 22.5, "flood50": 23.2}}, {"mileage": 2900.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 3050.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 3340.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 3620.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 3890.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 4170.0, "levels": {"current": 20.2, "normal": 19.75, "flood20": 21.55, "flood50": 22.35}}, {"mileage": 4200.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}}, {"mileage": 4470.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}}, {"mileage": 4760.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}}, {"mileage": 5060.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}}, {"mileage": 5360.0, "levels": {"current": 19.2, "normal": 18.7, "flood20": 20.8, "flood50": 21.7}}, {"mileage": 5600.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 5660.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 5960.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 6260.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 6560.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 6860.0, "levels": {"current": 18.25, "normal": 17.8, "flood20": 19.95, "flood50": 20.9}}, {"mileage": 7100.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 7160.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 7460.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 7760.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 8060.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 8360.0, "levels": {"current": 17.4, "normal": 16.95, "flood20": 18.95, "flood50": 20.05}}, {"mileage": 8600.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 8660.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 8980.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 9300.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 9620.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 9950.0, "levels": {"current": 16.55, "normal": 16.05, "flood20": 17.9, "flood50": 18.95}}, {"mileage": 10050.0, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}}, {"mileage": 10280.0, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}}, {"mileage": 10610.0, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}}, {"mileage": 10940.0, "levels": {"current": 15.8, "normal": 15.3, "flood20": 17.1, "flood50": 18.25}}, {"mileage": 11250.0, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}}, {"mileage": 11270.0, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}}, {"mileage": 11600.0, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}}, {"mileage": 11880.0, "levels": {"current": 15.1, "normal": 14.65, "flood20": 16.1, "flood50": 17.2}}, {"mileage": 12000.0, "levels": {"current": 14.9, "normal": 14.4, "flood20": 15.8, "flood50": 16.9}}], "channel_points": [{"mileage": 0.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 180.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 430.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 710.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 980.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 1260.0, "bed_elev": 18.2, "levee_elev": 25.4}, {"mileage": 1500.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 1580.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 1870.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 2140.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 2430.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 2720.0, "bed_elev": 17.35, "levee_elev": 24.75}, {"mileage": 2900.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 3050.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 3340.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 3620.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 3890.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 4170.0, "bed_elev": 16.4, "levee_elev": 23.9}, {"mileage": 4200.0, "bed_elev": 15.5, "levee_elev": 23.05}, {"mileage": 4470.0, "bed_elev": 15.5, "levee_elev": 23.05}, {"mileage": 4760.0, "bed_elev": 15.5, "levee_elev": 23.05}, {"mileage": 5060.0, "bed_elev": 15.5, "levee_elev": 23.05}, {"mileage": 5360.0, "bed_elev": 15.5, "levee_elev": 23.05}, {"mileage": 5600.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 5660.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 5960.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 6260.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 6560.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 6860.0, "bed_elev": 14.65, "levee_elev": 22.1}, {"mileage": 7100.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 7160.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 7460.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 7760.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 8060.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 8360.0, "bed_elev": 13.9, "levee_elev": 21.15}, {"mileage": 8600.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 8660.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 8980.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 9300.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 9620.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 9950.0, "bed_elev": 13.1, "levee_elev": 20.15}, {"mileage": 10050.0, "bed_elev": 12.4, "levee_elev": 19.4}, {"mileage": 10280.0, "bed_elev": 12.4, "levee_elev": 19.4}, {"mileage": 10610.0, "bed_elev": 12.4, "levee_elev": 19.4}, {"mileage": 10940.0, "bed_elev": 12.4, "levee_elev": 19.4}, {"mileage": 11250.0, "bed_elev": 11.85, "levee_elev": 18.5}, {"mileage": 11270.0, "bed_elev": 11.85, "levee_elev": 18.5}, {"mileage": 11600.0, "bed_elev": 11.85, "levee_elev": 18.5}, {"mileage": 11880.0, "bed_elev": 11.85, "levee_elev": 18.5}, {"mileage": 12000.0, "bed_elev": 11.6, "levee_elev": 18.15}], "scenarios": [{"key": "current", "label": "当前水位", "color": "#2563eb"}, {"key": "normal", "label": "常水位", "color": "#f59e0b"}, {"key": "flood20", "label": "20年一遇", "color": "#8b5cf6"}, {"key": "flood50", "label": "50年一遇", "color": "#dc2626"}], "summary": {"current": {"label": "当前水位", "counts": {"safe": 17, "partial": 21, "submerged": 2, "unknown": 0}, "submerged_codes": ["A0017", "A0037"], "partial_codes": ["A0002", "A0003", "A0005", "A0006", "A0008", "A0011", "A0012", "A0014", "A0018", "A0020", "A0022", "A0023", "A0025", "A0026", "A0028", "A0031", "A0032", "A0034", "A0035", "A0038", "A0040"], "text": "当前水位下共 40 个排口，未受淹 17 个，部分受淹 21 个，完全淹没 2 个，待补充 0 个。"}, "normal": {"label": "常水位", "counts": {"safe": 26, "partial": 12, "submerged": 2, "unknown": 0}, "submerged_codes": ["A0017", "A0037"], "partial_codes": ["A0002", "A0005", "A0008", "A0011", "A0014", "A0020", "A0022", "A0025", "A0028", "A0031", "A0034", "A0040"], "text": "常水位下共 40 个排口，未受淹 26 个，部分受淹 12 个，完全淹没 2 个，待补充 0 个。"}, "flood20": {"label": "20年一遇", "counts": {"safe": 1, "partial": 18, "submerged": 21, "unknown": 0}, "submerged_codes": ["A0002", "A0003", "A0005", "A0008", "A0011", "A0012", "A0014", "A0017", "A0018", "A0020", "A0022", "A0025", "A0026", "A0027", "A0028", "A0031", "A0033", "A0034", "A0035", "A0037", "A0040"], "partial_codes": ["A0001", "A0006", "A0007", "A0009", "A0010", "A0013", "A0015", "A0016", "A0019", "A0021", "A0023", "A0024", "A0029", "A0030", "A0032", "A0036", "A0038", "A0039"], "text": "20年一遇下共 40 个排口，未受淹 1 个，部分受淹 18 个，完全淹没 21 个，待补充 0 个。"}, "flood50": {"label": "50年一遇", "counts": {"safe": 0, "partial": 5, "submerged": 35, "unknown": 0}, "submerged_codes": ["A0001", "A0002", "A0003", "A0005", "A0006", "A0008", "A0009", "A0010", "A0011", "A0012", "A0014", "A0015", "A0016", "A0017", "A0018", "A0019", "A0020", "A0021", "A0022", "A0023", "A0025", "A0026", "A0027", "A0028", "A0029", "A0030", "A0031", "A0032", "A0033", "A0034", "A0035", "A0036", "A0037", "A0038", "A0040"], "partial_codes": ["A0004", "A0007", "A0013", "A0024", "A0039"], "text": "50年一遇下共 40 个排口，未受淹 0 个，部分受淹 5 个，完全淹没 35 个，待补充 0 个。"}}, "warnings": [], "bank_counts": {"left": 20, "right": 20, "unknown": 0}, "status_meta": {"safe": {"label": "未受淹", "color": "#15803d"}, "partial": {"label": "部分受淹", "color": "#ea580c"}, "submerged": {"label": "完全淹没", "color": "#b91c1c"}, "unknown": {"label": "待补充", "color": "#64748b"}}, "bank_meta": {"left": {"label": "左岸", "accent": "#0f766e"}, "right": {"label": "右岸", "accent": "#1d4ed8"}, "unknown": {"label": "待确认", "accent": "#475569"}}, "has_bed_profile": true, "has_levee_profile": true, "bounds": {"min_elev": 10.496, "max_elev": 26.503999999999998, "min_mileage": 0.0, "max_mileage": 12000.0}, "notes": ["Y轴按真实高程展示，不做垂向夸张。", "工作簿已提供河底/堤顶高程，主图按真实高程叠加河底线、堤顶线；当前选中场景的河道水体以蓝色填充。", "页面不依赖浏览器横向滚动条；在纵断图区域滚动鼠标滚轮可做横向缩放，排口符号宽度不随缩放变化。", "下方时间轴式总览条用于定位当前视窗范围。", "左岸排口向轴线左侧偏置，右岸排口向轴线右侧偏置，并可按岸别单独筛选。"], "default_scenario": "current"};
+    const STATUS_META = REPORT.status_meta;
+    const BANK_META = REPORT.bank_meta;
+    const CONTEXT_COLORS = {
+      bed: "#8b5a2b",
+      bedFill: "rgba(139, 90, 43, 0.14)",
+      bedStripe: "rgba(110, 74, 33, 0.18)",
+      levee: "#64748b",
+      waterFill: "rgba(59, 130, 246, 0.24)",
+    };
+
+    let activeScenario = "current";
+    let horizontalScale = Number(1.00);
+    let panX = 0;
+    const bankVisibility = { left: true, right: true, unknown: true };
+    let chartDrag = null;
+    let timelineDragging = false;
+    let chartLayout = null;
+    let timelineLayout = null;
+
+    const chartHost = document.getElementById("chartHost");
+    const canvas = document.getElementById("chartCanvas");
+    const ctx = canvas.getContext("2d");
+    const timelineCanvas = document.getElementById("timelineCanvas");
+    const timelineCtx = timelineCanvas.getContext("2d");
+    const scenarioBar = document.getElementById("scenarioBar");
+    const legendRow = document.getElementById("legendRow");
+
+    function formatNumber(value, digits = 2) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return "—";
+      }
+      const numeric = Number(value);
+      if (Math.abs(numeric - Math.round(numeric)) < 1e-6) {
+        return String(Math.round(numeric));
+      }
+      return numeric.toFixed(digits);
+    }
+
+    function niceStep(span, target = 7) {
+      if (span <= 0) {
+        return 1;
+      }
+      const rough = span / Math.max(target, 1);
+      const exponent = Math.floor(Math.log10(rough));
+      const fraction = rough / Math.pow(10, exponent);
+      let niceFraction = 1;
+      if (fraction <= 1) {
+        niceFraction = 1;
+      } else if (fraction <= 2) {
+        niceFraction = 2;
+      } else if (fraction <= 5) {
+        niceFraction = 5;
+      } else {
+        niceFraction = 10;
+      }
+      return niceFraction * Math.pow(10, exponent);
+    }
+
+    function scenarioLineLabel(label) {
+      return label.includes("水位") ? `${label}线` : `${label}水位线`;
+    }
+
+    function scenarioLevelLabel(label) {
+      return label.includes("水位") ? label : `${label}水位`;
+    }
+
+    function usesKilometers() {
+      return (REPORT.bounds.max_mileage - REPORT.bounds.min_mileage) >= 2000;
+    }
+
+    function formatMileage(mileage, digits = 1) {
+      if (mileage === null || mileage === undefined) {
+        return "—";
+      }
+      if (!usesKilometers()) {
+        return `${formatNumber(mileage, 0)} m`;
+      }
+      const km = Number(mileage) / 1000;
+      return `${km.toFixed(digits)} km`;
+    }
+
+    function axisMileageLabel(mileage) {
+      if (!usesKilometers()) {
+        return formatNumber(mileage, 0);
+      }
+      const km = Number(mileage) / 1000;
+      return Math.abs(km - Math.round(km)) < 1e-6 ? `${Math.round(km)}` : km.toFixed(1);
+    }
+
+    function currentScenario() {
+      return REPORT.scenarios.find((item) => item.key === activeScenario) || REPORT.scenarios[0];
+    }
+
+    function visibleOutfalls() {
+      return REPORT.outfalls.filter((outfall) => bankVisibility[outfall.bank] !== false);
+    }
+
+    function selectedBankLabels() {
+      const labels = [];
+      ["left", "right", "unknown"].forEach((bankKey) => {
+        if (bankVisibility[bankKey] && (REPORT.bank_counts?.[bankKey] || 0) > 0) {
+          labels.push(BANK_META[bankKey].label);
+        }
+      });
+      return labels;
+    }
+
+    function computeSummaryForScenario(outfalls, scenarioKey) {
+      const counts = { safe: 0, partial: 0, submerged: 0, unknown: 0 };
+      const submergedCodes = [];
+      const partialCodes = [];
+      outfalls.forEach((outfall) => {
+        const statusInfo = outfall.statuses[scenarioKey] || { status_key: "unknown" };
+        const statusKey = statusInfo.status_key || "unknown";
+        counts[statusKey] += 1;
+        if (statusKey === "submerged") {
+          submergedCodes.push(outfall.code);
+        } else if (statusKey === "partial") {
+          partialCodes.push(outfall.code);
+        }
+      });
+      return { counts, submergedCodes, partialCodes };
+    }
+
+    function setCanvasSize(targetCanvas, targetCtx, width, height) {
+      const dpr = window.devicePixelRatio || 1;
+      targetCanvas.width = Math.round(width * dpr);
+      targetCanvas.height = Math.round(height * dpr);
+      targetCanvas.style.width = `${width}px`;
+      targetCanvas.style.height = `${height}px`;
+      targetCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function buildScenarioButtons() {
+      scenarioBar.innerHTML = "";
+      REPORT.scenarios.forEach((scenario) => {
+        const button = document.createElement("button");
+        button.textContent = scenario.label;
+        button.className = scenario.key === activeScenario ? "active" : "";
+        button.style.background = scenario.key === activeScenario ? scenario.color : "#f8fafc";
+        button.addEventListener("click", () => {
+          activeScenario = scenario.key;
+          buildScenarioButtons();
+          updateHero();
+          updatePanels();
+          renderAll();
+        });
+        scenarioBar.appendChild(button);
+      });
+    }
+
+    function buildLegend() {
+      legendRow.innerHTML = "";
+      [["left", "bank-left"], ["right", "bank-right"], ["unknown", "bank-unknown"]].forEach(([bankKey, className]) => {
+        if ((REPORT.bank_counts?.[bankKey] || 0) === 0) {
+          return;
+        }
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `chip-toggle ${className} ${bankVisibility[bankKey] ? "" : "off"}`.trim();
+        button.textContent = BANK_META[bankKey].label;
+        button.addEventListener("click", () => {
+          bankVisibility[bankKey] = !bankVisibility[bankKey];
+          buildLegend();
+          updateHero();
+          updatePanels();
+          renderAll();
+        });
+        legendRow.appendChild(button);
+      });
+
+      if (REPORT.has_bed_profile) {
+        const span = document.createElement("span");
+        span.className = "chip line-chip";
+        span.style.color = CONTEXT_COLORS.bed;
+        span.textContent = "河底线";
+        legendRow.appendChild(span);
+      }
+      if (REPORT.has_levee_profile) {
+        const span = document.createElement("span");
+        span.className = "chip line-chip";
+        span.style.color = CONTEXT_COLORS.levee;
+        span.textContent = "堤顶线";
+        legendRow.appendChild(span);
+      }
+      if (REPORT.has_bed_profile) {
+        const span = document.createElement("span");
+        span.className = "chip fill-chip";
+        span.textContent = "当前场景水体";
+        legendRow.appendChild(span);
+      }
+
+      ["safe", "partial", "submerged", "unknown"].forEach((statusKey) => {
+        const span = document.createElement("span");
+        span.className = `chip ${statusKey}`;
+        span.textContent = STATUS_META[statusKey].label;
+        legendRow.appendChild(span);
+      });
+
+      REPORT.scenarios.forEach((scenario) => {
+        const span = document.createElement("span");
+        span.className = "chip line-chip";
+        span.style.color = scenario.color;
+        span.textContent = scenarioLineLabel(scenario.label);
+        legendRow.appendChild(span);
+      });
+    }
+
+    function updateHero() {
+      const scenario = currentScenario();
+      const channelText = REPORT.has_bed_profile || REPORT.has_levee_profile
+        ? "图中同步叠加河底/堤顶背景剖面，当前场景的河道水体区间以蓝色填充。"
+        : "源数据未提供河底/堤顶高程，主图仅显示水位线与排口状态。";
+      const bankText = selectedBankLabels().length
+        ? `当前显示 ${selectedBankLabels().join("、")}排口。`
+        : "当前已取消全部岸别显示。";
+      document.getElementById("heroText").textContent =
+        `${REPORT.river_name}排口状态可视化图。高亮场景为 ${scenario.label}，` +
+        `纵向始终使用真实高程；横向通过滚轮缩放与时间轴总览联动；` +
+        `${channelText}${bankText}`;
+
+      const noteRow = document.getElementById("noteRow");
+      noteRow.innerHTML = "";
+      REPORT.notes.forEach((note) => {
+        const span = document.createElement("span");
+        span.className = "chip";
+        span.textContent = note;
+        noteRow.appendChild(span);
+      });
+    }
+
+    function updatePanels() {
+      const filtered = visibleOutfalls();
+      const scenario = currentScenario();
+      const summary = computeSummaryForScenario(filtered, activeScenario);
+      const counts = summary.counts;
+      const visibleLeft = filtered.filter((item) => item.bank === "left").length;
+      const visibleRight = filtered.filter((item) => item.bank === "right").length;
+
+      document.getElementById("totalCount").textContent = filtered.length;
+      document.getElementById("bankCount").textContent = `${visibleLeft} / ${visibleRight}`;
+      document.getElementById("safeCount").textContent = counts.safe;
+      document.getElementById("partialCount").textContent = counts.partial;
+      document.getElementById("submergedCount").textContent = counts.submerged;
+
+      const scopePrefix = filtered.length === REPORT.outfalls.length
+        ? `${scenario.label}下共 ${filtered.length} 个排口`
+        : `${scenario.label}下当前显示 ${filtered.length} / ${REPORT.outfalls.length} 个排口`;
+      document.getElementById("scenarioSummary").textContent =
+        `${scopePrefix}，未受淹 ${counts.safe} 个，部分受淹 ${counts.partial} 个，完全淹没 ${counts.submerged} 个，待补充 ${counts.unknown} 个。`;
+      document.getElementById("submergedCodes").textContent =
+        summary.submergedCodes.length ? summary.submergedCodes.join("、") : "无";
+      document.getElementById("partialCodes").textContent =
+        summary.partialCodes.length ? summary.partialCodes.join("、") : "无";
+      document.getElementById("scenarioLevelHeader").textContent = scenarioLevelLabel(scenario.label);
+      document.getElementById("scenarioStatusHeader").textContent = `${scenario.label}状态`;
+
+      const warningList = document.getElementById("warningList");
+      warningList.innerHTML = "";
+      if (!REPORT.warnings.length) {
+        const item = document.createElement("li");
+        item.textContent = "未发现结构性告警。";
+        warningList.appendChild(item);
+      } else {
+        REPORT.warnings.slice(0, 12).forEach((warning) => {
+          const item = document.createElement("li");
+          item.textContent = warning;
+          warningList.appendChild(item);
+        });
+      }
+
+      const body = document.getElementById("detailBody");
+      body.innerHTML = "";
+      filtered.forEach((outfall) => {
+        const statusInfo = outfall.statuses[activeScenario] || {
+          status_key: "unknown",
+          status_label: "待补充",
+          level: null,
+        };
+        const tr = document.createElement("tr");
+        const pillColor = STATUS_META[statusInfo.status_key]?.color || STATUS_META.unknown.color;
+        tr.innerHTML = `
+          <td>${outfall.number || "—"}</td>
+          <td>${outfall.name || "—"}</td>
+          <td>${outfall.code}</td>
+          <td>${outfall.bank_label}</td>
+          <td>${outfall.size_text || "—"}</td>
+          <td>${formatMileage(outfall.mileage, 2)}</td>
+          <td>${formatNumber(outfall.base_elev, 2)}</td>
+          <td>${formatNumber(outfall.crown_elev, 2)}</td>
+          <td>${formatNumber(outfall.bed_elev, 2)}</td>
+          <td>${formatNumber(outfall.levee_elev, 2)}</td>
+          <td>${formatNumber(statusInfo.level, 2)}</td>
+          <td><span class="status-pill" style="background:${pillColor};">${statusInfo.status_label}</span></td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    function clampPan(nextPan) {
+      if (!chartLayout) {
+        return 0;
+      }
+      return Math.max(0, Math.min(nextPan, chartLayout.maxPanX));
+    }
+
+    function computeChartLayout() {
+      const hostWidth = chartHost.clientWidth || chartHost.parentElement?.clientWidth || 0;
+      const viewportWidth = Math.max(hostWidth, 320);
+      const compact = viewportWidth < 900;
+      const margin = compact
+        ? { left: 68, right: 26, top: 60, bottom: 76 }
+        : { left: 96, right: 88, top: 74, bottom: 92 };
+      const viewportHeight = compact ? 660 : 840;
+      const plotViewWidth = Math.max(viewportWidth - margin.left - margin.right, 180);
+      const plotViewHeight = Math.max(viewportHeight - margin.top - margin.bottom, 220);
+      const worldPlotWidth = plotViewWidth * horizontalScale;
+      const maxPanX = Math.max(0, worldPlotWidth - plotViewWidth);
+      panX = Math.max(0, Math.min(panX, maxPanX));
+
+      setCanvasSize(canvas, ctx, viewportWidth, viewportHeight);
+      chartLayout = {
+        viewportWidth,
+        viewportHeight,
+        plotViewWidth,
+        plotViewHeight,
+        worldPlotWidth,
+        maxPanX,
+        pxPerElev: plotViewHeight / (REPORT.bounds.max_elev - REPORT.bounds.min_elev || 1),
+        frame: {
+          left: margin.left,
+          right: viewportWidth - margin.right,
+          top: margin.top,
+          bottom: viewportHeight - margin.bottom,
+          width: plotViewWidth,
+          height: plotViewHeight,
+        },
+        xWorldForMileage(mileage) {
+          const span = REPORT.bounds.max_mileage - REPORT.bounds.min_mileage || 1;
+          return ((mileage - REPORT.bounds.min_mileage) / span) * worldPlotWidth;
+        },
+        xForMileage(mileage) {
+          return margin.left + this.xWorldForMileage(mileage) - panX;
+        },
+        yForElev(elev) {
+          const span = REPORT.bounds.max_elev - REPORT.bounds.min_elev || 1;
+          return (viewportHeight - margin.bottom) - ((elev - REPORT.bounds.min_elev) / span) * plotViewHeight;
+        },
+      };
+    }
+
+    function computeTimelineLayout() {
+      const hostWidth = chartHost.clientWidth || chartHost.parentElement?.clientWidth || 0;
+      const width = Math.max(hostWidth, 320);
+      const compact = width < 900;
+      const height = compact ? 84 : 92;
+      const margin = compact
+        ? { left: 28, right: 12, top: 14, bottom: 22 }
+        : { left: 50, right: 20, top: 14, bottom: 22 };
+      setCanvasSize(timelineCanvas, timelineCtx, width, height);
+      timelineLayout = {
+        width,
+        height,
+        barLeft: margin.left,
+        barRight: width - margin.right,
+        barTop: 26,
+        barHeight: 18,
+        axisY: height - margin.bottom,
+        barWidth: width - margin.left - margin.right,
+      };
+    }
+
+    function drawRoundRect(targetCtx, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      targetCtx.beginPath();
+      targetCtx.moveTo(x + r, y);
+      targetCtx.arcTo(x + width, y, x + width, y + height, r);
+      targetCtx.arcTo(x + width, y + height, x, y + height, r);
+      targetCtx.arcTo(x, y + height, x, y, r);
+      targetCtx.arcTo(x, y, x + width, y, r);
+      targetCtx.closePath();
+    }
+
+    function drawTag(text, centerX, centerY, options = {}) {
+      if (!text) {
+        return;
+      }
+      const fontSize = options.fontSize || 11;
+      const paddingX = options.paddingX || 6;
+      const paddingY = options.paddingY || 3;
+      ctx.save();
+      ctx.font = `${options.fontWeight || 600} ${fontSize}px Microsoft YaHei`;
+      const textWidth = ctx.measureText(text).width;
+      const boxWidth = textWidth + paddingX * 2;
+      const boxHeight = fontSize + paddingY * 2;
+      drawRoundRect(ctx, centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight, 7);
+      ctx.fillStyle = options.background || "rgba(255,255,255,0.92)";
+      ctx.fill();
+      ctx.strokeStyle = options.border || "rgba(148,163,184,0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = options.color || "#0f172a";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, centerX, centerY + 0.5);
+      ctx.restore();
+    }
+
+    function buildSeriesPoints(sourcePoints, valueAccessor) {
+      const rawPoints = (sourcePoints || [])
+        .map((point) => {
+          const value = valueAccessor(point);
+          return {
+            mileage: Number(point.mileage),
+            value: value === null || value === undefined ? null : Number(value),
+          };
+        })
+        .filter((point) => Number.isFinite(point.mileage) && Number.isFinite(point.value))
+        .sort((a, b) => a.mileage - b.mileage);
+      if (!rawPoints.length) {
+        return [];
+      }
+      const deduped = [];
+      rawPoints.forEach((point) => {
+        if (deduped.length && Math.abs(deduped[deduped.length - 1].mileage - point.mileage) < 1e-6) {
+          deduped[deduped.length - 1] = point;
+        } else {
+          deduped.push(point);
+        }
+      });
+      const firstValue = deduped[0].value;
+      const lastValue = deduped[deduped.length - 1].value;
+      if (deduped[0].mileage > REPORT.bounds.min_mileage) {
+        deduped.unshift({ mileage: REPORT.bounds.min_mileage, value: firstValue });
+      } else {
+        deduped[0] = { mileage: REPORT.bounds.min_mileage, value: firstValue };
+      }
+      if (deduped[deduped.length - 1].mileage < REPORT.bounds.max_mileage) {
+        deduped.push({ mileage: REPORT.bounds.max_mileage, value: lastValue });
+      } else {
+        deduped[deduped.length - 1] = { mileage: REPORT.bounds.max_mileage, value: lastValue };
+      }
+      return deduped;
+    }
+
+    function buildStepPoints(scenarioKey) {
+      return buildSeriesPoints(
+        REPORT.profile_points,
+        (point) => point.levels && point.levels[scenarioKey]
+      );
+    }
+
+    function buildChannelPoints(fieldKey) {
+      return buildSeriesPoints(REPORT.channel_points, (point) => point[fieldKey]);
+    }
+
+    function drawStepSeries(points, color, options = {}) {
+      if (points.length < 2) {
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        chartLayout.frame.left,
+        chartLayout.frame.top,
+        chartLayout.frame.width,
+        chartLayout.frame.height
+      );
+      ctx.clip();
+      ctx.beginPath();
+      const first = points[0];
+      let previousValue = first.value;
+      ctx.moveTo(chartLayout.xForMileage(first.mileage), chartLayout.yForElev(previousValue));
+      for (let index = 1; index < points.length; index += 1) {
+        const point = points[index];
+        const x = chartLayout.xForMileage(point.mileage);
+        const previousY = chartLayout.yForElev(previousValue);
+        ctx.lineTo(x, previousY);
+        if (Math.abs(point.value - previousValue) > 1e-6) {
+          ctx.lineTo(x, chartLayout.yForElev(point.value));
+        }
+        previousValue = point.value;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = options.lineWidth || 2;
+      ctx.globalAlpha = options.alpha ?? 1;
+      if (options.dash?.length) {
+        ctx.setLineDash(options.dash);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawStepLine(scenarioKey, color, isActive) {
+      drawStepSeries(buildStepPoints(scenarioKey), color, {
+        lineWidth: isActive ? 3 : 1.6,
+        alpha: isActive ? 0.96 : 0.42,
+        dash: isActive ? [] : [7, 5],
+      });
+    }
+
+    function uniqueBreakpoints(pointSets) {
+      const values = [];
+      pointSets.forEach((points) => {
+        (points || []).forEach((point) => {
+          if (Number.isFinite(point.mileage)) {
+            values.push(Number(point.mileage));
+          }
+        });
+      });
+      values.sort((a, b) => a - b);
+      const unique = [];
+      values.forEach((value) => {
+        if (!unique.length || Math.abs(unique[unique.length - 1] - value) > 1e-6) {
+          unique.push(value);
+        }
+      });
+      return unique;
+    }
+
+    function stepValueAt(points, mileage) {
+      if (!points.length) {
+        return null;
+      }
+      let activeValue = points[0].value;
+      for (let index = 1; index < points.length; index += 1) {
+        if (mileage < points[index].mileage - 1e-6) {
+          break;
+        }
+        activeValue = points[index].value;
+      }
+      return activeValue;
+    }
+
+    function drawActiveWaterFill() {
+      if (!REPORT.has_bed_profile) {
+        return;
+      }
+      const waterPoints = buildStepPoints(activeScenario);
+      const bedPoints = buildChannelPoints("bed_elev");
+      if (waterPoints.length < 2 || bedPoints.length < 2) {
+        return;
+      }
+      const breakpoints = uniqueBreakpoints([waterPoints, bedPoints]);
+      if (breakpoints.length < 2) {
+        return;
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        chartLayout.frame.left,
+        chartLayout.frame.top,
+        chartLayout.frame.width,
+        chartLayout.frame.height
+      );
+      ctx.clip();
+      ctx.fillStyle = CONTEXT_COLORS.waterFill;
+
+      for (let index = 0; index < breakpoints.length - 1; index += 1) {
+        const startMileage = breakpoints[index];
+        const endMileage = breakpoints[index + 1];
+        if (endMileage - startMileage <= 1e-6) {
+          continue;
+        }
+        const sampleMileage = startMileage + (endMileage - startMileage) / 2;
+        const waterLevel = stepValueAt(waterPoints, sampleMileage);
+        const bedLevel = stepValueAt(bedPoints, sampleMileage);
+        if (!Number.isFinite(waterLevel) || !Number.isFinite(bedLevel) || waterLevel <= bedLevel) {
+          continue;
+        }
+        const leftX = chartLayout.xForMileage(startMileage);
+        const rightX = chartLayout.xForMileage(endMileage);
+        const topY = chartLayout.yForElev(waterLevel);
+        const bottomY = chartLayout.yForElev(bedLevel);
+        ctx.fillRect(leftX, topY, Math.max(1, rightX - leftX), Math.max(1, bottomY - topY));
+      }
+      ctx.restore();
+    }
+
+    function drawRiverbedBackdrop() {
+      if (!REPORT.has_bed_profile) {
+        return;
+      }
+      const bedPoints = buildChannelPoints("bed_elev");
+      if (bedPoints.length < 2) {
+        return;
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(
+        chartLayout.frame.left,
+        chartLayout.frame.top,
+        chartLayout.frame.width,
+        chartLayout.frame.height
+      );
+      ctx.clip();
+
+      for (let index = 0; index < bedPoints.length - 1; index += 1) {
+        const startPoint = bedPoints[index];
+        const endPoint = bedPoints[index + 1];
+        const leftX = chartLayout.xForMileage(startPoint.mileage);
+        const rightX = chartLayout.xForMileage(endPoint.mileage);
+        const bedY = chartLayout.yForElev(startPoint.value);
+        const segmentHeight = chartLayout.frame.bottom - bedY;
+        if (segmentHeight <= 1 || rightX <= leftX) {
+          continue;
+        }
+
+        ctx.fillStyle = CONTEXT_COLORS.bedFill;
+        ctx.fillRect(leftX, bedY, rightX - leftX, segmentHeight);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(leftX, bedY, rightX - leftX, segmentHeight);
+        ctx.clip();
+        ctx.strokeStyle = CONTEXT_COLORS.bedStripe;
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        const stripeGap = 14;
+        for (let stripeX = leftX - segmentHeight; stripeX < rightX + segmentHeight; stripeX += stripeGap) {
+          ctx.moveTo(stripeX, chartLayout.frame.bottom);
+          ctx.lineTo(stripeX + segmentHeight, bedY);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function drawChannelProfiles() {
+      if (REPORT.has_bed_profile) {
+        drawStepSeries(buildChannelPoints("bed_elev"), CONTEXT_COLORS.bed, {
+          lineWidth: 2.8,
+          alpha: 0.95,
+        });
+      }
+      if (REPORT.has_levee_profile) {
+        drawStepSeries(buildChannelPoints("levee_elev"), CONTEXT_COLORS.levee, {
+          lineWidth: 2.1,
+          alpha: 0.9,
+        });
+      }
+    }
+
+    function outfallPath(geom) {
+      ctx.beginPath();
+      if (geom.shape === "circle") {
+        ctx.arc(geom.centerX, geom.centerY, geom.heightPx / 2, 0, Math.PI * 2);
+      } else {
+        ctx.rect(geom.left, geom.topY, geom.widthPx, geom.heightPx);
+      }
+    }
+
+    function computeOutfallGeometry(outfall) {
+      if (outfall.base_elev === null || outfall.crown_elev === null) {
+        return null;
+      }
+      const heightPx = Math.max((outfall.crown_elev - outfall.base_elev) * chartLayout.pxPerElev, 8);
+      let widthPx = heightPx;
+      if (outfall.shape === "rect" && outfall.width_m) {
+        widthPx = Math.max(outfall.width_m * chartLayout.pxPerElev, 8);
+      }
+      const anchorX = chartLayout.xForMileage(outfall.mileage);
+      const bankShiftBase = Math.max(22, Math.min(widthPx / 2 + 10, 46));
+      const bankOffset = outfall.bank === "left" ? -bankShiftBase : outfall.bank === "right" ? bankShiftBase : 0;
+      const centerX = anchorX + bankOffset;
+      const topY = chartLayout.yForElev(outfall.crown_elev);
+      const bottomY = chartLayout.yForElev(outfall.base_elev);
+      return {
+        shape: outfall.shape,
+        anchorX,
+        centerX,
+        centerY: (topY + bottomY) / 2,
+        topY,
+        bottomY,
+        left: centerX - widthPx / 2,
+        right: centerX + widthPx / 2,
+        widthPx,
+        heightPx,
+      };
+    }
+
+    function drawOutfalls() {
+      const filtered = visibleOutfalls();
+      const activeStatusKey = activeScenario;
+      const deferredLabels = [];
+      const lanes = { left: [], right: [], unknown: [] };
+
+      function nextLane(bank, centerX, widthPx) {
+        const track = lanes[bank] || lanes.unknown;
+        const threshold = Math.max(70, widthPx * 0.7);
+        const nearby = track.filter((entry) => Math.abs(entry - centerX) < threshold).length;
+        track.push(centerX);
+        return nearby % 3;
+      }
+
+      filtered.forEach((outfall) => {
+        const geom = computeOutfallGeometry(outfall);
+        if (!geom) {
+          return;
+        }
+        if (geom.right < chartLayout.frame.left - 220 || geom.left > chartLayout.frame.right + 220) {
+          return;
+        }
+        const statusInfo = outfall.statuses[activeStatusKey] || { status_key: "unknown", level: null };
+        const strokeColor = STATUS_META[statusInfo.status_key]?.color || STATUS_META.unknown.color;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(
+          chartLayout.frame.left,
+          chartLayout.frame.top,
+          chartLayout.frame.width,
+          chartLayout.frame.height
+        );
+        ctx.clip();
+
+        ctx.strokeStyle = outfall.bank_accent || BANK_META.unknown.accent;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        const connectorEnd = outfall.bank === "left" ? geom.right : outfall.bank === "right" ? geom.left : geom.centerX;
+        ctx.moveTo(geom.anchorX, geom.bottomY);
+        ctx.lineTo(connectorEnd, geom.bottomY);
+        ctx.stroke();
+
+        outfallPath(geom);
+        ctx.fillStyle = "rgba(248,250,252,0.95)";
+        ctx.fill();
+
+        if (statusInfo.level !== null && statusInfo.level > outfall.base_elev) {
+          const cappedLevel = Math.min(statusInfo.level, outfall.crown_elev);
+          const waterY = chartLayout.yForElev(cappedLevel);
+          ctx.save();
+          outfallPath(geom);
+          ctx.clip();
+          ctx.fillStyle = CONTEXT_COLORS.waterFill;
+          ctx.fillRect(geom.left - 2, waterY, geom.widthPx + 4, geom.bottomY - waterY + 2);
+          ctx.restore();
+        }
+        ctx.restore();
+
+        deferredLabels.push({ outfall, geom, strokeColor, lane: nextLane(outfall.bank, geom.centerX, geom.widthPx) });
+      });
+
+      REPORT.scenarios.forEach((scenario) => {
+        drawStepLine(scenario.key, scenario.color, scenario.key === activeStatusKey);
+      });
+
+      deferredLabels.forEach(({ outfall, geom, strokeColor, lane }) => {
+        outfallPath(geom);
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2.4;
+        ctx.stroke();
+
+        const primaryLabel = outfall.code;
+        const secondaryLabel = outfall.size_text || "";
+        const canFitPrimaryInside = geom.widthPx >= 54 && geom.heightPx >= 24;
+        const canFitSecondaryInside = geom.widthPx >= 44 && geom.heightPx >= 40;
+
+        if (canFitPrimaryInside) {
+          drawTag(primaryLabel, geom.centerX, geom.centerY - (canFitSecondaryInside ? 8 : 0), {
+            fontSize: 11,
+            background: "rgba(255,255,255,0.86)",
+          });
+        } else {
+          drawTag(primaryLabel, geom.centerX, geom.topY - 10 - lane * 16, {
+            fontSize: 11,
+            background: "rgba(255,255,255,0.94)",
+          });
+        }
+
+        if (secondaryLabel) {
+          if (canFitSecondaryInside) {
+            drawTag(secondaryLabel, geom.centerX, geom.centerY + 10, {
+              fontSize: 10,
+              background: "rgba(248,250,252,0.78)",
+              color: "#334155",
+            });
+          } else {
+            drawTag(secondaryLabel, geom.centerX, geom.bottomY + 12, {
+              fontSize: 10,
+              background: "rgba(248,250,252,0.9)",
+              color: "#334155",
+            });
+          }
+        }
+      });
+    }
+
+    function renderChart() {
+      computeChartLayout();
+      ctx.clearRect(0, 0, chartLayout.viewportWidth, chartLayout.viewportHeight);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, chartLayout.viewportWidth, chartLayout.viewportHeight);
+      drawRiverbedBackdrop();
+      drawActiveWaterFill();
+
+      const yStep = niceStep(REPORT.bounds.max_elev - REPORT.bounds.min_elev, 8);
+      const xStep = niceStep(REPORT.bounds.max_mileage - REPORT.bounds.min_mileage, 8);
+      const firstY = Math.ceil(REPORT.bounds.min_elev / yStep) * yStep;
+      const firstX = Math.ceil(REPORT.bounds.min_mileage / xStep) * xStep;
+
+      ctx.strokeStyle = "#dbe4ef";
+      ctx.lineWidth = 1;
+      ctx.font = "12px Microsoft YaHei";
+      ctx.fillStyle = "#334155";
+      ctx.textAlign = "right";
+
+      for (let elev = firstY; elev <= REPORT.bounds.max_elev + 1e-6; elev += yStep) {
+        const y = chartLayout.yForElev(elev);
+        ctx.beginPath();
+        ctx.moveTo(chartLayout.frame.left, y);
+        ctx.lineTo(chartLayout.frame.right, y);
+        ctx.stroke();
+        ctx.fillText(formatNumber(elev, 2), chartLayout.frame.left - 12, y + 4);
+      }
+
+      ctx.textAlign = "center";
+      for (let mileage = firstX; mileage <= REPORT.bounds.max_mileage + 1e-6; mileage += xStep) {
+        const x = chartLayout.xForMileage(mileage);
+        if (x < chartLayout.frame.left - 30 || x > chartLayout.frame.right + 30) {
+          continue;
+        }
+        ctx.beginPath();
+        ctx.moveTo(x, chartLayout.frame.top);
+        ctx.lineTo(x, chartLayout.frame.bottom);
+        ctx.stroke();
+        ctx.fillText(axisMileageLabel(mileage), x, chartLayout.frame.bottom + 22);
+      }
+
+      ctx.strokeStyle = "#0f172a";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(chartLayout.frame.left, chartLayout.frame.top);
+      ctx.lineTo(chartLayout.frame.left, chartLayout.frame.bottom);
+      ctx.lineTo(chartLayout.frame.right, chartLayout.frame.bottom);
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(34, chartLayout.frame.top + chartLayout.frame.height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.font = "14px Microsoft YaHei";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#0f172a";
+      ctx.fillText("高程 (m)", 0, 0);
+      ctx.restore();
+
+      ctx.textAlign = "center";
+      ctx.font = "14px Microsoft YaHei";
+      ctx.fillStyle = "#0f172a";
+      ctx.fillText(usesKilometers() ? "里程 (km)" : "里程 (m)", chartLayout.frame.left + chartLayout.frame.width / 2, chartLayout.viewportHeight - 22);
+
+      REPORT.controls.forEach((control) => {
+        const x = chartLayout.xForMileage(control.mileage);
+        if (x < chartLayout.frame.left - 120 || x > chartLayout.frame.right + 120) {
+          return;
+        }
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = "#475569";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, chartLayout.frame.top);
+        ctx.lineTo(x, chartLayout.frame.bottom);
+        ctx.stroke();
+        ctx.restore();
+        drawTag(control.name, x, chartLayout.frame.top - 14, {
+          fontSize: 10,
+          background: "rgba(255,255,255,0.88)",
+          color: "#334155",
+        });
+      });
+
+      drawChannelProfiles();
+      drawOutfalls();
+    }
+
+    function renderTimeline() {
+      computeTimelineLayout();
+      timelineCtx.clearRect(0, 0, timelineLayout.width, timelineLayout.height);
+      timelineCtx.fillStyle = "#ffffff";
+      timelineCtx.fillRect(0, 0, timelineLayout.width, timelineLayout.height);
+
+      const barY = timelineLayout.barTop;
+      drawRoundRect(timelineCtx, timelineLayout.barLeft, barY, timelineLayout.barWidth, timelineLayout.barHeight, 9);
+      timelineCtx.fillStyle = "#e2e8f0";
+      timelineCtx.fill();
+
+      const xForMileage = (mileage) =>
+        timelineLayout.barLeft + ((mileage - REPORT.bounds.min_mileage) / (REPORT.bounds.max_mileage - REPORT.bounds.min_mileage || 1)) * timelineLayout.barWidth;
+
+      REPORT.controls.forEach((control) => {
+        const x = xForMileage(control.mileage);
+        timelineCtx.strokeStyle = "#475569";
+        timelineCtx.lineWidth = 1;
+        timelineCtx.beginPath();
+        timelineCtx.moveTo(x, barY - 6);
+        timelineCtx.lineTo(x, barY + timelineLayout.barHeight + 14);
+        timelineCtx.stroke();
+      });
+
+      REPORT.outfalls.forEach((outfall) => {
+        if (!bankVisibility[outfall.bank]) {
+          return;
+        }
+        const x = xForMileage(outfall.mileage);
+        timelineCtx.strokeStyle = outfall.bank === "left" ? "#0f766e" : outfall.bank === "right" ? "#1d4ed8" : "#64748b";
+        timelineCtx.lineWidth = 1.6;
+        timelineCtx.beginPath();
+        timelineCtx.moveTo(x, barY + 2);
+        timelineCtx.lineTo(x, barY + timelineLayout.barHeight - 2);
+        timelineCtx.stroke();
+      });
+
+      const visibleRatio = chartLayout.plotViewWidth / chartLayout.worldPlotWidth;
+      const startRatio = panX / chartLayout.worldPlotWidth;
+      const brushX = timelineLayout.barLeft + timelineLayout.barWidth * startRatio;
+      const brushW = Math.max(22, timelineLayout.barWidth * visibleRatio);
+      drawRoundRect(timelineCtx, brushX, barY - 4, brushW, timelineLayout.barHeight + 8, 10);
+      timelineCtx.fillStyle = "rgba(37, 99, 235, 0.14)";
+      timelineCtx.fill();
+      timelineCtx.strokeStyle = "#2563eb";
+      timelineCtx.lineWidth = 1.8;
+      timelineCtx.stroke();
+
+      const xStep = niceStep(REPORT.bounds.max_mileage - REPORT.bounds.min_mileage, 6);
+      const firstX = Math.ceil(REPORT.bounds.min_mileage / xStep) * xStep;
+      timelineCtx.font = "11px Microsoft YaHei";
+      timelineCtx.textAlign = "center";
+      timelineCtx.fillStyle = "#334155";
+      for (let mileage = firstX; mileage <= REPORT.bounds.max_mileage + 1e-6; mileage += xStep) {
+        const x = xForMileage(mileage);
+        timelineCtx.beginPath();
+        timelineCtx.moveTo(x, timelineLayout.axisY - 8);
+        timelineCtx.lineTo(x, timelineLayout.axisY - 2);
+        timelineCtx.strokeStyle = "#cbd5e1";
+        timelineCtx.lineWidth = 1;
+        timelineCtx.stroke();
+        timelineCtx.fillText(axisMileageLabel(mileage), x, timelineLayout.axisY + 10);
+      }
+
+      const viewStartMileage = REPORT.bounds.min_mileage + (panX / chartLayout.worldPlotWidth) * (REPORT.bounds.max_mileage - REPORT.bounds.min_mileage);
+      const viewEndMileage = REPORT.bounds.min_mileage + ((panX + chartLayout.plotViewWidth) / chartLayout.worldPlotWidth) * (REPORT.bounds.max_mileage - REPORT.bounds.min_mileage);
+      document.getElementById("timelineInfo").textContent =
+        `当前视窗: ${formatMileage(viewStartMileage, 2)} - ${formatMileage(viewEndMileage, 2)} / 全长 ${formatMileage(REPORT.bounds.max_mileage - REPORT.bounds.min_mileage, 2)}`;
+    }
+
+    function renderAll() {
+      renderChart();
+      renderTimeline();
+    }
+
+    function handleWheel(event) {
+      event.preventDefault();
+      if (!chartLayout) {
+        return;
+      }
+      const rect = chartHost.getBoundingClientRect();
+      const localX = event.clientX - rect.left - chartLayout.frame.left;
+      const anchor = Math.max(0, Math.min(chartLayout.plotViewWidth, localX));
+      const previousWorldWidth = chartLayout.worldPlotWidth;
+      const anchorWorldX = panX + anchor;
+      const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const nextScale = Math.max(1, Math.min(8, horizontalScale * zoomFactor));
+      if (Math.abs(nextScale - horizontalScale) < 1e-4) {
+        return;
+      }
+      horizontalScale = nextScale;
+      const nextWorldWidth = chartLayout.plotViewWidth * horizontalScale;
+      panX = ((anchorWorldX / previousWorldWidth) * nextWorldWidth) - anchor;
+      panX = clampPan(panX);
+      renderAll();
+    }
+
+    function panToClientX(clientX) {
+      if (!timelineLayout || !chartLayout) {
+        return;
+      }
+      const rect = timelineCanvas.getBoundingClientRect();
+      const localX = Math.max(timelineLayout.barLeft, Math.min(clientX - rect.left, timelineLayout.barRight));
+      const ratio = (localX - timelineLayout.barLeft) / timelineLayout.barWidth;
+      panX = clampPan(ratio * chartLayout.worldPlotWidth - chartLayout.plotViewWidth / 2);
+      renderAll();
+    }
+
+    chartHost.addEventListener("wheel", handleWheel, { passive: false });
+    chartHost.addEventListener("mousedown", (event) => {
+      chartDrag = { startX: event.clientX, startPanX: panX };
+      chartHost.classList.add("dragging");
+      event.preventDefault();
+    });
+
+    timelineCanvas.addEventListener("mousedown", (event) => {
+      timelineDragging = true;
+      panToClientX(event.clientX);
+      event.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (event) => {
+      if (chartDrag) {
+        panX = clampPan(chartDrag.startPanX - (event.clientX - chartDrag.startX));
+        renderAll();
+      } else if (timelineDragging) {
+        panToClientX(event.clientX);
+      }
+    });
+
+    window.addEventListener("mouseup", () => {
+      chartDrag = null;
+      timelineDragging = false;
+      chartHost.classList.remove("dragging");
+    });
+
+    buildScenarioButtons();
+    buildLegend();
+    updateHero();
+    updatePanels();
+    renderAll();
+    window.addEventListener("resize", renderAll);
+  </script>
+</body>
+</html>

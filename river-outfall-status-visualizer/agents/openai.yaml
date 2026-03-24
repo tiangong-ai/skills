@@ -1,0 +1,4 @@
+interface:
+  display_name: "River Outfall Status Visualizer"
+  short_description: "Build river outfall status charts and flood summaries"
+  default_prompt: "Use $river-outfall-status-visualizer to turn my river outfall Excel data into a report-ready status chart and submerged-outfall summary."
