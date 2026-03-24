@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "adjudication_id": "adjudication-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "authorization_id": "matchauth-round-001",
+  "matching_result_id": "matchres-round-001",
+  "adjudication_status": "complete",
+  "summary": "The first matching pass produced one active evidence card and no unresolved remands.",
+  "matching_reasonable": true,
+  "needs_additional_data": false,
+  "card_ids": [
+    "evidence-001"
+  ],
+  "isolated_entry_ids": [],
+  "remand_ids": [],
+  "open_questions": [],
+  "recommended_next_actions": []
+}

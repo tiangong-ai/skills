@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "submission_id": "claimsub-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "sociologist",
+  "claim_id": "claim-001",
+  "claim_type": "smoke",
+  "summary": "Public posts claim Chiang Mai smoke worsened on 2026-03-19 due to nearby burning.",
+  "statement": "Public discussion asserts that smoke in Chiang Mai worsened on 2026-03-19 and attributes the episode to nearby or upwind burning.",
+  "meaning": "This claim captures the dominant public attribution narrative worth testing against physical evidence.",
+  "priority": 1,
+  "needs_physical_validation": true,
+  "worth_storing": true,
+  "source_signal_count": 12,
+  "time_window": {
+    "start_utc": "2026-03-18T00:00:00Z",
+    "end_utc": "2026-03-19T23:59:59Z"
+  },
+  "place_scope": {
+    "label": "Chiang Mai, Thailand",
+    "geometry": {
+      "type": "Point",
+      "latitude": 18.7883,
+      "longitude": 98.9853
+    }
+  },
+  "public_refs": [
+    {
+      "source_skill": "gdelt-doc-search",
+      "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/sociologist/raw/gdelt-doc-search.json",
+      "record_locator": "$.articles[0]",
+      "external_id": "gdelt-article-001"
+    }
+  ],
+  "compact_audit": {
+    "representative": true,
+    "retained_count": 3,
+    "total_candidate_count": 12,
+    "coverage_summary": "The compact view keeps the dominant attribution cluster and preserves the main source channels.",
+    "concentration_flags": [],
+    "sampling_notes": [
+      "Top titles were deduplicated by semantic fingerprint before compaction."
+    ]
+  }
+}

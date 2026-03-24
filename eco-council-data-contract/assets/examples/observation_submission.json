@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "submission_id": "obssub-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "environmentalist",
+  "observation_id": "obs-001",
+  "source_skill": "open-meteo-air-quality-fetch",
+  "metric": "pm2_5",
+  "aggregation": "window-summary",
+  "value": 42.7,
+  "unit": "ug/m3",
+  "meaning": "The mission window contains elevated particulate concentrations consistent with a smoke episode.",
+  "worth_storing": true,
+  "time_window": {
+    "start_utc": "2026-03-18T00:00:00Z",
+    "end_utc": "2026-03-19T23:59:59Z"
+  },
+  "place_scope": {
+    "label": "Chiang Mai, Thailand",
+    "geometry": {
+      "type": "Point",
+      "latitude": 18.7883,
+      "longitude": 98.9853
+    }
+  },
+  "quality_flags": [
+    "modeled-background"
+  ],
+  "provenance": {
+    "source_skill": "open-meteo-air-quality-fetch",
+    "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
+    "record_locator": "$.records[0]"
+  },
+  "compact_audit": {
+    "representative": true,
+    "retained_count": 4,
+    "total_candidate_count": 24,
+    "coverage_summary": "The compact summary preserves the peak PM signal and the dominant modeled background context.",
+    "concentration_flags": [],
+    "sampling_notes": [
+      "Window summaries were preferred over raw hourly rows for compact storage."
+    ]
+  }
+}

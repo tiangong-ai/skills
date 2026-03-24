@@ -1,12 +1,13 @@
 {
   "case_id": "flood_supported_complete",
-  "description": "Flood claim is sufficiently supported by hydrology signals and should close without another round.",
+  "description": "Flood claim is physically supported, but public-side coverage remains too thin, so one follow-up public-discussion round is still required.",
   "round_id": "round-001",
   "mission": {
     "schema_version": "1.0.0",
     "run_id": "eval-flood-supported-complete",
     "topic": "Flood verification replay",
     "objective": "Check that a supported flood claim closes cleanly.",
+    "policy_profile": "standard",
     "window": {
       "start_utc": "2026-03-03T00:00:00Z",
       "end_utc": "2026-03-05T23:59:59Z"
@@ -27,14 +28,51 @@
       "max_claims_per_round": 3,
       "max_tasks_per_round": 4
     },
-    "source_policy": {
-      "sociologist": [
-        "gdelt-doc-search"
-      ],
-      "environmentalist": [
-        "open-meteo-flood-fetch"
-      ],
-      "historian": []
+    "source_governance": {
+      "approval_authority": "policy",
+      "allow_cross_round_anchors": true,
+      "max_selected_sources_per_role": 2,
+      "max_active_families_per_role": 2,
+      "max_non_entry_layers_per_role": 0,
+      "approved_layers": [],
+      "families": [
+        {
+          "family_id": "gdelt",
+          "role": "sociologist",
+          "label": "GDELT public coverage",
+          "layers": [
+            {
+              "layer_id": "recon",
+              "tier": "l1",
+              "skills": [
+                "gdelt-doc-search"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "openmeteo-flood",
+          "role": "environmentalist",
+          "label": "Open-Meteo flood",
+          "layers": [
+            {
+              "layer_id": "flood-model",
+              "tier": "l1",
+              "skills": [
+                "open-meteo-flood-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        }
+      ]
     }
   },
   "tasks": [
@@ -62,8 +100,15 @@
           "start_utc": "2026-03-03T00:00:00Z",
           "end_utc": "2026-03-05T23:59:59Z"
         },
-        "preferred_sources": [
-          "gdelt-doc-search"
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-sociologist-round-001-flood-public",
+            "requirement_type": "public-claim-discovery",
+            "summary": "Collect attributable public flood claims for Brisbane during the mission window.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Replay fixture."
@@ -92,8 +137,15 @@
           "start_utc": "2026-03-03T00:00:00Z",
           "end_utc": "2026-03-05T23:59:59Z"
         },
-        "preferred_sources": [
-          "open-meteo-flood-fetch"
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-environmentalist-round-001-flood-physical",
+            "requirement_type": "precipitation-hydrology",
+            "summary": "Collect hydrological evidence for the Brisbane flood claim in the mission window.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Replay fixture."
@@ -252,13 +304,44 @@
   ],
   "expect": {
     "decision": {
-      "moderator_status": "complete",
-      "next_round_required": false,
+      "moderator_status": "continue",
+      "next_round_required": true,
       "evidence_sufficiency": "sufficient",
       "missing_evidence_types": []
     },
+    "next_round_tasks": [
+      {
+        "assigned_role": "sociologist",
+        "objective": "Collect more independent public-discussion evidence for the same mission window.",
+        "expected_output_kinds": [
+          "source-selection",
+          "claim-submission",
+          "data-readiness-report",
+          "expert-report"
+        ],
+        "inputs": {
+          "evidence_requirements": [
+            {
+              "requirement_type": "public-discussion-coverage"
+            }
+          ]
+        }
+      }
+    ],
+    "next_round_tasks_forbidden_fields": [
+      {
+        "match": {
+          "assigned_role": "sociologist",
+          "objective": "Collect more independent public-discussion evidence for the same mission window."
+        },
+        "fields": [
+          "inputs.preferred_sources",
+          "inputs.required_sources"
+        ]
+      }
+    ],
     "context": {
-      "context_layer": "compact-v1",
+      "context_layer": "evidence-library-v1",
       "max_observations": 8,
       "max_claims": 4
     }

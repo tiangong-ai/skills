@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "isolated_id": "isolated-claim-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "entity_kind": "claim",
+  "entity_id": "claim-001",
+  "summary": "Public smoke attribution claim remains unmatched after the first matching pass.",
+  "reason": "Public-side evidence is currently isolated from physical corroboration."
+}

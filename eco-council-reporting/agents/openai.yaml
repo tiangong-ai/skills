@@ -1,4 +1,4 @@
 interface:
   display_name: "Eco Council Reporting"
-  short_description: "Draft eco-council reports, decisions, next tasks"
-  default_prompt: "Use $eco-council-reporting to build expert-report packets, moderator decision drafts, and next-round task drafts that preserve audited source-selection before any new fetch stage."
+  short_description: "Stage-gated eco-council reporting packets"
+  default_prompt: "Use $eco-council-reporting to build eco-council data-readiness, matching-authorization, post-match report, and decision packets without bypassing the audited stage flow."

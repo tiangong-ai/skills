@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -34,6 +35,7 @@ ROUND_DIR_PATTERN = re.compile(r"^round_(\d{3})$")
 AGENT_ID_SAFE = re.compile(r"[^a-z0-9-]+")
 ROLES = ("moderator", "sociologist", "environmentalist")
 SOURCE_SELECTION_ROLES = ("sociologist", "environmentalist")
+READINESS_ROLES = ("sociologist", "environmentalist")
 REPORT_ROLES = ("sociologist", "environmentalist")
 OPENCLAW_AGENT_GUIDE_FILENAME = "OPENCLAW_AGENT_GUIDE.md"
 
@@ -42,6 +44,9 @@ STAGE_AWAITING_SOURCE_SELECTION = "awaiting-source-selection"
 STAGE_READY_PREPARE = "ready-to-prepare-round"
 STAGE_READY_FETCH = "ready-to-execute-fetch-plan"
 STAGE_READY_DATA_PLANE = "ready-to-run-data-plane"
+STAGE_AWAITING_DATA_READINESS = "awaiting-data-readiness"
+STAGE_AWAITING_MATCHING_AUTHORIZATION = "awaiting-matching-authorization"
+STAGE_READY_MATCHING_ADJUDICATION = "ready-to-run-matching-adjudication"
 STAGE_AWAITING_REPORTS = "awaiting-expert-reports"
 STAGE_AWAITING_DECISION = "awaiting-moderator-decision"
 STAGE_READY_PROMOTE = "ready-to-promote"
@@ -49,6 +54,43 @@ STAGE_READY_ADVANCE = "ready-to-advance-round"
 STAGE_COMPLETED = "completed"
 DEFAULT_HISTORY_TOP_K = 3
 MAX_HISTORY_TOP_K = 5
+LAST_FAILURE_ERROR_LIMIT = 4000
+DATA_PLANE_STEP_IDS = (
+    "normalize-init-run",
+    "normalize-public",
+    "normalize-environment",
+    "build-round-context",
+    "reporting-build-data-readiness-packets",
+    "render-openclaw-prompts",
+    "validate-bundle",
+    "build-reporting-handoff",
+)
+MATCHING_ADJUDICATION_STEP_IDS = (
+    "link-evidence",
+    "build-round-context",
+    "reporting-build-report-packets",
+    "render-openclaw-prompts",
+    "validate-bundle",
+    "build-reporting-handoff",
+)
+
+
+def load_contract_module() -> Any | None:
+    if not CONTRACT_SCRIPT.exists():
+        return None
+    module_name = "eco_council_contract_supervisor"
+    spec = importlib.util.spec_from_file_location(module_name, CONTRACT_SCRIPT)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+CONTRACT_MODULE = load_contract_module()
+if CONTRACT_MODULE is not None and hasattr(CONTRACT_MODULE, "SCHEMA_VERSION"):
+    SCHEMA_VERSION = CONTRACT_MODULE.SCHEMA_VERSION
 
 
 def utc_now_iso() -> str:
@@ -114,6 +156,15 @@ def maybe_text(value: Any) -> str:
     return " ".join(str(value).split())
 
 
+def truncate_text(value: str, limit: int) -> str:
+    text = maybe_text(value)
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return text[: limit - 3].rstrip() + "..."
+
+
 def require_round_id(value: str) -> str:
     if not ROUND_ID_PATTERN.fullmatch(value):
         raise ValueError(f"Invalid round id: {value!r}")
@@ -177,6 +228,14 @@ def fetch_execution_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "fetch_execution.json"
 
 
+def data_plane_execution_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "data_plane_execution.json"
+
+
+def matching_execution_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_adjudication_execution.json"
+
+
 def fetch_lock_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "fetch.lock"
 
@@ -193,8 +252,210 @@ def source_selection_packet_path(run_dir: Path, round_id: str, role: str) -> Pat
     return round_dir(run_dir, round_id) / role / "derived" / "source_selection_packet.json"
 
 
+def override_requests_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "override_requests.json"
+
+
+def contract_call(name: str, *args: Any, **kwargs: Any) -> Any | None:
+    if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, name):
+        return None
+    helper = getattr(CONTRACT_MODULE, name)
+    return helper(*args, **kwargs)
+
+
+def effective_constraints(mission: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("effective_constraints", mission)
+    if isinstance(value, dict):
+        return value
+    constraints = mission.get("constraints")
+    return constraints if isinstance(constraints, dict) else {}
+
+
+def policy_profile_summary(mission: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("policy_profile_summary", mission)
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def load_override_requests(run_dir: Path, round_id: str, role: str | None = None) -> list[dict[str, Any]]:
+    roles = (role,) if role else ROLES
+    output: list[dict[str, Any]] = []
+    for role_name in roles:
+        payload = load_json_if_exists(override_requests_path(run_dir, round_id, role_name))
+        if not isinstance(payload, list):
+            continue
+        output.extend(item for item in payload if isinstance(item, dict))
+    output.sort(key=lambda item: maybe_text(item.get("request_id")))
+    return output
+
+
+def prior_round_ids(run_dir: Path, round_id: str) -> list[str]:
+    round_ids = discover_round_ids(run_dir)
+    if round_id not in round_ids:
+        return round_ids
+    current_index = round_ids.index(round_id)
+    return round_ids[:current_index]
+
+
+def role_source_governance(mission: dict[str, Any], role: str) -> dict[str, Any]:
+    governance = contract_call("source_governance", mission)
+    if not isinstance(governance, dict):
+        return {}
+    family_lookup = contract_call("source_family_lookup", mission, role=role)
+    if isinstance(family_lookup, dict):
+        role_families = list(family_lookup.values())
+    else:
+        role_families = [
+            family
+            for family in governance.get("families", [])
+            if isinstance(family, dict) and maybe_text(family.get("role")) == role
+        ]
+    family_ids = {maybe_text(family.get("family_id")) for family in role_families if maybe_text(family.get("family_id"))}
+    approved_layers = [
+        approval
+        for approval in governance.get("approved_layers", [])
+        if isinstance(approval, dict) and maybe_text(approval.get("family_id")) in family_ids
+    ]
+    return {
+        "approval_authority": maybe_text(governance.get("approval_authority")),
+        "allow_cross_round_anchors": bool(governance.get("allow_cross_round_anchors")),
+        "max_selected_sources_per_role": governance.get("max_selected_sources_per_role"),
+        "max_active_families_per_role": governance.get("max_active_families_per_role"),
+        "max_non_entry_layers_per_role": governance.get("max_non_entry_layers_per_role"),
+        "approved_layers": approved_layers,
+        "families": role_families,
+    }
+
+
+def role_evidence_requirements(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    requirements: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for task in tasks:
+        inputs = task.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        values = inputs.get("evidence_requirements")
+        if not isinstance(values, list):
+            continue
+        for requirement in values:
+            if not isinstance(requirement, dict):
+                continue
+            requirement_id = maybe_text(requirement.get("requirement_id"))
+            if not requirement_id or requirement_id.casefold() in seen:
+                continue
+            seen.add(requirement_id.casefold())
+            requirements.append(json.loads(json.dumps(requirement)))
+    return requirements
+
+
+def role_family_memory(run_dir: Path, round_id: str, role: str, mission: dict[str, Any]) -> list[dict[str, Any]]:
+    governance = role_source_governance(mission, role)
+    families = governance.get("families", []) if isinstance(governance.get("families"), list) else []
+    if not families:
+        return []
+
+    prior_ids = prior_round_ids(run_dir, round_id)
+    history: list[dict[str, Any]] = []
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        family_skills = {
+            maybe_text(skill)
+            for skill in family.get("skills", [])
+            if maybe_text(skill)
+        }
+        rounds: list[dict[str, Any]] = []
+        completed_sources: set[str] = set()
+
+        for observed_round_id in prior_ids:
+            selection = load_json_if_exists(source_selection_path(run_dir, observed_round_id, role))
+            if not isinstance(selection, dict):
+                continue
+            family_plans = selection.get("family_plans")
+            if not isinstance(family_plans, list):
+                continue
+            matching_family = next(
+                (
+                    item
+                    for item in family_plans
+                    if isinstance(item, dict) and maybe_text(item.get("family_id")) == family_id
+                ),
+                None,
+            )
+            if not isinstance(matching_family, dict):
+                continue
+            layer_plans = matching_family.get("layer_plans")
+            selected_layers: list[str] = []
+            selected_sources: list[str] = []
+            if isinstance(layer_plans, list):
+                for layer_plan in layer_plans:
+                    if not isinstance(layer_plan, dict) or layer_plan.get("selected") is not True:
+                        continue
+                    layer_id = maybe_text(layer_plan.get("layer_id"))
+                    if layer_id:
+                        selected_layers.append(layer_id)
+                    skills = layer_plan.get("source_skills")
+                    if isinstance(skills, list):
+                        selected_sources.extend(maybe_text(skill) for skill in skills if maybe_text(skill))
+
+            fetch_payload = load_json_if_exists(fetch_execution_path(run_dir, observed_round_id))
+            statuses = fetch_payload.get("statuses") if isinstance(fetch_payload, dict) else []
+            completed_in_round: list[str] = []
+            if isinstance(statuses, list):
+                for status in statuses:
+                    if not isinstance(status, dict):
+                        continue
+                    if maybe_text(status.get("status")) != "completed":
+                        continue
+                    if maybe_text(status.get("assigned_role")) != role:
+                        continue
+                    source_skill = maybe_text(status.get("source_skill")) or maybe_text(status.get("source"))
+                    if source_skill and source_skill in family_skills:
+                        completed_sources.add(source_skill)
+                        completed_in_round.append(source_skill)
+
+            rounds.append(
+                {
+                    "round_id": observed_round_id,
+                    "selection_status": maybe_text(selection.get("status")),
+                    "selected_layers": sorted({item for item in selected_layers if item}),
+                    "selected_sources": sorted({item for item in selected_sources if item}),
+                    "completed_sources": sorted({item for item in completed_in_round if item}),
+                    "summary": maybe_text(selection.get("summary")),
+                }
+            )
+
+        history.append(
+            {
+                "family_id": family_id,
+                "label": maybe_text(family.get("label")),
+                "prior_rounds": rounds[-3:],
+                "completed_sources": sorted(completed_sources),
+            }
+        )
+    return history
+
+
 def report_draft_path(run_dir: Path, round_id: str, role: str) -> Path:
     return round_dir(run_dir, round_id) / role / "derived" / f"{role}_report_draft.json"
+
+
+def data_readiness_report_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "data_readiness_report.json"
+
+
+def data_readiness_draft_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "derived" / f"{role}_data_readiness_draft.json"
+
+
+def data_readiness_packet_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "derived" / "data_readiness_packet.json"
+
+
+def data_readiness_prompt_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "derived" / "openclaw_data_readiness_prompt.txt"
 
 
 def report_target_path(run_dir: Path, round_id: str, role: str) -> Path:
@@ -213,6 +474,30 @@ def decision_draft_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "council_decision_draft.json"
 
 
+def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
+
+
+def matching_authorization_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_authorization_draft.json"
+
+
+def matching_authorization_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_authorization_packet.json"
+
+
+def matching_authorization_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_matching_authorization_prompt.txt"
+
+
+def matching_result_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "matching_result.json"
+
+
+def evidence_adjudication_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence_adjudication.json"
+
+
 def decision_prompt_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_decision_prompt.txt"
 
@@ -225,6 +510,10 @@ def decision_target_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "council_decision.json"
 
 
+def reporting_handoff_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_reporting_handoff.json"
+
+
 def shared_claims_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "shared" / "claims.json"
 
@@ -235,6 +524,26 @@ def shared_observations_path(run_dir: Path, round_id: str) -> Path:
 
 def shared_evidence_cards_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "shared" / "evidence_cards.json"
+
+
+def claims_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "claims_active.json"
+
+
+def observations_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "observations_active.json"
+
+
+def cards_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "cards_active.json"
+
+
+def isolated_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "isolated_active.json"
+
+
+def remands_open_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "remands_open.json"
 
 
 def public_signals_path(run_dir: Path, round_id: str) -> Path:
@@ -366,6 +675,7 @@ def load_state(run_dir: Path) -> dict[str, Any]:
 
 
 def save_state(run_dir: Path, state: dict[str, Any]) -> None:
+    prune_last_failure(state)
     state["updated_at_utc"] = utc_now_iso()
     refresh_supervisor_files(run_dir, state)
     write_json(supervisor_state_path(run_dir), state, pretty=True)
@@ -690,10 +1000,10 @@ def openclaw_agent_guide_text(*, run_dir: Path, state: dict[str, Any], role: str
             f"- `{status_command}`",
             "  Purpose: inspect current round, current stage, prompt paths, and recommended next command.",
             f"- `{continue_command}`",
-            "  Purpose: advance one supervisor-owned shell stage such as prepare-round, execute-fetch-plan, run-data-plane, promote-all, or advance-round. Human/supervisor only.",
+            "  Purpose: advance one supervisor-owned shell stage such as prepare-round, execute-fetch-plan, run-data-plane, run-matching-adjudication, promote-all, or advance-round. Human/supervisor only.",
             f"- `{run_agent_command}`",
             "  Purpose: supervisor wrapper that sends the current turn to an OpenClaw agent and imports the validated JSON reply. Do not call this from inside the agent already handling the turn.",
-            "- `python3 ... import-task-review ...` / `import-source-selection ...` / `import-report ...` / `import-decision ...` / `import-fetch-execution ...`",
+            "- `python3 ... import-task-review ...` / `import-source-selection ...` / `import-data-readiness ...` / `import-matching-authorization ...` / `import-report ...` / `import-decision ...` / `import-fetch-execution ...`",
             "  Purpose: import canonical JSON after manual edits or external fetch execution. Human/supervisor only.",
             f"- `{provision_command}`",
             "  Purpose: create or repair the three fixed OpenClaw agents and workspace support files. Human/supervisor only.",
@@ -704,11 +1014,15 @@ def openclaw_agent_guide_text(*, run_dir: Path, state: dict[str, Any], role: str
             "- Validation commands printed inside the active prompt or packet",
             "  Purpose: check that the JSON artifact you just edited matches the required eco-council schema. Safe to run when the prompt explicitly asks for validation.",
             "",
+            "Policy note:",
+            "- Mission `policy_profile` expands into the active caps and source-governance envelope shown in the current packet.",
+            "- If the envelope is insufficient, return `override_requests` inside the requested JSON artifact. Those requests are advisory only until an upstream human/supervisor edits mission.json.",
+            "",
             "Never do the following unless the human explicitly changes your role to supervisor operator:",
             "- Do not call `continue-run`, `run-agent-step`, or any `import-*` command from inside a normal role turn.",
-            "- Do not run raw fetch shell commands during task-review, source-selection, report, or decision turns.",
+            "- Do not run raw fetch shell commands during task-review, source-selection, data-readiness, matching-authorization, report, or decision turns.",
             "- Do not mutate files other than the target JSON artifact named by the current turn prompt.",
-            "- Do not invent fetch results, evidence cards, or reports outside the current stage contract.",
+            "- Do not invent fetch results, readiness reports, matching outputs, evidence cards, or reports outside the current stage contract.",
         ]
     )
 
@@ -732,21 +1046,27 @@ def session_prompt_text(*, run_dir: Path, state: dict[str, Any], role: str, agen
             "1. Stay in role for the full run.",
             "2. Only work on the JSON file/object explicitly requested by the supervisor.",
             "3. For task review turns, return only a JSON list of round-task objects.",
-            "4. For decision turns, return only one JSON object shaped like council-decision.",
-            "5. Never add markdown, prose, or code fences.",
-            "6. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
-            "7. If compact historical-case context is provided, use it only to prioritize work and avoid redundant fetch requests; never treat it as current-round evidence.",
+            "4. For matching-authorization turns, return only one JSON object shaped like matching-authorization.",
+            "5. For decision turns, return only one JSON object shaped like council-decision.",
+            "6. Never add markdown, prose, or code fences.",
+            "7. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
+            "8. If compact historical-case context is provided, use it only to prioritize work and avoid redundant fetch requests; never treat it as current-round evidence.",
+            "9. Describe evidence needs, claim focus, and priorities in tasks or decisions; do not prescribe exact source skills or source-family layer upgrades.",
+            "10. If policy caps block necessary next steps, use the decision override_requests field to ask an upstream human/bot for envelope changes instead of applying them yourself.",
         ]
     else:
         rules = [
             "1. Stay in role for the full run.",
-            "2. Only work on the source-selection packet or report packet explicitly requested by the supervisor.",
+            "2. Only work on the source-selection packet, data-readiness packet, or report packet explicitly requested by the supervisor.",
             "3. For source-selection turns, return only one JSON object shaped like source-selection.",
-            "4. For report turns, return only one JSON object shaped like expert-report.",
-            "5. Never add markdown, prose, or code fences.",
-            "6. Do not invent new raw data fetch results in the report stage.",
-            "7. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
-            "8. `recommended_next_actions` must be a list of objects with `assigned_role`, `objective`, and `reason`; use [] when there are no recommendations.",
+            "4. For data-readiness turns, return only one JSON object shaped like data-readiness-report.",
+            "5. For report turns, return only one JSON object shaped like expert-report.",
+            "6. Never add markdown, prose, or code fences.",
+            "7. Do not invent new raw data fetch results in readiness or report stages.",
+            "8. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
+            "9. `recommended_next_actions` must be a list of objects with `assigned_role`, `objective`, and `reason`; use [] when there are no recommendations.",
+            "10. Treat moderator tasks as evidence needs only. Use governance, family layers, and anchors to decide exact source skills.",
+            "11. Never self-apply profile or governance changes. If the current envelope is insufficient, keep work inside bounds and use override_requests so an upstream human/bot can decide.",
         ]
     command_notes = [
         "",
@@ -793,6 +1113,8 @@ def build_source_selection_packet(run_dir: Path, round_id: str, role: str) -> Pa
     task_payload = read_json(tasks_path(run_dir, round_id))
     tasks = task_payload if isinstance(task_payload, list) else []
     role_tasks = [item for item in tasks_for_role(tasks, role) if isinstance(item, dict)]
+    governance = role_source_governance(mission_payload, role)
+    profile = policy_profile_summary(mission_payload)
     packet = {
         "schema_version": SCHEMA_VERSION,
         "packet_kind": "eco-council-source-selection-packet",
@@ -800,9 +1122,15 @@ def build_source_selection_packet(run_dir: Path, round_id: str, role: str) -> Pa
         "round_id": round_id,
         "agent_role": role,
         "mission": mission_payload,
+        "policy_profile": profile,
+        "effective_constraints": effective_constraints(mission_payload),
         "tasks": role_tasks,
-        "allowed_sources": source_policy_for_role(mission_payload, role),
+        "evidence_requirements": role_evidence_requirements(role_tasks),
+        "allowed_sources": allowed_sources_for_role(mission_payload, role),
+        "governance": governance,
+        "family_memory": role_family_memory(run_dir, round_id, role, mission_payload),
         "current_source_selection": load_json_if_exists(source_selection_path(run_dir, round_id, role)),
+        "existing_override_requests": load_override_requests(run_dir, round_id, role),
     }
     target = source_selection_packet_path(run_dir, round_id, role)
     write_json(target, packet, pretty=True)
@@ -825,6 +1153,8 @@ def render_source_selection_prompt(run_dir: Path, round_id: str, role: str) -> P
         f"Write the canonical source-selection object at: {target_path}",
         "",
         "Review whether your role needs any raw-data fetch sources before prepare-round.",
+        "Treat moderator tasks as evidence-need statements only. Do not treat them as source commands.",
+        "Use packet.governance as the authority boundary: only upstream-approved or policy-auto layers may be selected.",
         "Requirements:",
         "1. Return exactly one valid source-selection JSON object.",
         "2. Keep run_id, round_id, agent_role, task_ids, and allowed_sources aligned with the packet unless the packet itself is stale.",
@@ -833,8 +1163,12 @@ def render_source_selection_prompt(run_dir: Path, round_id: str, role: str) -> P
         "4a. In each source_decisions item, use the exact key name source_skill (not source).",
         "5. status must be exactly one of: complete, pending, blocked. For a finished selection, use complete (not completed).",
         "6. If no raw fetch is needed, keep selected_sources as [] and explain why in summary.",
-        "7. Treat task.inputs.preferred_sources only as hints. They do not auto-run.",
-        "8. If the moderator explicitly set task.inputs.required_sources upstream, treat those sources as mandatory forced sources.",
+        "7. Fill family_plans explicitly. Include one family_plans entry for every governed family in packet.governance.families and one layer_plans entry for every governed layer.",
+        "8. For each selected L2 layer, provide a non-empty anchor_refs list and a valid anchor_mode.",
+        "9. Use authorization_basis=entry-layer for L1 entry layers, policy-auto for auto-selectable non-entry layers, and upstream-approval for packet.governance.approved_layers decisions.",
+        "10. Do not invent moderator overrides or self-apply envelope changes. If governance or caps are insufficient, keep selection inside the current envelope and use override_requests with one or more explicit policy requests.",
+        "11. Each override_requests item must stay aligned with the current run_id, round_id, agent_role, and request_origin_kind=source-selection. Use target_path only for the profile-governed fields listed in packet.policy_profile.overrideable_paths.",
+        "12. If no override is needed, keep override_requests as [].",
         "",
         "After editing, validate with:",
         validate_command,
@@ -854,6 +1188,62 @@ def build_current_step_text(run_dir: Path, state: dict[str, Any]) -> str:
         f"Current stage: {stage}",
         "",
     ]
+    pending_override_requests = load_override_requests(run_dir, round_id) if round_id else []
+    if pending_override_requests:
+        lines.extend(
+            [
+                "Pending override requests:",
+                *[
+                    (
+                        f"- {maybe_text(item.get('request_id'))}: {maybe_text(item.get('target_path'))} "
+                        f"requested by {maybe_text(item.get('agent_role'))} from {maybe_text(item.get('request_origin_kind'))}"
+                    )
+                    for item in pending_override_requests
+                ],
+                "- These requests are advisory only. The active mission envelope does not change until an upstream human/bot edits mission.json and regenerates the relevant stage artifacts.",
+                "",
+            ]
+        )
+    last_failure = normalize_last_failure(state.get("last_failure"), round_id=round_id, stage=stage)
+    if last_failure:
+        lines.extend(
+            [
+                "Last recorded failure:",
+                f"- failed_at_utc: {maybe_text(last_failure.get('failed_at_utc'))}",
+                f"- action: {maybe_text(last_failure.get('action'))}",
+                f"- recoverable: {'yes' if bool(last_failure.get('recoverable')) else 'no'}",
+                f"- attempt_count: {maybe_int(last_failure.get('attempt_count'))}",
+                f"- error: {maybe_text(last_failure.get('error'))}",
+            ]
+        )
+        related_paths = [maybe_text(item) for item in last_failure.get("related_paths", []) if maybe_text(item)]
+        if related_paths:
+            lines.extend(
+                [
+                    "",
+                    "Relevant files:",
+                    *[f"- {path}" for path in related_paths],
+                ]
+            )
+        recommended_commands = [maybe_text(item) for item in last_failure.get("recommended_commands", []) if maybe_text(item)]
+        if recommended_commands:
+            lines.extend(
+                [
+                    "",
+                    "Suggested recovery commands:",
+                    *recommended_commands,
+                ]
+            )
+        notes = [maybe_text(item) for item in last_failure.get("notes", []) if maybe_text(item)]
+        if notes:
+            lines.extend(
+                [
+                    "",
+                    "Recovery notes:",
+                    *[f"- {note}" for note in notes],
+                ]
+            )
+        lines.append("")
     if stage == STAGE_AWAITING_TASK_REVIEW:
         lines.extend(
             [
@@ -952,7 +1342,82 @@ def build_current_step_text(run_dir: Path, state: dict[str, Any]) -> str:
     elif stage == STAGE_READY_DATA_PLANE:
         lines.extend(
             [
-                "Run normalization and draft generation:",
+                "Run normalization and data-readiness draft generation:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " continue-run --run-dir "
+                + str(run_dir)
+                + " --pretty",
+            ]
+        )
+    elif stage == STAGE_AWAITING_DATA_READINESS:
+        lines.extend(
+            [
+                "Preferred: run the two expert data-readiness turns automatically, one by one:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role sociologist --pretty",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role environmentalist --pretty",
+                "",
+                "Manual fallback:",
+                "1. Open the sociologist session prompt:",
+                str(session_prompt_path(run_dir, "sociologist")),
+                "",
+                "2. Send this data-readiness prompt to the sociologist agent:",
+                str(outbox_message_path(run_dir, "sociologist_data_readiness")),
+                "",
+                "3. Import the returned JSON:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-data-readiness --run-dir "
+                + str(run_dir)
+                + " --role sociologist --input /path/to/sociologist_data_readiness.json --pretty",
+                "",
+                "4. Repeat the same pattern for the environmentalist:",
+                str(session_prompt_path(run_dir, "environmentalist")),
+                str(outbox_message_path(run_dir, "environmentalist_data_readiness")),
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-data-readiness --run-dir "
+                + str(run_dir)
+                + " --role environmentalist --input /path/to/environmentalist_data_readiness.json --pretty",
+            ]
+        )
+    elif stage == STAGE_AWAITING_MATCHING_AUTHORIZATION:
+        lines.extend(
+            [
+                "Preferred: run the moderator matching-authorization turn automatically:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role moderator --pretty",
+                "",
+                "Manual fallback:",
+                "1. Open the moderator session prompt:",
+                str(session_prompt_path(run_dir, "moderator")),
+                "",
+                "2. Send this matching-authorization prompt to the moderator agent:",
+                str(outbox_message_path(run_dir, "moderator_matching_authorization")),
+                "",
+                "3. Import the returned JSON:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-matching-authorization --run-dir "
+                + str(run_dir)
+                + " --input /path/to/matching_authorization.json --pretty",
+            ]
+        )
+    elif stage == STAGE_READY_MATCHING_ADJUDICATION:
+        lines.extend(
+            [
+                "Run the authorized matching and adjudication stage:",
                 "python3 "
                 + str(SCRIPT_DIR / "eco_council_supervisor.py")
                 + " continue-run --run-dir "
@@ -1079,6 +1544,9 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
         "moderator_task_review",
         "sociologist_source_selection",
         "environmentalist_source_selection",
+        "sociologist_data_readiness",
+        "environmentalist_data_readiness",
+        "moderator_matching_authorization",
         "sociologist_report",
         "environmentalist_report",
         "moderator_decision",
@@ -1109,6 +1577,26 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
                     prompt_path=prompt_path,
                 ),
             )
+    if stage == STAGE_AWAITING_DATA_READINESS:
+        for role in READINESS_ROLES:
+            write_text(
+                outbox_message_path(run_dir, f"{role}_data_readiness"),
+                role_prompt_outbox_text(
+                    role=role,
+                    round_id=current_round_id,
+                    prompt_path=data_readiness_prompt_path(run_dir, current_round_id, role),
+                ),
+            )
+    if stage == STAGE_AWAITING_MATCHING_AUTHORIZATION:
+        write_text(
+            outbox_message_path(run_dir, "moderator_matching_authorization"),
+            role_prompt_outbox_text(
+                role="moderator",
+                round_id=current_round_id,
+                prompt_path=matching_authorization_prompt_path(run_dir, current_round_id),
+                history_path=history_path,
+            ),
+        )
     if stage == STAGE_AWAITING_REPORTS:
         for role in REPORT_ROLES:
             write_text(
@@ -1144,9 +1632,12 @@ def build_state_payload(*, run_dir: Path, round_id: str, agent_prefix: str) -> d
         "imports": {
             "task_review_received": False,
             "source_selection_roles_received": [],
+            "data_readiness_roles_received": [],
+            "matching_authorization_received": False,
             "report_roles_received": [],
             "decision_received": False,
         },
+        "last_failure": {},
         "openclaw": {
             "agent_prefix": prefix,
             "workspace_root": str(supervisor_dir(run_dir) / "openclaw-workspaces"),
@@ -1179,9 +1670,15 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
     round_id = maybe_text(state.get("current_round_id"))
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     stage = maybe_text(state.get("stage"))
+    last_failure = normalize_last_failure(state.get("last_failure"), round_id=round_id, stage=stage)
+    mission_payload = load_json_if_exists(mission_path(run_dir))
+    mission = mission_payload if isinstance(mission_payload, dict) else {}
+    pending_override_requests = load_override_requests(run_dir, round_id) if round_id else []
     stage_outboxes = {
         STAGE_AWAITING_TASK_REVIEW: ("moderator_task_review",),
         STAGE_AWAITING_SOURCE_SELECTION: ("sociologist_source_selection", "environmentalist_source_selection"),
+        STAGE_AWAITING_DATA_READINESS: ("sociologist_data_readiness", "environmentalist_data_readiness"),
+        STAGE_AWAITING_MATCHING_AUTHORIZATION: ("moderator_matching_authorization",),
         STAGE_AWAITING_REPORTS: ("sociologist_report", "environmentalist_report"),
         STAGE_AWAITING_DECISION: ("moderator_decision",),
     }.get(stage, ())
@@ -1201,6 +1698,8 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
         "run_dir": str(run_dir),
         "current_round_id": round_id,
         "stage": stage,
+        "policy_profile": policy_profile_summary(mission) if mission else {},
+        "effective_constraints": effective_constraints(mission) if mission else {},
         "fetch_execution": maybe_text(state.get("fetch_execution")),
         "imports": {
             "task_review_received": bool(imports.get("task_review_received")),
@@ -1211,6 +1710,14 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
                     if maybe_text(role)
                 }
             ),
+            "data_readiness_roles_received": sorted(
+                {
+                    maybe_text(role)
+                    for role in imports.get("data_readiness_roles_received", [])
+                    if maybe_text(role)
+                }
+            ),
+            "matching_authorization_received": bool(imports.get("matching_authorization_received")),
             "report_roles_received": sorted(
                 {maybe_text(role) for role in imports.get("report_roles_received", []) if maybe_text(role)}
             ),
@@ -1225,10 +1732,35 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
             role: str(source_selection_prompt_path(run_dir, round_id, role))
             for role in SOURCE_SELECTION_ROLES
         },
+        "data_readiness_paths": {
+            role: str(data_readiness_report_path(run_dir, round_id, role))
+            for role in READINESS_ROLES
+        },
+        "data_readiness_prompt_paths": {
+            role: str(data_readiness_prompt_path(run_dir, round_id, role))
+            for role in READINESS_ROLES
+        },
+        "matching_authorization_path": str(matching_authorization_path(run_dir, round_id)),
+        "matching_authorization_prompt_path": str(matching_authorization_prompt_path(run_dir, round_id)),
+        "report_prompt_paths": {
+            role: str(report_prompt_path(run_dir, round_id, role))
+            for role in REPORT_ROLES
+        },
+        "decision_prompt_path": str(decision_prompt_path(run_dir, round_id)),
+        "override_request_paths": {role: str(override_requests_path(run_dir, round_id, role)) for role in ROLES},
+        "pending_override_request_count": len(pending_override_requests),
+        "pending_override_requests": pending_override_requests,
         "fetch_plan_path": str(fetch_plan_path(run_dir, round_id)),
+        "fetch_execution_path": str(fetch_execution_path(run_dir, round_id)),
+        "data_plane_execution_path": str(data_plane_execution_path(run_dir, round_id)),
+        "matching_execution_path": str(matching_execution_path(run_dir, round_id)),
+        "matching_result_path": str(matching_result_path(run_dir, round_id)),
+        "evidence_adjudication_path": str(evidence_adjudication_path(run_dir, round_id)),
         "session_prompt_paths": session_paths,
         "outbox_paths": outbox_paths,
         "current_step_path": str(supervisor_current_step_path(run_dir)),
+        "recommended_commands": recommended_commands_for_stage(run_dir, state),
+        "last_failure": last_failure,
         "openclaw": state.get("openclaw", {}),
         "history_context": {
             "db": maybe_text(history.get("db")),
@@ -1267,14 +1799,198 @@ def unique_strings(values: list[str]) -> list[str]:
     return output
 
 
-def source_policy_for_role(mission: dict[str, Any], role: str) -> list[str]:
-    policy = mission.get("source_policy")
-    if not isinstance(policy, dict):
-        return []
-    selected = policy.get(role)
-    if not isinstance(selected, list):
-        return []
-    return unique_strings([maybe_text(item) for item in selected if maybe_text(item)])
+def normalize_last_failure(value: Any, *, round_id: str, stage: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    raw_commands = value.get("recommended_commands")
+    raw_paths = value.get("related_paths")
+    raw_notes = value.get("notes")
+    record = {
+        "round_id": maybe_text(value.get("round_id")),
+        "stage": maybe_text(value.get("stage")),
+        "action": maybe_text(value.get("action")),
+        "failed_at_utc": maybe_text(value.get("failed_at_utc")),
+        "error": maybe_text(value.get("error")),
+        "recoverable": bool(value.get("recoverable")),
+        "attempt_count": max(1, maybe_int(value.get("attempt_count"))),
+        "recommended_commands": unique_strings(
+            [
+                maybe_text(item)
+                for item in (raw_commands if isinstance(raw_commands, list) else [])
+                if maybe_text(item)
+            ]
+        ),
+        "related_paths": unique_strings(
+            [
+                maybe_text(item)
+                for item in (raw_paths if isinstance(raw_paths, list) else [])
+                if maybe_text(item)
+            ]
+        ),
+        "notes": unique_strings(
+            [
+                maybe_text(item)
+                for item in (raw_notes if isinstance(raw_notes, list) else [])
+                if maybe_text(item)
+            ]
+        ),
+    }
+    if record["round_id"] != round_id or record["stage"] != stage:
+        return {}
+    if not record["action"] or not record["failed_at_utc"] or not record["error"]:
+        return {}
+    return record
+
+
+def clear_last_failure(state: dict[str, Any]) -> None:
+    state["last_failure"] = {}
+
+
+def prune_last_failure(state: dict[str, Any]) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    stage = maybe_text(state.get("stage"))
+    record = normalize_last_failure(state.get("last_failure"), round_id=round_id, stage=stage)
+    state["last_failure"] = record
+    return record
+
+
+def stage_failure_related_paths(run_dir: Path, state: dict[str, Any], action_name: str) -> list[str]:
+    round_id = maybe_text(state.get("current_round_id"))
+    stage = maybe_text(state.get("stage"))
+    paths: list[str] = [str(supervisor_current_step_path(run_dir))]
+    if not round_id:
+        return unique_strings(paths)
+    if action_name == "prepare-round":
+        paths.extend(
+            [
+                str(tasks_path(run_dir, round_id)),
+                str(fetch_plan_path(run_dir, round_id)),
+            ]
+        )
+    elif action_name == "execute-fetch-plan":
+        paths.extend(
+            [
+                str(fetch_plan_path(run_dir, round_id)),
+                str(fetch_execution_path(run_dir, round_id)),
+            ]
+        )
+    elif action_name == "run-data-plane":
+        paths.extend(
+            [
+                str(fetch_execution_path(run_dir, round_id)),
+                str(data_plane_execution_path(run_dir, round_id)),
+                str(data_readiness_prompt_path(run_dir, round_id, "sociologist")),
+                str(data_readiness_prompt_path(run_dir, round_id, "environmentalist")),
+                str(matching_authorization_prompt_path(run_dir, round_id)),
+                str(reporting_handoff_path(run_dir, round_id)),
+            ]
+        )
+    elif action_name == "run-matching-adjudication":
+        paths.extend(
+            [
+                str(matching_authorization_path(run_dir, round_id)),
+                str(matching_execution_path(run_dir, round_id)),
+                str(report_prompt_path(run_dir, round_id, "sociologist")),
+                str(report_prompt_path(run_dir, round_id, "environmentalist")),
+                str(reporting_handoff_path(run_dir, round_id)),
+            ]
+        )
+    elif action_name == "promote-all":
+        paths.extend(
+            [
+                str(report_draft_path(run_dir, round_id, "sociologist")),
+                str(report_draft_path(run_dir, round_id, "environmentalist")),
+                str(decision_draft_path(run_dir, round_id)),
+            ]
+        )
+    elif action_name == "advance-round" or stage == STAGE_READY_ADVANCE:
+        paths.extend(
+            [
+                str(decision_target_path(run_dir, round_id)),
+            ]
+        )
+    return unique_strings(paths)
+
+
+def stage_failure_notes(stage: str) -> list[str]:
+    if stage == STAGE_READY_FETCH:
+        return [
+            "Supervisor keeps the run at ready-to-execute-fetch-plan until a valid canonical fetch_execution.json is available.",
+            "Retries reuse existing valid artifacts and rerun only missing or malformed JSON artifacts.",
+            "You can also repair raw outputs externally and import fetch_execution.json.",
+        ]
+    if stage == STAGE_READY_DATA_PLANE:
+        return [
+            "Supervisor keeps the run at ready-to-run-data-plane until normalization and readiness generation complete.",
+            "Inspect data_plane_execution.json to find the failed substep, fix the local issue, then rerun continue-run.",
+        ]
+    if stage == STAGE_READY_MATCHING_ADJUDICATION:
+        return [
+            "Supervisor keeps the run at ready-to-run-matching-adjudication until authorized matching and report-packet generation complete.",
+            "Inspect matching_adjudication_execution.json to find the failed substep, fix the local issue, then rerun continue-run.",
+        ]
+    if stage == STAGE_READY_PREPARE:
+        return [
+            "The run stays at ready-to-prepare-round until prepare-round succeeds.",
+        ]
+    if stage == STAGE_READY_PROMOTE:
+        return [
+            "The run stays at ready-to-promote until promote-all succeeds.",
+        ]
+    if stage == STAGE_READY_ADVANCE:
+        return [
+            "The run stays at ready-to-advance-round until next-round scaffolding succeeds.",
+        ]
+    return []
+
+
+def failure_recovery_commands(run_dir: Path, state: dict[str, Any], action_name: str) -> list[str]:
+    commands = list(recommended_commands_for_stage(run_dir, state))
+    commands.append(supervisor_status_command(run_dir))
+    if action_name == "execute-fetch-plan":
+        commands.append(
+            shlex.join(
+                [
+                    "python3",
+                    str(SCRIPT_DIR / "eco_council_supervisor.py"),
+                    "import-fetch-execution",
+                    "--run-dir",
+                    str(run_dir),
+                    "--pretty",
+                ]
+            )
+        )
+    return unique_strings(commands)
+
+
+def record_continue_run_failure(run_dir: Path, state: dict[str, Any], action_name: str, exc: Exception) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    stage = maybe_text(state.get("stage"))
+    previous = normalize_last_failure(state.get("last_failure"), round_id=round_id, stage=stage)
+    attempt_count = 1
+    if previous and maybe_text(previous.get("action")) == action_name:
+        attempt_count = maybe_int(previous.get("attempt_count")) + 1
+    failure = {
+        "round_id": round_id,
+        "stage": stage,
+        "action": action_name,
+        "failed_at_utc": utc_now_iso(),
+        "error": truncate_text(str(exc), LAST_FAILURE_ERROR_LIMIT),
+        "recoverable": True,
+        "attempt_count": attempt_count,
+        "recommended_commands": failure_recovery_commands(run_dir, state, action_name),
+        "related_paths": stage_failure_related_paths(run_dir, state, action_name),
+        "notes": stage_failure_notes(stage),
+    }
+    state["last_failure"] = failure
+    return failure
+
+
+def allowed_sources_for_role(mission: dict[str, Any], role: str) -> list[str]:
+    values = contract_call("allowed_sources_for_role", mission, role)
+    if isinstance(values, list):
+        return unique_strings([maybe_text(item) for item in values if maybe_text(item)])
+    return []
 
 
 def tasks_for_role(tasks: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
@@ -1307,7 +2023,10 @@ def stage_label_zh(stage: str) -> str:
         STAGE_AWAITING_SOURCE_SELECTION: "等待专家选择数据源",
         STAGE_READY_PREPARE: "等待生成本轮抓取计划",
         STAGE_READY_FETCH: "等待执行抓取计划",
-        STAGE_READY_DATA_PLANE: "等待归一化与报告草稿生成",
+        STAGE_READY_DATA_PLANE: "等待归一化与数据准备审计生成",
+        STAGE_AWAITING_DATA_READINESS: "等待专家提交数据准备审计",
+        STAGE_AWAITING_MATCHING_AUTHORIZATION: "等待议长授权匹配",
+        STAGE_READY_MATCHING_ADJUDICATION: "等待执行匹配与证据裁定",
         STAGE_AWAITING_REPORTS: "等待专家报告",
         STAGE_AWAITING_DECISION: "等待议长作出决议",
         STAGE_READY_PROMOTE: "等待正式写入本轮产物",
@@ -1399,8 +2118,15 @@ def recommended_commands_for_stage(run_dir: Path, state: dict[str, Any]) -> list
             f"{script} run-agent-step --run-dir {current_run} --role sociologist --yes --pretty",
             f"{script} run-agent-step --run-dir {current_run} --role environmentalist --yes --pretty",
         ]
-    if stage in {STAGE_READY_PREPARE, STAGE_READY_FETCH, STAGE_READY_DATA_PLANE, STAGE_READY_PROMOTE, STAGE_READY_ADVANCE}:
+    if stage in {STAGE_READY_PREPARE, STAGE_READY_FETCH, STAGE_READY_DATA_PLANE, STAGE_READY_MATCHING_ADJUDICATION, STAGE_READY_PROMOTE, STAGE_READY_ADVANCE}:
         return [f"{script} continue-run --run-dir {current_run} --yes --pretty"]
+    if stage == STAGE_AWAITING_DATA_READINESS:
+        return [
+            f"{script} run-agent-step --run-dir {current_run} --role sociologist --yes --pretty",
+            f"{script} run-agent-step --run-dir {current_run} --role environmentalist --yes --pretty",
+        ]
+    if stage == STAGE_AWAITING_MATCHING_AUTHORIZATION:
+        return [f"{script} run-agent-step --run-dir {current_run} --role moderator --yes --pretty"]
     if stage == STAGE_AWAITING_REPORTS:
         return [
             f"{script} run-agent-step --run-dir {current_run} --role sociologist --yes --pretty",
@@ -1430,6 +2156,17 @@ def collect_round_summary(run_dir: Path, state: dict[str, Any], round_id: str) -
     for role in REPORT_ROLES:
         report_payload = load_json_if_exists(report_target_path(run_dir, round_id, role))
         reports[role] = report_payload if isinstance(report_payload, dict) else None
+    readiness_reports: dict[str, dict[str, Any] | None] = {}
+    for role in READINESS_ROLES:
+        readiness_payload = load_json_if_exists(data_readiness_report_path(run_dir, round_id, role))
+        readiness_reports[role] = readiness_payload if isinstance(readiness_payload, dict) else None
+    matching_authorization = load_json_if_exists(matching_authorization_path(run_dir, round_id))
+    matching_result = load_json_if_exists(matching_result_path(run_dir, round_id))
+    evidence_adjudication = load_json_if_exists(evidence_adjudication_path(run_dir, round_id))
+    override_requests_by_role = {
+        role: load_override_requests(run_dir, round_id, role)
+        for role in ROLES
+    }
 
     return {
         "round_id": round_id,
@@ -1454,12 +2191,22 @@ def collect_round_summary(run_dir: Path, state: dict[str, Any], round_id: str) -
             "claim_count": count_json_list(shared_claims_path(run_dir, round_id)),
             "observation_count": count_json_list(shared_observations_path(run_dir, round_id)),
             "evidence_count": count_json_list(shared_evidence_cards_path(run_dir, round_id)),
+            "claims_active_count": count_json_list(claims_active_path(run_dir, round_id)),
+            "observations_active_count": count_json_list(observations_active_path(run_dir, round_id)),
+            "cards_active_count": count_json_list(cards_active_path(run_dir, round_id)),
+            "isolated_count": count_json_list(isolated_active_path(run_dir, round_id)),
+            "remand_count": count_json_list(remands_open_path(run_dir, round_id)),
         },
         "normalized": {
             "public_signal_count": count_jsonl_records(public_signals_path(run_dir, round_id)),
             "environment_signal_count": count_jsonl_records(environment_signals_path(run_dir, round_id)),
         },
         "source_selections": source_selections,
+        "override_requests": override_requests_by_role,
+        "readiness_reports": readiness_reports,
+        "matching_authorization": matching_authorization if isinstance(matching_authorization, dict) else None,
+        "matching_result": matching_result if isinstance(matching_result, dict) else None,
+        "evidence_adjudication": evidence_adjudication if isinstance(evidence_adjudication, dict) else None,
         "reports": reports,
         "decision": decision,
     }
@@ -1504,15 +2251,33 @@ def build_current_issues_zh(round_summaries: list[dict[str, Any]], state: dict[s
     for summary in round_summaries:
         fetch = summary.get("fetch", {})
         shared = summary.get("shared", {})
-        if maybe_int(fetch.get("completed_count")) > 0 and maybe_int(shared.get("claim_count")) == 0 and maybe_int(shared.get("evidence_count")) == 0:
+        auth_status = maybe_text((summary.get("matching_authorization") or {}).get("authorization_status"))
+        if (
+            maybe_int(fetch.get("completed_count")) > 0
+            and maybe_int(shared.get("claim_count")) == 0
+            and maybe_int(shared.get("evidence_count")) == 0
+            and auth_status == "authorized"
+        ):
             issues.append(
                 f"{summary['round_id']} 已完成 {maybe_int(fetch.get('completed_count'))} 个抓取步骤，但共享层仍是 claims=0、evidence_cards=0。"
             )
 
     current_summary = next((summary for summary in round_summaries if summary["round_id"] == current_round_id), None)
+    if isinstance(current_summary, dict):
+        override_requests = current_summary.get("override_requests", {}) if isinstance(current_summary.get("override_requests"), dict) else {}
+        pending_count = sum(
+            len(value)
+            for value in override_requests.values()
+            if isinstance(value, list)
+        )
+        if pending_count > 0:
+            issues.append(f"{current_round_id} 当前存在 {pending_count} 个待上游处理的 override request；在 mission 边界被明确修改之前，这些请求不会自动生效。")
     current_stage_allows_fetch = current_stage in {
         STAGE_READY_FETCH,
         STAGE_READY_DATA_PLANE,
+        STAGE_AWAITING_DATA_READINESS,
+        STAGE_AWAITING_MATCHING_AUTHORIZATION,
+        STAGE_READY_MATCHING_ADJUDICATION,
         STAGE_AWAITING_REPORTS,
         STAGE_AWAITING_DECISION,
         STAGE_READY_PROMOTE,
@@ -1541,8 +2306,12 @@ def render_run_summary_markdown(
 ) -> str:
     region = mission.get("region", {}) if isinstance(mission.get("region"), dict) else {}
     window = mission.get("window", {}) if isinstance(mission.get("window"), dict) else {}
-    constraints = mission.get("constraints", {}) if isinstance(mission.get("constraints"), dict) else {}
-    source_policy = mission.get("source_policy", {}) if isinstance(mission.get("source_policy"), dict) else {}
+    constraints = effective_constraints(mission)
+    profile = policy_profile_summary(mission)
+    allowed_sources_by_role = {
+        "sociologist": allowed_sources_for_role(mission, "sociologist"),
+        "environmentalist": allowed_sources_for_role(mission, "environmentalist"),
+    }
     current_round_id = maybe_text(state.get("current_round_id"))
     current_stage = maybe_text(state.get("stage"))
     latest_decision_summary = next((summary for summary in reversed(round_summaries) if isinstance(summary.get("decision"), dict)), None)
@@ -1566,7 +2335,10 @@ def render_run_summary_markdown(
                 STAGE_AWAITING_SOURCE_SELECTION: "Waiting for expert source selection",
                 STAGE_READY_PREPARE: "Waiting to prepare the round fetch plan",
                 STAGE_READY_FETCH: "Waiting to execute the fetch plan",
-                STAGE_READY_DATA_PLANE: "Waiting to run normalization and report draft generation",
+                STAGE_READY_DATA_PLANE: "Waiting to run normalization and data-readiness draft generation",
+                STAGE_AWAITING_DATA_READINESS: "Waiting for expert data-readiness reports",
+                STAGE_AWAITING_MATCHING_AUTHORIZATION: "Waiting for moderator matching authorization",
+                STAGE_READY_MATCHING_ADJUDICATION: "Waiting to run matching and adjudication",
                 STAGE_AWAITING_REPORTS: "Waiting for expert reports",
                 STAGE_AWAITING_DECISION: "Waiting for moderator decision",
                 STAGE_READY_PROMOTE: "Waiting to promote canonical outputs",
@@ -1642,14 +2414,34 @@ def render_run_summary_markdown(
         for summary in round_summaries:
             fetch = summary.get("fetch", {})
             shared = summary.get("shared", {})
-            if maybe_int(fetch.get("completed_count")) > 0 and maybe_int(shared.get("claim_count")) == 0 and maybe_int(shared.get("evidence_count")) == 0:
+            auth_status = maybe_text((summary.get("matching_authorization") or {}).get("authorization_status"))
+            if (
+                maybe_int(fetch.get("completed_count")) > 0
+                and maybe_int(shared.get("claim_count")) == 0
+                and maybe_int(shared.get("evidence_count")) == 0
+                and auth_status == "authorized"
+            ):
                 issues.append(
                     f"{summary['round_id']} completed {maybe_int(fetch.get('completed_count'))} fetch steps, but the shared layer still has claims=0 and evidence_cards=0."
                 )
         current_summary = next((summary for summary in round_summaries if summary["round_id"] == current_round_id), None)
+        if isinstance(current_summary, dict):
+            override_requests = current_summary.get("override_requests", {}) if isinstance(current_summary.get("override_requests"), dict) else {}
+            pending_count = sum(
+                len(value)
+                for value in override_requests.values()
+                if isinstance(value, list)
+            )
+            if pending_count > 0:
+                issues.append(
+                    f"{current_round_id} currently has {pending_count} pending override requests. They remain advisory until an upstream human/bot edits the mission envelope."
+                )
         current_stage_allows_fetch = current_stage in {
             STAGE_READY_FETCH,
             STAGE_READY_DATA_PLANE,
+            STAGE_AWAITING_DATA_READINESS,
+            STAGE_AWAITING_MATCHING_AUTHORIZATION,
+            STAGE_READY_MATCHING_ADJUDICATION,
             STAGE_AWAITING_REPORTS,
             STAGE_AWAITING_DECISION,
             STAGE_READY_PROMOTE,
@@ -1678,6 +2470,7 @@ def render_run_summary_markdown(
         "round_count": "Round count" if lang == "en" else "轮次数量",
         "state_file": "State file" if lang == "en" else "运行状态文件",
         "constraints": "## Constraints" if lang == "en" else "## 任务边界",
+        "policy_profile": "Policy profile" if lang == "en" else "策略画像",
         "max_rounds": "Max rounds" if lang == "en" else "最多轮次",
         "max_tasks": "Max tasks per round" if lang == "en" else "每轮最多任务",
         "max_claims": "Max claims per round" if lang == "en" else "每轮最多 claims",
@@ -1699,8 +2492,10 @@ def render_run_summary_markdown(
         "no_tasks": "- No tasks are available for this round yet." if lang == "en" else "- 本轮尚无任务清单。",
         "source_selection": "#### Source Selection" if lang == "en" else "#### 数据源选择",
         "selected_sources": "Selected sources" if lang == "en" else "已选源",
+        "override_requests": "Override requests" if lang == "en" else "越界请求",
+        "no_override_requests": "No override requests." if lang == "en" else "无越界请求。",
         "no_source_selection": "No source-selection generated." if lang == "en" else "未生成 source-selection。",
-        "source": "Sources" if lang == "en" else "来源",
+        "source": "Evidence requirements" if lang == "en" else "证据需求",
         "depends_on": "Depends on" if lang == "en" else "依赖",
         "fetch": "#### Fetch Execution" if lang == "en" else "#### 数据抓取",
         "fetch_summary": "Total steps" if lang == "en" else "总步骤",
@@ -1744,11 +2539,12 @@ def render_run_summary_markdown(
         "",
         labels["constraints"],
         "",
+        f"- {labels['policy_profile']}：{maybe_text(profile.get('profile_id')) or maybe_text(mission.get('policy_profile'))}",
         f"- {labels['max_rounds']}：{maybe_int(constraints.get('max_rounds'))}",
         f"- {labels['max_tasks']}：{maybe_int(constraints.get('max_tasks_per_round'))}",
         f"- {labels['max_claims']}：{maybe_int(constraints.get('max_claims_per_round'))}",
-        f"- {labels['sociologist_sources']}：{format_list(source_policy.get('sociologist') if isinstance(source_policy.get('sociologist'), list) else [])}",
-        f"- {labels['environmentalist_sources']}：{format_list(source_policy.get('environmentalist') if isinstance(source_policy.get('environmentalist'), list) else [])}",
+        f"- {labels['sociologist_sources']}：{format_list(allowed_sources_by_role['sociologist'])}",
+        f"- {labels['environmentalist_sources']}：{format_list(allowed_sources_by_role['environmentalist'])}",
         "",
         labels["overall"],
         "",
@@ -1798,7 +2594,7 @@ def render_run_summary_markdown(
                 )
                 line += (
                     f"{maybe_text(task.get('objective'))} {labels['source']}: "
-                    f"{format_list(task.get('inputs', {}).get('preferred_sources') if isinstance(task.get('inputs'), dict) and isinstance(task.get('inputs', {}).get('preferred_sources'), list) else [])}; "
+                    f"{format_list([maybe_text(item.get('requirement_type')) for item in task.get('inputs', {}).get('evidence_requirements', []) if isinstance(task.get('inputs'), dict) and isinstance(task.get('inputs', {}).get('evidence_requirements'), list) and isinstance(item, dict) and maybe_text(item.get('requirement_type'))])}; "
                     f"{labels['depends_on']}: {format_list(task.get('depends_on') if isinstance(task.get('depends_on'), list) else [])}."
                 )
                 lines.append(line)
@@ -1818,6 +2614,29 @@ def render_run_summary_markdown(
                 f"{labels['selected_sources']}: {format_list(selected_sources)}."
             )
             lines.append(line)
+
+        override_requests = summary.get("override_requests", {}) if isinstance(summary.get("override_requests"), dict) else {}
+        lines.extend(["", f"#### {labels['override_requests']}", ""])
+        pending_override_lines: list[str] = []
+        for role in ROLES:
+            values = override_requests.get(role)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                if lang == "en":
+                    pending_override_lines.append(
+                        f"- [{role_label(role)}] `{maybe_text(item.get('request_id'))}` -> `{maybe_text(item.get('target_path'))}`: {maybe_text(item.get('summary'))}"
+                    )
+                else:
+                    pending_override_lines.append(
+                        f"- [{role_label(role)}] `{maybe_text(item.get('request_id'))}` -> `{maybe_text(item.get('target_path'))}`：{maybe_text(item.get('summary'))}"
+                    )
+        if pending_override_lines:
+            lines.extend(pending_override_lines)
+        else:
+            lines.append(f"- {labels['no_override_requests']}")
 
         lines.extend(["", labels["fetch"], ""])
         fetch = summary.get("fetch", {})
@@ -1986,6 +2805,102 @@ def normalize_source_selection_payload(payload: Any) -> Any:
             fixed_decisions.append(decision)
         normalized["source_decisions"] = fixed_decisions
 
+    family_plans = normalized.get("family_plans")
+    if isinstance(family_plans, list):
+        fixed_families: list[Any] = []
+        for family in family_plans:
+            if not isinstance(family, dict):
+                fixed_families.append(family)
+                continue
+            family_plan = dict(family)
+            layer_plans = family_plan.get("layer_plans")
+            if isinstance(layer_plans, list):
+                fixed_layers: list[Any] = []
+                for layer in layer_plans:
+                    if not isinstance(layer, dict):
+                        fixed_layers.append(layer)
+                        continue
+                    layer_plan = dict(layer)
+                    if "source_skills" not in layer_plan and "selected_skills" in layer_plan:
+                        layer_plan["source_skills"] = layer_plan.pop("selected_skills")
+                    anchor_mode = maybe_text(layer_plan.get("anchor_mode")).casefold()
+                    anchor_mode_aliases = {
+                        "not-required": "none",
+                        "not_required": "none",
+                        "no-anchor": "none",
+                        "no_anchor": "none",
+                    }
+                    if anchor_mode in anchor_mode_aliases:
+                        layer_plan["anchor_mode"] = anchor_mode_aliases[anchor_mode]
+                    fixed_layers.append(layer_plan)
+                family_plan["layer_plans"] = fixed_layers
+            fixed_families.append(family_plan)
+        normalized["family_plans"] = fixed_families
+
+    return normalized
+
+
+def hydrate_source_selection_layer_skills(*, run_dir: Path, round_id: str, role: str, payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    family_plans = payload.get("family_plans")
+    if not isinstance(family_plans, list):
+        return payload
+
+    packet = load_json_if_exists(source_selection_packet_path(run_dir, round_id, role))
+    if not isinstance(packet, dict):
+        return payload
+    governance = packet.get("governance") if isinstance(packet.get("governance"), dict) else {}
+    families = governance.get("families") if isinstance(governance.get("families"), list) else []
+    layer_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        if not family_id:
+            continue
+        for layer in family.get("layers", []):
+            if not isinstance(layer, dict):
+                continue
+            layer_id = maybe_text(layer.get("layer_id"))
+            if not layer_id:
+                continue
+            layer_lookup[(family_id, layer_id)] = {
+                "skills": [maybe_text(skill) for skill in layer.get("skills", []) if maybe_text(skill)],
+                "tier": maybe_text(layer.get("tier")),
+            }
+
+    normalized = json.loads(json.dumps(payload))
+    fixed_families: list[Any] = []
+    for family in family_plans:
+        if not isinstance(family, dict):
+            fixed_families.append(family)
+            continue
+        family_plan = dict(family)
+        family_id = maybe_text(family_plan.get("family_id"))
+        layer_plans = family_plan.get("layer_plans")
+        if isinstance(layer_plans, list):
+            fixed_layers: list[Any] = []
+            for layer in layer_plans:
+                if not isinstance(layer, dict):
+                    fixed_layers.append(layer)
+                    continue
+                layer_plan = dict(layer)
+                layer_id = maybe_text(layer_plan.get("layer_id"))
+                layer_meta = layer_lookup.get((family_id, layer_id)) if family_id and layer_id else {}
+                skills = layer_plan.get("source_skills")
+                if (not isinstance(skills, list) or not [maybe_text(skill) for skill in skills if maybe_text(skill)]):
+                    fallback_skills = layer_meta.get("skills") if isinstance(layer_meta, dict) else []
+                    if fallback_skills:
+                        layer_plan["source_skills"] = fallback_skills
+                if not maybe_text(layer_plan.get("tier")):
+                    fallback_tier = layer_meta.get("tier") if isinstance(layer_meta, dict) else ""
+                    if fallback_tier:
+                        layer_plan["tier"] = fallback_tier
+                fixed_layers.append(layer_plan)
+            family_plan["layer_plans"] = fixed_layers
+        fixed_families.append(family_plan)
+    normalized["family_plans"] = fixed_families
     return normalized
 
 
@@ -2016,6 +2931,174 @@ def ensure_source_selection_matches(payload: Any, *, round_id: str, role: str) -
         raise ValueError(f"Source-selection agent_role mismatch: expected {role}, got {payload_role}")
     if payload_status == "pending":
         raise ValueError("Source-selection payload must not remain pending when imported into the supervisor.")
+
+
+def ensure_source_selection_respects_packet(*, run_dir: Path, round_id: str, role: str, payload: dict[str, Any]) -> None:
+    packet = load_json_if_exists(source_selection_packet_path(run_dir, round_id, role))
+    if not isinstance(packet, dict):
+        packet_path = build_source_selection_packet(run_dir, round_id, role)
+        packet = load_json_if_exists(packet_path)
+    if not isinstance(packet, dict):
+        raise ValueError("Source-selection packet is missing or invalid.")
+
+    governance = packet.get("governance") if isinstance(packet.get("governance"), dict) else {}
+    families = governance.get("families") if isinstance(governance.get("families"), list) else []
+    approved_layers = governance.get("approved_layers") if isinstance(governance.get("approved_layers"), list) else []
+    family_lookup: dict[str, dict[str, Any]] = {}
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        if family_id:
+            family_lookup[family_id] = family
+    approved_lookup = {
+        (maybe_text(item.get("family_id")), maybe_text(item.get("layer_id"))): item
+        for item in approved_layers
+        if isinstance(item, dict) and maybe_text(item.get("family_id")) and maybe_text(item.get("layer_id"))
+    }
+
+    family_plans = payload.get("family_plans")
+    if not isinstance(family_plans, list):
+        raise ValueError("Source-selection payload must include family_plans.")
+    payload_family_lookup: dict[str, dict[str, Any]] = {}
+    for family_plan in family_plans:
+        if not isinstance(family_plan, dict):
+            continue
+        family_id = maybe_text(family_plan.get("family_id"))
+        if family_id:
+            payload_family_lookup[family_id] = family_plan
+
+    expected_family_ids = set(family_lookup)
+    payload_family_ids = set(payload_family_lookup)
+    if expected_family_ids and payload_family_ids != expected_family_ids:
+        missing = sorted(expected_family_ids - payload_family_ids)
+        extra = sorted(payload_family_ids - expected_family_ids)
+        raise ValueError(f"Source-selection family_plans must match packet governance families. Missing={missing}, extra={extra}")
+
+    max_sources = governance.get("max_selected_sources_per_role")
+    selected_sources = contract_call("selected_sources_from_family_plans", payload)
+    if not isinstance(selected_sources, list):
+        selected_sources = payload.get("selected_sources") if isinstance(payload.get("selected_sources"), list) else []
+    if isinstance(max_sources, int) and max_sources > 0 and len(selected_sources) > max_sources:
+        raise ValueError(f"Selected sources {selected_sources} exceed governance max_selected_sources_per_role={max_sources}.")
+
+    selected_family_count = 0
+    selected_non_entry_layers = 0
+    allow_cross_round_anchors = bool(governance.get("allow_cross_round_anchors"))
+
+    for family_id, family_plan in payload_family_lookup.items():
+        family_policy = family_lookup.get(family_id)
+        if not isinstance(family_policy, dict):
+            raise ValueError(f"family_plans references unknown family_id: {family_id}")
+        layer_lookup = {
+            maybe_text(layer.get("layer_id")): layer
+            for layer in family_policy.get("layers", [])
+            if isinstance(layer, dict) and maybe_text(layer.get("layer_id"))
+        }
+        layer_plans = family_plan.get("layer_plans")
+        if not isinstance(layer_plans, list):
+            raise ValueError(f"family_plans.{family_id}.layer_plans must be a list.")
+        payload_layer_ids = {
+            maybe_text(layer.get("layer_id"))
+            for layer in layer_plans
+            if isinstance(layer, dict) and maybe_text(layer.get("layer_id"))
+        }
+        if set(layer_lookup) != payload_layer_ids:
+            missing = sorted(set(layer_lookup) - payload_layer_ids)
+            extra = sorted(payload_layer_ids - set(layer_lookup))
+            raise ValueError(f"family_plans.{family_id}.layer_plans must match governance layers. Missing={missing}, extra={extra}")
+
+        if family_plan.get("selected") is True:
+            selected_family_count += 1
+
+        for layer_plan in layer_plans:
+            if not isinstance(layer_plan, dict):
+                continue
+            layer_id = maybe_text(layer_plan.get("layer_id"))
+            layer_policy = layer_lookup.get(layer_id)
+            if not isinstance(layer_policy, dict):
+                continue
+            if maybe_text(layer_plan.get("tier")) != maybe_text(layer_policy.get("tier")):
+                raise ValueError(f"{family_id}.{layer_id} tier must match governance tier.")
+            skills = layer_plan.get("source_skills")
+            if not isinstance(skills, list):
+                raise ValueError(f"{family_id}.{layer_id} source_skills must be a list.")
+            selected_skill_set = {maybe_text(skill) for skill in skills if maybe_text(skill)}
+            allowed_skill_set = {
+                maybe_text(skill)
+                for skill in layer_policy.get("skills", [])
+                if maybe_text(skill)
+            }
+            if not selected_skill_set <= allowed_skill_set:
+                invalid = sorted(selected_skill_set - allowed_skill_set)
+                raise ValueError(f"{family_id}.{layer_id} selected unsupported skills: {invalid}")
+            max_selected = layer_policy.get("max_selected_skills")
+            if isinstance(max_selected, int) and max_selected > 0 and len(selected_skill_set) > max_selected:
+                raise ValueError(f"{family_id}.{layer_id} selected {len(selected_skill_set)} skills but max_selected_skills={max_selected}.")
+
+            if layer_plan.get("selected") is not True:
+                continue
+
+            tier = maybe_text(layer_policy.get("tier"))
+            anchor_mode = maybe_text(layer_plan.get("anchor_mode"))
+            anchor_refs = layer_plan.get("anchor_refs") if isinstance(layer_plan.get("anchor_refs"), list) else []
+            authorization_basis = maybe_text(layer_plan.get("authorization_basis"))
+            auto_selectable = layer_policy.get("auto_selectable") is True
+            requires_anchor = layer_policy.get("requires_anchor") is True
+
+            if tier == "l2":
+                selected_non_entry_layers += 1
+            if requires_anchor and (anchor_mode == "none" or not anchor_refs):
+                raise ValueError(f"{family_id}.{layer_id} requires a non-empty anchor_refs list and a non-none anchor_mode.")
+            if anchor_mode == "prior_round_l1" and not allow_cross_round_anchors:
+                raise ValueError(f"{family_id}.{layer_id} cannot use prior_round_l1 because governance disallows cross-round anchors.")
+
+            approval_key = (family_id, layer_id)
+            if tier == "l1":
+                if authorization_basis != "entry-layer":
+                    raise ValueError(f"{family_id}.{layer_id} must use authorization_basis=entry-layer for L1 selection.")
+            else:
+                if approval_key in approved_lookup:
+                    if authorization_basis != "upstream-approval":
+                        raise ValueError(f"{family_id}.{layer_id} must use authorization_basis=upstream-approval.")
+                elif auto_selectable:
+                    if authorization_basis != "policy-auto":
+                        raise ValueError(f"{family_id}.{layer_id} is auto-selectable and must use authorization_basis=policy-auto.")
+                else:
+                    raise ValueError(f"{family_id}.{layer_id} is not upstream-approved and not policy-auto, so it cannot be selected.")
+
+    max_families = governance.get("max_active_families_per_role")
+    if isinstance(max_families, int) and max_families > 0 and selected_family_count > max_families:
+        raise ValueError(
+            f"Selected families {selected_family_count} exceed governance max_active_families_per_role={max_families}."
+        )
+    max_l2_layers = governance.get("max_non_entry_layers_per_role")
+    if isinstance(max_l2_layers, int) and max_l2_layers >= 0 and selected_non_entry_layers > max_l2_layers:
+        raise ValueError(
+            f"Selected non-entry layers {selected_non_entry_layers} exceed governance max_non_entry_layers_per_role={max_l2_layers}."
+        )
+
+
+def ensure_data_readiness_matches(payload: Any, *, round_id: str, role: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Data-readiness payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    payload_role = maybe_text(payload.get("agent_role"))
+    if payload_round_id and payload_round_id != round_id:
+        raise ValueError(f"Data-readiness round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_role and payload_role != role:
+        raise ValueError(f"Data-readiness agent_role mismatch: expected {role}, got {payload_role}")
+
+
+def ensure_matching_authorization_matches(payload: Any, *, round_id: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Matching-authorization payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    payload_role = maybe_text(payload.get("agent_role"))
+    if payload_round_id and payload_round_id != round_id:
+        raise ValueError(f"Matching-authorization round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_role and payload_role != "moderator":
+        raise ValueError(f"Matching-authorization agent_role mismatch: expected moderator, got {payload_role}")
 
 
 def ensure_report_matches(payload: Any, *, round_id: str, role: str) -> None:
@@ -2068,6 +3151,15 @@ def optional_resolved_path(value: Any) -> Path | None:
     if not text:
         return None
     return Path(text).expanduser().resolve()
+
+
+def validate_json_artifact_if_applicable(path: Path) -> None:
+    if path.suffix.casefold() != ".json":
+        return
+    try:
+        read_json(path)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Artifact is not valid JSON: {path} ({exc})") from exc
 
 
 def ensure_fetch_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
@@ -2161,6 +3253,7 @@ def ensure_fetch_execution_matches(payload: Any, *, run_dir: Path, round_id: str
             )
         if not artifact_path.exists():
             raise ValueError(f"Fetch execution artifact_path does not exist: {artifact_path}")
+        validate_json_artifact_if_applicable(artifact_path)
         status_state = maybe_text(status.get("status"))
         expected_stdout_path = resolved_required_path(expected_step.get("stdout_path"), label=f"fetch plan {step_id} stdout_path")
         expected_stderr_path = resolved_required_path(expected_step.get("stderr_path"), label=f"fetch plan {step_id} stderr_path")
@@ -2199,6 +3292,211 @@ def ensure_fetch_execution_matches(payload: Any, *, run_dir: Path, round_id: str
         raise ValueError(f"Fetch execution is missing statuses for steps: {missing_step_ids}")
 
 
+def ensure_data_plane_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Data-plane execution payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    if not payload_round_id:
+        raise ValueError("Data-plane execution payload must include round_id.")
+    if payload_round_id != round_id:
+        raise ValueError(f"Data-plane execution round_id mismatch: expected {round_id}, got {payload_round_id}")
+    payload_run_dir = maybe_text(payload.get("run_dir"))
+    expected_run_dir = run_dir.expanduser().resolve()
+    if payload_run_dir:
+        found_run_dir = Path(payload_run_dir).expanduser().resolve()
+        if found_run_dir != expected_run_dir:
+            raise ValueError(f"Data-plane execution run_dir mismatch: expected {expected_run_dir}, got {found_run_dir}")
+    statuses = payload.get("statuses")
+    if not isinstance(statuses, list):
+        raise ValueError("Data-plane execution payload must include a statuses list.")
+    expected_step_count = len(DATA_PLANE_STEP_IDS)
+    payload_step_count = maybe_int(payload.get("step_count"))
+    if payload_step_count != expected_step_count:
+        raise ValueError(f"Data-plane execution step_count mismatch: expected {expected_step_count}, got {payload_step_count}")
+    if len(statuses) != expected_step_count:
+        raise ValueError(f"Data-plane execution statuses length mismatch: expected {expected_step_count}, got {len(statuses)}")
+    actual_completed = sum(1 for item in statuses if isinstance(item, dict) and maybe_text(item.get("status")) == "completed")
+    actual_failed = sum(1 for item in statuses if isinstance(item, dict) and maybe_text(item.get("status")) == "failed")
+    if actual_failed:
+        raise ValueError(f"Data-plane execution still contains failed steps: {statuses}")
+    if maybe_int(payload.get("completed_count")) != actual_completed:
+        raise ValueError(
+            f"Data-plane execution completed_count mismatch: expected {actual_completed}, got {maybe_int(payload.get('completed_count'))}"
+        )
+    if maybe_int(payload.get("failed_count")) != actual_failed:
+        raise ValueError(
+            f"Data-plane execution failed_count mismatch: expected {actual_failed}, got {maybe_int(payload.get('failed_count'))}"
+        )
+    seen_step_ids: set[str] = set()
+    for status in statuses:
+        if not isinstance(status, dict):
+            raise ValueError("Data-plane execution statuses must be JSON objects.")
+        step_id = maybe_text(status.get("step_id"))
+        if not step_id:
+            raise ValueError(f"Data-plane execution status is missing step_id: {status}")
+        if step_id in seen_step_ids:
+            raise ValueError(f"Data-plane execution contains duplicate status for step_id: {step_id}")
+        seen_step_ids.add(step_id)
+        if step_id not in DATA_PLANE_STEP_IDS:
+            raise ValueError(f"Data-plane execution contains unexpected step_id: {step_id}")
+        if maybe_text(status.get("status")) != "completed":
+            raise ValueError(f"Data-plane execution step {step_id} is not completed: {status}")
+    missing_step_ids = sorted(set(DATA_PLANE_STEP_IDS) - seen_step_ids)
+    if missing_step_ids:
+        raise ValueError(f"Data-plane execution is missing statuses for steps: {missing_step_ids}")
+    handoff = resolved_required_path(payload.get("reporting_handoff_path"), label="data-plane execution reporting_handoff_path")
+    required_paths = [
+        handoff,
+        data_readiness_prompt_path(run_dir, round_id, "sociologist"),
+        data_readiness_prompt_path(run_dir, round_id, "environmentalist"),
+    ]
+    for path in required_paths:
+        if not path.exists():
+            raise ValueError(f"Data-plane execution required output does not exist: {path}")
+    canonical_fetch_execution = fetch_execution_path(run_dir, round_id)
+    if (
+        source_path.exists()
+        and canonical_fetch_execution.exists()
+        and source_path.stat().st_mtime_ns < canonical_fetch_execution.stat().st_mtime_ns
+    ):
+        # If fetch execution is newer, the data plane should be regenerated from the newer raw inputs.
+        raise ValueError("Data-plane execution appears older than the current fetch_execution.json. Regenerate the data plane.")
+
+
+def ensure_matching_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Matching/adjudication execution payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    if not payload_round_id:
+        raise ValueError("Matching/adjudication execution payload must include round_id.")
+    if payload_round_id != round_id:
+        raise ValueError(f"Matching/adjudication execution round_id mismatch: expected {round_id}, got {payload_round_id}")
+    payload_run_dir = maybe_text(payload.get("run_dir"))
+    expected_run_dir = run_dir.expanduser().resolve()
+    if payload_run_dir:
+        found_run_dir = Path(payload_run_dir).expanduser().resolve()
+        if found_run_dir != expected_run_dir:
+            raise ValueError(f"Matching/adjudication execution run_dir mismatch: expected {expected_run_dir}, got {found_run_dir}")
+    statuses = payload.get("statuses")
+    if not isinstance(statuses, list):
+        raise ValueError("Matching/adjudication execution payload must include a statuses list.")
+    expected_step_count = len(MATCHING_ADJUDICATION_STEP_IDS)
+    payload_step_count = maybe_int(payload.get("step_count"))
+    if payload_step_count != expected_step_count:
+        raise ValueError(f"Matching/adjudication execution step_count mismatch: expected {expected_step_count}, got {payload_step_count}")
+    if len(statuses) != expected_step_count:
+        raise ValueError(f"Matching/adjudication execution statuses length mismatch: expected {expected_step_count}, got {len(statuses)}")
+    actual_completed = sum(1 for item in statuses if isinstance(item, dict) and maybe_text(item.get("status")) == "completed")
+    actual_failed = sum(1 for item in statuses if isinstance(item, dict) and maybe_text(item.get("status")) == "failed")
+    if actual_failed:
+        raise ValueError(f"Matching/adjudication execution still contains failed steps: {statuses}")
+    if maybe_int(payload.get("completed_count")) != actual_completed:
+        raise ValueError(
+            f"Matching/adjudication execution completed_count mismatch: expected {actual_completed}, got {maybe_int(payload.get('completed_count'))}"
+        )
+    if maybe_int(payload.get("failed_count")) != actual_failed:
+        raise ValueError(
+            f"Matching/adjudication execution failed_count mismatch: expected {actual_failed}, got {maybe_int(payload.get('failed_count'))}"
+        )
+    seen_step_ids: set[str] = set()
+    for status in statuses:
+        if not isinstance(status, dict):
+            raise ValueError("Matching/adjudication execution statuses must be JSON objects.")
+        step_id = maybe_text(status.get("step_id"))
+        if not step_id:
+            raise ValueError(f"Matching/adjudication execution status is missing step_id: {status}")
+        if step_id in seen_step_ids:
+            raise ValueError(f"Matching/adjudication execution contains duplicate status for step_id: {step_id}")
+        seen_step_ids.add(step_id)
+        if step_id not in MATCHING_ADJUDICATION_STEP_IDS:
+            raise ValueError(f"Matching/adjudication execution contains unexpected step_id: {step_id}")
+        if maybe_text(status.get("status")) != "completed":
+            raise ValueError(f"Matching/adjudication execution step {step_id} is not completed: {status}")
+    missing_step_ids = sorted(set(MATCHING_ADJUDICATION_STEP_IDS) - seen_step_ids)
+    if missing_step_ids:
+        raise ValueError(f"Matching/adjudication execution is missing statuses for steps: {missing_step_ids}")
+    handoff = resolved_required_path(payload.get("reporting_handoff_path"), label="matching execution reporting_handoff_path")
+    required_paths = [
+        handoff,
+        report_prompt_path(run_dir, round_id, "sociologist"),
+        report_prompt_path(run_dir, round_id, "environmentalist"),
+        matching_result_path(run_dir, round_id),
+        evidence_adjudication_path(run_dir, round_id),
+    ]
+    for path in required_paths:
+        if not path.exists():
+            raise ValueError(f"Matching/adjudication execution required output does not exist: {path}")
+    authorization_payload = load_json_if_exists(matching_authorization_path(run_dir, round_id))
+    if not isinstance(authorization_payload, dict) or maybe_text(authorization_payload.get("authorization_status")) != "authorized":
+        raise ValueError("Matching/adjudication execution requires canonical matching_authorization.json with authorization_status=authorized.")
+    canonical_authorization = matching_authorization_path(run_dir, round_id)
+    if (
+        source_path.exists()
+        and canonical_authorization.exists()
+        and source_path.stat().st_mtime_ns < canonical_authorization.stat().st_mtime_ns
+    ):
+        raise ValueError("Matching/adjudication execution appears older than the current matching_authorization.json. Regenerate it.")
+
+
+def build_matching_authorization_artifacts_for_supervisor(run_dir: Path, round_id: str) -> None:
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-matching-authorization-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+
+
+def build_decision_artifacts_for_supervisor(run_dir: Path, round_id: str) -> None:
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-decision-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--prefer-draft-reports",
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+
+
 def import_task_review_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
     ensure_task_review_matches(payload, round_id=round_id)
@@ -2208,6 +3506,8 @@ def import_task_review_payload(*, run_dir: Path, state: dict[str, Any], payload:
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": [],
+        "data_readiness_roles_received": [],
+        "matching_authorization_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -2220,6 +3520,35 @@ def import_task_review_payload(*, run_dir: Path, state: dict[str, Any], payload:
     }
 
 
+def extract_override_requests(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    value = payload.get("override_requests")
+    if not isinstance(value, list):
+        return []
+    return [json.loads(json.dumps(item)) for item in value if isinstance(item, dict)]
+
+
+def persist_override_requests_for_role(*, run_dir: Path, round_id: str, role: str, origin_kind: str, payload: Any) -> None:
+    target = override_requests_path(run_dir, round_id, role)
+    current_payload = load_json_if_exists(target)
+    current_items = current_payload if isinstance(current_payload, list) else []
+    merged: dict[str, dict[str, Any]] = {}
+    for item in current_items:
+        if not isinstance(item, dict):
+            continue
+        if maybe_text(item.get("request_origin_kind")) == origin_kind:
+            continue
+        request_id = maybe_text(item.get("request_id"))
+        if request_id:
+            merged[request_id] = json.loads(json.dumps(item))
+    for item in extract_override_requests(payload):
+        request_id = maybe_text(item.get("request_id"))
+        if request_id:
+            merged[request_id] = item
+    write_json(target, list(sorted(merged.values(), key=lambda item: maybe_text(item.get("request_id")))), pretty=True)
+
+
 def import_source_selection_payload(
     *,
     run_dir: Path,
@@ -2230,8 +3559,10 @@ def import_source_selection_payload(
 ) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
     ensure_source_selection_matches(payload, round_id=round_id, role=role)
+    ensure_source_selection_respects_packet(run_dir=run_dir, round_id=round_id, role=role, payload=payload)
     target = source_selection_path(run_dir, round_id, role)
     write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role=role, origin_kind="source-selection", payload=payload)
 
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     received = {
@@ -2258,13 +3589,18 @@ def import_report_payload(*, run_dir: Path, state: dict[str, Any], role: str, pa
     ensure_report_matches(payload, round_id=round_id, role=role)
     target = report_draft_path(run_dir, round_id, role)
     write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role=role, origin_kind="expert-report", payload=payload)
 
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     received = {maybe_text(item) for item in imports.get("report_roles_received", []) if maybe_text(item)}
     received.add(role)
     imports["report_roles_received"] = sorted(received)
     state["imports"] = imports
-    state["stage"] = STAGE_AWAITING_DECISION if received == set(REPORT_ROLES) else STAGE_AWAITING_REPORTS
+    if received == set(REPORT_ROLES):
+        build_decision_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_DECISION
+    else:
+        state["stage"] = STAGE_AWAITING_REPORTS
     save_state(run_dir, state)
     return {
         "imported_kind": "expert-report",
@@ -2280,6 +3616,7 @@ def import_decision_payload(*, run_dir: Path, state: dict[str, Any], payload: An
     ensure_decision_matches(payload, round_id=round_id)
     target = decision_draft_path(run_dir, round_id)
     write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role="moderator", origin_kind="council-decision", payload=payload)
 
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     imports["decision_received"] = True
@@ -2288,6 +3625,56 @@ def import_decision_payload(*, run_dir: Path, state: dict[str, Any], payload: An
     save_state(run_dir, state)
     return {
         "imported_kind": "council-decision",
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+
+
+def import_data_readiness_payload(*, run_dir: Path, state: dict[str, Any], role: str, payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_data_readiness_matches(payload, round_id=round_id, role=role)
+    target = data_readiness_report_path(run_dir, round_id, role)
+    write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role=role, origin_kind="data-readiness-report", payload=payload)
+
+    imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
+    received = {maybe_text(item) for item in imports.get("data_readiness_roles_received", []) if maybe_text(item)}
+    received.add(role)
+    imports["data_readiness_roles_received"] = sorted(received)
+    state["imports"] = imports
+    if received == set(READINESS_ROLES):
+        build_matching_authorization_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_MATCHING_AUTHORIZATION
+    else:
+        state["stage"] = STAGE_AWAITING_DATA_READINESS
+    save_state(run_dir, state)
+    return {
+        "imported_kind": "data-readiness-report",
+        "role": role,
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+
+
+def import_matching_authorization_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_matching_authorization_matches(payload, round_id=round_id)
+    target = matching_authorization_path(run_dir, round_id)
+    write_json(target, payload, pretty=True)
+
+    imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
+    imports["matching_authorization_received"] = True
+    state["imports"] = imports
+    if maybe_text(payload.get("authorization_status")) == "authorized":
+        state["stage"] = STAGE_READY_MATCHING_ADJUDICATION
+    else:
+        build_decision_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_DECISION
+    save_state(run_dir, state)
+    return {
+        "imported_kind": "matching-authorization",
         "input_path": str(source_path),
         "target_path": str(target),
         "state": build_status_payload(run_dir, state),
@@ -2308,6 +3695,33 @@ def import_fetch_execution_payload(*, run_dir: Path, state: dict[str, Any], payl
         "target_path": str(target),
         "state": build_status_payload(run_dir, state),
     }
+
+
+def import_data_plane_execution_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_data_plane_execution_matches(payload, run_dir=run_dir, round_id=round_id, source_path=source_path)
+    target = data_plane_execution_path(run_dir, round_id)
+    write_json(target, payload, pretty=True)
+    signal_corpus_import = maybe_auto_import_signal_corpus(run_dir, state, round_id)
+    state["stage"] = STAGE_AWAITING_DATA_READINESS
+    state["imports"] = {
+        "task_review_received": True,
+        "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "data_readiness_roles_received": [],
+        "matching_authorization_received": False,
+        "report_roles_received": [],
+        "decision_received": False,
+    }
+    save_state(run_dir, state)
+    result = {
+        "imported_kind": "data-plane-execution",
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+    if signal_corpus_import is not None:
+        result["signal_corpus_import"] = signal_corpus_import
+    return result
 
 
 def current_agent_turn(*, state: dict[str, Any], requested_role: str) -> tuple[str, str, str]:
@@ -2335,6 +3749,27 @@ def current_agent_turn(*, state: dict[str, Any], requested_role: str) -> tuple[s
         if len(missing) == 1:
             return (missing[0], "source-selection", "source-selection")
         raise ValueError("Current stage needs --role sociologist or --role environmentalist.")
+
+    if stage == STAGE_AWAITING_DATA_READINESS:
+        missing = [
+            role
+            for role in READINESS_ROLES
+            if role not in {maybe_text(item) for item in imports.get("data_readiness_roles_received", [])}
+        ]
+        if requested:
+            if requested not in READINESS_ROLES:
+                raise ValueError("Data-readiness stage requires role=sociologist or role=environmentalist.")
+            if requested not in missing:
+                raise ValueError(f"Role {requested} has already been imported for this round.")
+            return (requested, "data-readiness", "data-readiness-report")
+        if len(missing) == 1:
+            return (missing[0], "data-readiness", "data-readiness-report")
+        raise ValueError("Current stage needs --role sociologist or --role environmentalist.")
+
+    if stage == STAGE_AWAITING_MATCHING_AUTHORIZATION:
+        if requested and requested != "moderator":
+            raise ValueError("Current stage only accepts role=moderator.")
+        return ("moderator", "matching-authorization", "matching-authorization")
 
     if stage == STAGE_AWAITING_DECISION:
         if requested and requested != "moderator":
@@ -2400,6 +3835,22 @@ def build_agent_message(*, run_dir: Path, state: dict[str, Any], role: str, turn
             ]
         )
 
+    if turn_kind == "data-readiness":
+        prompt_text = load_text(data_readiness_prompt_path(run_dir, round_id, role))
+        packet_text = load_text(data_readiness_packet_path(run_dir, round_id, role))
+        return "\n\n".join(
+            [
+                session_text,
+                (
+                    f"Current automated turn: {role} data-readiness auditing for {round_id}.\n"
+                    "The required packet content is embedded below. Do not ask for filesystem access. "
+                    "Return only the final JSON object."
+                ),
+                "=== DATA READINESS PROMPT ===\n" + prompt_text,
+                "=== DATA READINESS PACKET.JSON ===\n" + packet_text,
+            ]
+        )
+
     if turn_kind == "report":
         prompt_text = load_text(report_prompt_path(run_dir, round_id, role))
         packet_text = load_text(report_packet_path(run_dir, round_id, role))
@@ -2415,6 +3866,23 @@ def build_agent_message(*, run_dir: Path, state: dict[str, Any], role: str, turn
                 "=== REPORT PACKET.JSON ===\n" + packet_text,
             ]
         )
+
+    if turn_kind == "matching-authorization":
+        prompt_text = load_text(matching_authorization_prompt_path(run_dir, round_id))
+        packet_text = load_text(matching_authorization_packet_path(run_dir, round_id))
+        sections = [
+            session_text,
+            (
+                f"Current automated turn: moderator matching authorization for {round_id}.\n"
+                "The required packet content is embedded below. Do not ask for filesystem access. "
+                "Return only the final JSON object."
+            ),
+            "=== MATCHING AUTHORIZATION PROMPT ===\n" + prompt_text,
+            "=== MATCHING AUTHORIZATION PACKET.JSON ===\n" + packet_text,
+        ]
+        if history_text:
+            sections.append("=== HISTORICAL CASE CONTEXT ===\n" + history_text)
+        return "\n\n".join(sections)
 
     if turn_kind == "decision":
         prompt_text = load_text(decision_prompt_path(run_dir, round_id))
@@ -2491,6 +3959,7 @@ def run_openclaw_agent_turn(
     payload = extract_json_suffix(completed.stdout)
     if schema_kind == "source-selection":
         payload = normalize_source_selection_payload(payload)
+        payload = hydrate_source_selection_layer_skills(run_dir=run_dir, round_id=round_id, role=role, payload=payload)
     write_json(json_path, payload, pretty=True)
     validate_input_file(schema_kind, json_path)
     return {
@@ -2659,6 +4128,8 @@ def continue_execute_fetch(run_dir: Path, state: dict[str, Any], timeout_seconds
             round_id,
             "--timeout-seconds",
             str(timeout_seconds),
+            "--continue-on-error",
+            "--skip-existing",
             "--pretty",
         ],
         cwd=REPO_DIR,
@@ -2670,10 +4141,39 @@ def continue_execute_fetch(run_dir: Path, state: dict[str, Any], timeout_seconds
         if isinstance(item, dict) and maybe_text(item.get("status")) == "failed"
     ]
     if failures:
-        raise RuntimeError(f"Fetch plan reported failed steps. Inspect stderr paths: {failures}")
+        failed_step_ids = [maybe_text(item.get("step_id")) for item in failures if maybe_text(item.get("step_id"))]
+        execution_text = maybe_text(execution_payload.get("execution_path")) or str(fetch_execution_path(run_dir, round_id))
+        raise RuntimeError(
+            f"Fetch plan reported {len(failures)} failed step(s) for {round_id}. "
+            f"Inspect {execution_text}. Failed steps: {', '.join(failed_step_ids) or 'unknown'}."
+        )
     state["stage"] = STAGE_READY_DATA_PLANE
     save_state(run_dir, state)
     return {"action": "execute-fetch-plan", "payload": payload, "state": build_status_payload(run_dir, state)}
+
+
+def continue_recover_or_execute_fetch(run_dir: Path, state: dict[str, Any], timeout_seconds: int) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    canonical_execution_path = fetch_execution_path(run_dir, round_id)
+    if canonical_execution_path.exists():
+        try:
+            payload = read_json(canonical_execution_path)
+            recovered = import_fetch_execution_payload(
+                run_dir=run_dir,
+                state=state,
+                payload=payload,
+                source_path=canonical_execution_path,
+            )
+            recovered["action"] = "reuse-fetch-execution"
+            recovered["reused_existing_execution"] = True
+            return recovered
+        except Exception as exc:  # noqa: BLE001
+            # If an existing fetch_execution.json is stale or invalid, fall back to a fresh execution.
+            return {
+                **continue_execute_fetch(run_dir, state, timeout_seconds),
+                "recovery_skipped_reason": str(exc),
+            }
+    return continue_execute_fetch(run_dir, state, timeout_seconds)
 
 
 def maybe_auto_import_signal_corpus(run_dir: Path, state: dict[str, Any], round_id: str) -> dict[str, Any] | None:
@@ -2744,15 +4244,99 @@ def continue_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, A
     signal_corpus_import = maybe_auto_import_signal_corpus(run_dir, state, round_id)
     if signal_corpus_import is not None and isinstance(payload, dict):
         payload["signal_corpus_import"] = signal_corpus_import
-    state["stage"] = STAGE_AWAITING_REPORTS
+    state["stage"] = STAGE_AWAITING_DATA_READINESS
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "data_readiness_roles_received": [],
+        "matching_authorization_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
     save_state(run_dir, state)
     return {"action": "run-data-plane", "payload": payload, "state": build_status_payload(run_dir, state)}
+
+
+def continue_recover_or_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    canonical_execution_path = data_plane_execution_path(run_dir, round_id)
+    if canonical_execution_path.exists():
+        try:
+            payload = read_json(canonical_execution_path)
+            recovered = import_data_plane_execution_payload(
+                run_dir=run_dir,
+                state=state,
+                payload=payload,
+                source_path=canonical_execution_path,
+            )
+            recovered["action"] = "reuse-data-plane-execution"
+            recovered["reused_existing_execution"] = True
+            return recovered
+        except Exception as exc:  # noqa: BLE001
+            return {
+                **continue_run_data_plane(run_dir, state),
+                "recovery_skipped_reason": str(exc),
+            }
+    return continue_run_data_plane(run_dir, state)
+
+
+def continue_run_matching_adjudication(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    payload = run_json_command(
+        [
+            "python3",
+            str(ORCHESTRATE_SCRIPT),
+            "run-matching-adjudication",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    state["stage"] = STAGE_AWAITING_REPORTS
+    state["imports"] = {
+        "task_review_received": True,
+        "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "data_readiness_roles_received": list(READINESS_ROLES),
+        "matching_authorization_received": True,
+        "report_roles_received": [],
+        "decision_received": False,
+    }
+    save_state(run_dir, state)
+    return {"action": "run-matching-adjudication", "payload": payload, "state": build_status_payload(run_dir, state)}
+
+
+def continue_recover_or_run_matching_adjudication(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    canonical_execution_path = matching_execution_path(run_dir, round_id)
+    if canonical_execution_path.exists():
+        try:
+            payload = read_json(canonical_execution_path)
+            ensure_matching_execution_matches(payload, run_dir=run_dir, round_id=round_id, source_path=canonical_execution_path)
+            state["stage"] = STAGE_AWAITING_REPORTS
+            state["imports"] = {
+                "task_review_received": True,
+                "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+                "data_readiness_roles_received": list(READINESS_ROLES),
+                "matching_authorization_received": True,
+                "report_roles_received": [],
+                "decision_received": False,
+            }
+            save_state(run_dir, state)
+            return {
+                "action": "reuse-matching-adjudication-execution",
+                "reused_existing_execution": True,
+                "payload": payload,
+                "state": build_status_payload(run_dir, state),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                **continue_run_matching_adjudication(run_dir, state),
+                "recovery_skipped_reason": str(exc),
+            }
+    return continue_run_matching_adjudication(run_dir, state)
 
 
 def continue_promote(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
@@ -2803,6 +4387,8 @@ def continue_advance_round(run_dir: Path, state: dict[str, Any]) -> dict[str, An
     state["imports"] = {
         "task_review_received": False,
         "source_selection_roles_received": [],
+        "data_readiness_roles_received": [],
+        "matching_authorization_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -2816,8 +4402,9 @@ def command_continue_run(args: argparse.Namespace) -> dict[str, Any]:
     stage = maybe_text(state.get("stage"))
     action_map = {
         STAGE_READY_PREPARE: ("prepare-round", continue_prepare_round),
-        STAGE_READY_FETCH: ("execute-fetch-plan", lambda d, s: continue_execute_fetch(d, s, args.timeout_seconds)),
-        STAGE_READY_DATA_PLANE: ("run-data-plane", continue_run_data_plane),
+        STAGE_READY_FETCH: ("execute-fetch-plan", lambda d, s: continue_recover_or_execute_fetch(d, s, args.timeout_seconds)),
+        STAGE_READY_DATA_PLANE: ("run-data-plane", continue_recover_or_run_data_plane),
+        STAGE_READY_MATCHING_ADJUDICATION: ("run-matching-adjudication", continue_recover_or_run_matching_adjudication),
         STAGE_READY_PROMOTE: ("promote-all", continue_promote),
         STAGE_READY_ADVANCE: ("advance-round", continue_advance_round),
     }
@@ -2840,8 +4427,22 @@ def command_continue_run(args: argparse.Namespace) -> dict[str, Any]:
         locked_stage = maybe_text(locked_state.get("stage"))
         if locked_stage != stage:
             raise ValueError(f"Stage changed during approval window: expected {stage}, found {locked_stage}. Rerun continue-run.")
-        result = handler(run_dir, locked_state)
+        try:
+            result = handler(run_dir, locked_state)
+        except Exception as exc:  # noqa: BLE001
+            failure = record_continue_run_failure(run_dir, locked_state, action_name, exc)
+            save_state(run_dir, locked_state)
+            return {
+                "ok": False,
+                "approved": True,
+                "action": action_name,
+                "recoverable": True,
+                "error": maybe_text(failure.get("error")),
+                "failure": failure,
+                "state": build_status_payload(run_dir, locked_state),
+            }
     result["approved"] = True
+    result["ok"] = True
     return result
 
 
@@ -2870,6 +4471,31 @@ def command_import_source_selection(args: argparse.Namespace) -> dict[str, Any]:
         if maybe_text(state.get("stage")) != STAGE_AWAITING_SOURCE_SELECTION:
             raise ValueError("import-source-selection is only allowed while waiting for expert source selection.")
         return import_source_selection_payload(run_dir=run_dir, state=state, role=role, payload=payload, source_path=input_path)
+
+
+def command_import_data_readiness(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    input_path = Path(args.input).expanduser().resolve()
+    role = args.role
+    validate_input_file("data-readiness-report", input_path)
+    payload = read_json(input_path)
+    with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
+        state = load_state(run_dir)
+        if maybe_text(state.get("stage")) != STAGE_AWAITING_DATA_READINESS:
+            raise ValueError("import-data-readiness is only allowed while waiting for expert data-readiness reports.")
+        return import_data_readiness_payload(run_dir=run_dir, state=state, role=role, payload=payload, source_path=input_path)
+
+
+def command_import_matching_authorization(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    input_path = Path(args.input).expanduser().resolve()
+    validate_input_file("matching-authorization", input_path)
+    payload = read_json(input_path)
+    with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
+        state = load_state(run_dir)
+        if maybe_text(state.get("stage")) != STAGE_AWAITING_MATCHING_AUTHORIZATION:
+            raise ValueError("import-matching-authorization is only allowed while waiting for moderator matching authorization.")
+        return import_matching_authorization_payload(run_dir=run_dir, state=state, payload=payload, source_path=input_path)
 
 
 def command_import_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -2968,6 +4594,21 @@ def command_run_agent_step(args: argparse.Namespace) -> dict[str, Any]:
                 run_dir=run_dir,
                 state=locked_state,
                 role=role,
+                payload=payload,
+                source_path=response_path,
+            )
+        elif schema_kind == "data-readiness-report":
+            imported = import_data_readiness_payload(
+                run_dir=run_dir,
+                state=locked_state,
+                role=role,
+                payload=payload,
+                source_path=response_path,
+            )
+        elif schema_kind == "matching-authorization":
+            imported = import_matching_authorization_payload(
+                run_dir=run_dir,
+                state=locked_state,
                 payload=payload,
                 source_path=response_path,
             )
@@ -3198,7 +4839,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_agent = sub.add_parser("run-agent-step", help="Send the current turn to OpenClaw, receive JSON, and import it.")
     run_agent.add_argument("--run-dir", required=True, help="Eco-council run directory.")
-    run_agent.add_argument("--role", default="", choices=("", "moderator", "sociologist", "environmentalist"), help="Optional role override for source-selection or expert-report stages.")
+    run_agent.add_argument("--role", default="", choices=("", "moderator", "sociologist", "environmentalist"), help="Optional role override for source-selection, data-readiness, report, or moderator-gated stages.")
     run_agent.add_argument("--timeout-seconds", type=int, default=600, help="OpenClaw agent timeout.")
     run_agent.add_argument("--thinking", default="low", choices=("off", "minimal", "low", "medium", "high"), help="OpenClaw thinking level.")
     run_agent.add_argument("--yes", action="store_true", help="Skip interactive approval.")
@@ -3214,6 +4855,17 @@ def build_parser() -> argparse.ArgumentParser:
     import_source_selection.add_argument("--role", required=True, choices=SOURCE_SELECTION_ROLES, help="Expert role.")
     import_source_selection.add_argument("--input", required=True, help="JSON file returned by the expert agent.")
     import_source_selection.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    import_data_readiness = sub.add_parser("import-data-readiness", help="Import one data-readiness-report JSON into the canonical role path.")
+    import_data_readiness.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    import_data_readiness.add_argument("--role", required=True, choices=READINESS_ROLES, help="Expert role.")
+    import_data_readiness.add_argument("--input", required=True, help="JSON file returned by the expert agent.")
+    import_data_readiness.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    import_matching_authorization = sub.add_parser("import-matching-authorization", help="Import moderator matching-authorization JSON into the canonical path.")
+    import_matching_authorization.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    import_matching_authorization.add_argument("--input", required=True, help="JSON file returned by the moderator.")
+    import_matching_authorization.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     import_report = sub.add_parser("import-report", help="Import one expert-report JSON into the draft path.")
     import_report.add_argument("--run-dir", required=True, help="Eco-council run directory.")
@@ -3253,6 +4905,8 @@ def main(argv: list[str] | None = None) -> int:
         "run-agent-step": command_run_agent_step,
         "import-task-review": command_import_task_review,
         "import-source-selection": command_import_source_selection,
+        "import-data-readiness": command_import_data_readiness,
+        "import-matching-authorization": command_import_matching_authorization,
         "import-report": command_import_report,
         "import-decision": command_import_decision,
         "import-fetch-execution": command_import_fetch_execution,
@@ -3263,6 +4917,8 @@ def main(argv: list[str] | None = None) -> int:
         print(pretty_json({"ok": False, "error": str(exc)}, pretty=True))
         return 1
     print(pretty_json(payload, pretty=bool(getattr(args, "pretty", False))))
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        return 1
     return 0
 
 

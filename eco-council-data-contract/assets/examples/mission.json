@@ -3,6 +3,7 @@
   "run_id": "eco-20260320-chiangmai-smoke",
   "topic": "Chiang Mai smoke verification",
   "objective": "Determine whether public smoke claims are supported by physical evidence.",
+  "policy_profile": "standard",
   "window": {
     "start_utc": "2026-03-18T00:00:00Z",
     "end_utc": "2026-03-19T23:59:59Z"
@@ -19,33 +20,14 @@
     "Smoke discussion is driven by real fire activity upwind of Chiang Mai.",
     "Public AQ concern aligns with modeled PM and meteorological background."
   ],
-  "constraints": {
-    "max_rounds": 3,
-    "max_claims_per_round": 3,
-    "max_tasks_per_round": 4
-  },
-  "source_policy": {
-    "sociologist": [
-      "gdelt-doc-search",
-      "gdelt-events-fetch",
-      "gdelt-mentions-fetch",
-      "gdelt-gkg-fetch",
-      "bluesky-cascade-fetch",
-      "youtube-video-search",
-      "youtube-comments-fetch",
-      "federal-register-doc-fetch",
-      "regulationsgov-comments-fetch",
-      "regulationsgov-comment-detail-fetch"
-    ],
-    "environmentalist": [
-      "airnow-hourly-obs-fetch",
-      "openaq-data-fetch",
-      "usgs-water-iv-fetch",
-      "nasa-firms-fire-fetch",
-      "open-meteo-air-quality-fetch",
-      "open-meteo-historical-fetch",
-      "open-meteo-flood-fetch"
-    ],
-    "historian": []
+  "source_governance": {
+    "approved_layers": [
+      {
+        "family_id": "gdelt",
+        "layer_id": "bulk",
+        "approved_by": "human",
+        "reason": "This run may use one anchored GDELT bulk layer after article recon."
+      }
+    ]
   }
 }

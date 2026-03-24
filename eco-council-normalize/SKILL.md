@@ -1,6 +1,6 @@
 ---
 name: eco-council-normalize
-description: Normalize eco-council raw fetch outputs into separate public-signal and environment-signal staging databases, canonical claims, observations, evidence cards, and role-specific round context JSON. Use when sociologist and environmentalist agents have already collected raw JSON, JSONL, CSV, or ZIP artifacts and OpenClaw needs deterministic cleaning, deduplication, provenance tracking, and moderator-ready aggregation before report writing.
+description: Normalize eco-council raw fetch outputs into separate public-signal and environment-signal staging databases, canonical submissions, shared claims and observations, evidence-library entries, evidence cards, and role-specific round context JSON. Use when sociologist and environmentalist agents have already collected raw JSON, JSONL, CSV, or ZIP artifacts and OpenClaw needs deterministic cleaning, deduplication, provenance tracking, and moderator-ready aggregation before data-readiness review, matching authorization, or report writing.
 ---
 
 # Eco Council Normalize
@@ -11,7 +11,7 @@ description: Normalize eco-council raw fetch outputs into separate public-signal
 - Build two staging SQLite databases per run:
   - `analytics/public_signals.sqlite`
   - `analytics/environment_signals.sqlite`
-- Convert raw artifacts into canonical `claim`, `observation`, `evidence-card`, and role-specific context JSON compatible with `$eco-council-data-contract`.
+- Convert raw artifacts into canonical `claim-submission`, `observation-submission`, active evidence-library views, `claim`, `observation`, `evidence-card`, `isolated-entry`, `remand-entry`, and role-specific context JSON compatible with `$eco-council-data-contract`.
 
 ## Required Upstream State
 
@@ -60,7 +60,7 @@ python3 scripts/eco_council_normalize.py normalize-environment \
   --pretty
 ```
 
-4. Link canonical claims and observations into `evidence-card`.
+4. Link canonical claims and observations into `matching-result`, `evidence-adjudication`, `evidence-card`, `isolated-entry`, and `remand-entry`.
 
 ```bash
 python3 scripts/eco_council_normalize.py link-evidence \
@@ -108,6 +108,7 @@ Environment normalization currently supports:
 - Do not geocode place names here.
 - Do not write final natural-language expert reports here.
 - Keep raw artifacts immutable and preserve provenance into every canonical object.
+- Keep `shared/evidence-library/` as the persistent cross-round surface for active submissions, cards, isolated entries, and remands.
 
 ## References
 

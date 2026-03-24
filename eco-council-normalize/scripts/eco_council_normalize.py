@@ -531,6 +531,28 @@ def mission_place_scope(mission: dict[str, Any]) -> dict[str, Any]:
     return {"label": label, "geometry": geometry}
 
 
+def mission_constraints(mission: dict[str, Any]) -> dict[str, int]:
+    if CONTRACT_MODULE is not None and hasattr(CONTRACT_MODULE, "effective_constraints"):
+        values = CONTRACT_MODULE.effective_constraints(mission)
+        if isinstance(values, dict):
+            return {key: int(value) for key, value in values.items() if isinstance(value, int) and value > 0}
+    constraints = mission.get("constraints")
+    if not isinstance(constraints, dict):
+        return {}
+    output: dict[str, int] = {}
+    for key in (
+        "max_rounds",
+        "max_claims_per_round",
+        "max_tasks_per_round",
+        "claim_target_per_round",
+        "claim_hard_cap_per_round",
+    ):
+        value = constraints.get(key)
+        if isinstance(value, int) and value > 0:
+            output[key] = value
+    return output
+
+
 def geometry_to_bbox(geometry: dict[str, Any]) -> tuple[float, float, float, float] | None:
     kind = maybe_text(geometry.get("type"))
     if kind == "Point":
@@ -697,6 +719,62 @@ def shared_observations_path(run_dir: Path, round_id: str) -> Path:
 
 def shared_evidence_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "shared" / "evidence_cards.json"
+
+
+def claim_submissions_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "claim_submissions.json"
+
+
+def observation_submissions_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "observation_submissions.json"
+
+
+def data_readiness_report_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "data_readiness_report.json"
+
+
+def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
+
+
+def matching_result_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "matching_result.json"
+
+
+def evidence_adjudication_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence_adjudication.json"
+
+
+def evidence_library_dir(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library"
+
+
+def evidence_library_ledger_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "ledger.jsonl"
+
+
+def claims_active_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "claims_active.json"
+
+
+def observations_active_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "observations_active.json"
+
+
+def cards_active_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "cards_active.json"
+
+
+def isolated_active_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "isolated_active.json"
+
+
+def remands_open_path(run_dir: Path, round_id: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / "remands_open.json"
+
+
+def library_context_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return evidence_library_dir(run_dir, round_id) / f"context_{role}.json"
 
 
 def role_normalized_dir(run_dir: Path, round_id: str, role: str) -> Path:
@@ -2254,6 +2332,63 @@ def normalize_public_source_cached(
     return signals, "miss"
 
 
+def build_compact_audit(
+    *,
+    total_candidate_count: int,
+    retained_count: int,
+    coverage_summary: str,
+    concentration_flags: list[str] | None = None,
+    sampling_notes: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "representative": not bool(concentration_flags),
+        "retained_count": max(0, int(retained_count)),
+        "total_candidate_count": max(0, int(total_candidate_count)),
+        "coverage_summary": coverage_summary,
+        "concentration_flags": [maybe_text(item) for item in (concentration_flags or []) if maybe_text(item)],
+        "sampling_notes": [maybe_text(item) for item in (sampling_notes or []) if maybe_text(item)],
+    }
+
+
+def public_group_compact_audit(items: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts = Counter(maybe_text(item.get("source_skill")) for item in items)
+    top_source = source_counts.most_common(1)[0] if source_counts else None
+    concentration_flags: list[str] = []
+    if top_source is not None and len(items) > 0 and top_source[1] / len(items) >= 0.8:
+        concentration_flags.append(f"Public evidence is highly concentrated in {top_source[0]}.")
+    return build_compact_audit(
+        total_candidate_count=len(items),
+        retained_count=min(len(items), 8),
+        coverage_summary=(
+            f"Retained {min(len(items), 8)} references from {len(items)} supporting public signals "
+            f"across {len(source_counts)} source skills."
+        ),
+        concentration_flags=concentration_flags,
+        sampling_notes=[
+            f"Dominant source skills: {top_counter_text(source_counts, limit=3)}" if source_counts else "No dominant sources recorded.",
+        ],
+    )
+
+
+def observation_group_compact_audit(group: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts = Counter(maybe_text(item.get("source_skill")) for item in group)
+    concentration_flags: list[str] = []
+    if len(source_counts) == 1:
+        only_source = next(iter(source_counts)) if source_counts else "unknown"
+        concentration_flags.append(f"Observation summary currently depends on a single source skill: {only_source}.")
+    return build_compact_audit(
+        total_candidate_count=len(group),
+        retained_count=1,
+        coverage_summary=(
+            f"Aggregated {len(group)} raw environment signals into one canonical observation."
+        ),
+        concentration_flags=concentration_flags,
+        sampling_notes=[
+            f"Dominant source skills: {top_counter_text(source_counts, limit=3)}" if source_counts else "No dominant sources recorded.",
+        ],
+    )
+
+
 def public_signals_to_claims(
     *,
     mission: dict[str, Any],
@@ -2318,6 +2453,8 @@ def public_signals_to_claims(
             "time_window": time_window,
             "place_scope": place_scope,
             "public_refs": [artifact_ref(item) for item in items[:8]],
+            "source_signal_count": len(items),
+            "compact_audit": public_group_compact_audit(items),
         }
         validate_payload("claim", claim)
         claims.append(claim)
@@ -3089,6 +3226,7 @@ def environment_signals_to_observations(
             "place_scope": derive_place_scope(group, mission_scope),
             "quality_flags": quality_flags,
             "provenance": artifact_ref(group[0]),
+            "compact_audit": observation_group_compact_audit(group),
         }
         validate_payload("observation", observation)
         observations.append(observation)
@@ -3100,6 +3238,16 @@ def environment_signals_to_observations(
         item["round_id"] = round_id
         item["place_scope"] = mission_scope
         item["time_window"] = mission_time_window
+        item.setdefault(
+            "compact_audit",
+            build_compact_audit(
+                total_candidate_count=1,
+                retained_count=1,
+                coverage_summary="The canonical observation was emitted directly from an extra deterministic observation source.",
+                concentration_flags=[],
+                sampling_notes=[],
+            ),
+        )
         validate_payload("observation", item)
         observations.append(item)
         counter += 1
@@ -3175,6 +3323,80 @@ def load_canonical_list(path: Path) -> list[dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
+def load_object_if_exists(path: Path) -> dict[str, Any] | None:
+    payload = load_json_if_exists(path)
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def append_library_events(run_dir: Path, round_id: str, events: list[dict[str, Any]]) -> None:
+    if not events:
+        return
+    ledger_path = evidence_library_ledger_path(run_dir, round_id)
+    existing = read_jsonl(ledger_path) if ledger_path.exists() else []
+    entries = [item for item in existing if isinstance(item, dict)]
+    for event in events:
+        object_kind = maybe_text(event.get("object_kind"))
+        payload = event.get("payload")
+        if not object_kind or not isinstance(payload, dict):
+            continue
+        entries.append(
+            {
+                "recorded_at_utc": utc_now_iso(),
+                "object_kind": object_kind,
+                "payload": payload,
+            }
+        )
+    write_jsonl(ledger_path, entries)
+
+
+def merge_unique_items(*groups: list[dict[str, Any]], key_fn: Any) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    ordered_keys: list[str] = []
+    for group in groups:
+        for item in group:
+            if not isinstance(item, dict):
+                continue
+            key = maybe_text(key_fn(item))
+            if not key:
+                key = stable_hash(stable_json(item))
+            if key not in merged:
+                ordered_keys.append(key)
+            merged[key] = item
+    return [merged[key] for key in ordered_keys]
+
+
+def previous_active_list(run_dir: Path, round_id: str, path_fn: Any) -> list[dict[str, Any]]:
+    prior_round = previous_round_id(run_dir, round_id)
+    if prior_round is None:
+        return []
+    return load_canonical_list(path_fn(run_dir, prior_round))
+
+
+def merge_claim_submissions(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(*groups, key_fn=lambda item: item.get("submission_id") or item.get("claim_id"))
+
+
+def merge_observation_submissions(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(
+        *groups,
+        key_fn=lambda item: stable_hash(stable_json(observation_signature_payload(item))),
+    )
+
+
+def merge_evidence_cards(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(*groups, key_fn=lambda item: item.get("evidence_id"))
+
+
+def merge_isolated_entries(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(*groups, key_fn=lambda item: item.get("isolated_id"))
+
+
+def merge_remand_entries(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(*groups, key_fn=lambda item: item.get("remand_id"))
+
+
 def observation_signature_payload(observation: dict[str, Any]) -> dict[str, Any]:
     provenance = observation.get("provenance")
     if not isinstance(provenance, dict):
@@ -3242,6 +3464,54 @@ def effective_shared_observations(
     return merge_effective_observations(inherited, current)
 
 
+def merge_effective_claims(*claim_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return merge_unique_items(*claim_groups, key_fn=lambda item: item.get("claim_id"))
+
+
+def effective_shared_claims(
+    run_dir: Path,
+    round_id: str,
+    *,
+    current_round_claims: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    inherited: list[dict[str, Any]] = []
+    prior_round_id = previous_round_id(run_dir, round_id)
+    if prior_round_id is not None:
+        inherited = effective_shared_claims(run_dir, prior_round_id)
+    current = (
+        current_round_claims
+        if current_round_claims is not None
+        else load_canonical_list(shared_claims_path(run_dir, round_id))
+    )
+    return merge_effective_claims(inherited, current)
+
+
+def active_library_list(run_dir: Path, round_id: str, path_fn: Any) -> list[dict[str, Any]]:
+    current_path = path_fn(run_dir, round_id)
+    if current_path.exists():
+        return load_canonical_list(current_path)
+    return previous_active_list(run_dir, round_id, path_fn)
+
+
+def library_state(run_dir: Path, round_id: str) -> dict[str, Any]:
+    return {
+        "claim_submissions_current": load_canonical_list(claim_submissions_path(run_dir, round_id)),
+        "observation_submissions_current": load_canonical_list(observation_submissions_path(run_dir, round_id)),
+        "claims_active": active_library_list(run_dir, round_id, claims_active_path),
+        "observations_active": active_library_list(run_dir, round_id, observations_active_path),
+        "cards_active": active_library_list(run_dir, round_id, cards_active_path),
+        "isolated_active": active_library_list(run_dir, round_id, isolated_active_path),
+        "remands_open": active_library_list(run_dir, round_id, remands_open_path),
+        "matching_result": load_object_if_exists(matching_result_path(run_dir, round_id)) or {},
+        "evidence_adjudication": load_object_if_exists(evidence_adjudication_path(run_dir, round_id)) or {},
+        "matching_authorization": load_object_if_exists(matching_authorization_path(run_dir, round_id)) or {},
+        "readiness_reports": {
+            "sociologist": load_object_if_exists(data_readiness_report_path(run_dir, round_id, "sociologist")) or {},
+            "environmentalist": load_object_if_exists(data_readiness_report_path(run_dir, round_id, "environmentalist")) or {},
+        },
+    }
+
+
 def metric_relevant(claim_type: str, metric: str) -> bool:
     metric = canonical_environment_metric(metric)
     if claim_type not in CLAIM_METRIC_RULES:
@@ -3299,13 +3569,17 @@ def build_evidence_summary(claim: dict[str, Any], observation_notes: list[str], 
 
 def compact_task(task: dict[str, Any]) -> dict[str, Any]:
     inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) else {}
-    preferred_sources = inputs.get("preferred_sources") if isinstance(inputs.get("preferred_sources"), list) else []
+    evidence_requirements = inputs.get("evidence_requirements") if isinstance(inputs.get("evidence_requirements"), list) else []
     return {
         "task_id": maybe_text(task.get("task_id")),
         "assigned_role": maybe_text(task.get("assigned_role")),
         "objective": truncate_text(maybe_text(task.get("objective")), 180),
         "status": maybe_text(task.get("status")),
-        "preferred_sources": [maybe_text(item) for item in preferred_sources if maybe_text(item)][:3],
+        "evidence_requirements": [
+            maybe_text(item.get("requirement_type"))
+            for item in evidence_requirements
+            if isinstance(item, dict) and maybe_text(item.get("requirement_type"))
+        ][:3],
     }
 
 
@@ -3355,6 +3629,52 @@ def compact_evidence_card(card: dict[str, Any]) -> dict[str, Any]:
         "summary": truncate_text(maybe_text(card.get("summary")), 220),
         "observation_ids": [maybe_text(item) for item in card.get("observation_ids", []) if maybe_text(item)][:6],
         "gaps": [truncate_text(maybe_text(item), 120) for item in card.get("gaps", []) if maybe_text(item)][:3],
+    }
+
+
+def compact_claim_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "submission_id": maybe_text(submission.get("submission_id")),
+        "claim_id": maybe_text(submission.get("claim_id")),
+        "claim_type": maybe_text(submission.get("claim_type")),
+        "summary": truncate_text(maybe_text(submission.get("summary")), 180),
+        "meaning": truncate_text(maybe_text(submission.get("meaning")), 200),
+        "worth_storing": bool(submission.get("worth_storing")),
+        "source_signal_count": submission.get("source_signal_count"),
+    }
+
+
+def compact_observation_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "submission_id": maybe_text(submission.get("submission_id")),
+        "observation_id": maybe_text(submission.get("observation_id")),
+        "metric": maybe_text(submission.get("metric")),
+        "source_skill": maybe_text(submission.get("source_skill")),
+        "aggregation": maybe_text(submission.get("aggregation")),
+        "value": submission.get("value"),
+        "unit": maybe_text(submission.get("unit")),
+        "meaning": truncate_text(maybe_text(submission.get("meaning")), 200),
+        "worth_storing": bool(submission.get("worth_storing")),
+    }
+
+
+def compact_isolated_entry(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "isolated_id": maybe_text(item.get("isolated_id")),
+        "entity_kind": maybe_text(item.get("entity_kind")),
+        "entity_id": maybe_text(item.get("entity_id")),
+        "summary": truncate_text(maybe_text(item.get("summary")), 200),
+        "reason": truncate_text(maybe_text(item.get("reason")), 160),
+    }
+
+
+def compact_remand_entry(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "remand_id": maybe_text(item.get("remand_id")),
+        "entity_kind": maybe_text(item.get("entity_kind")),
+        "entity_id": maybe_text(item.get("entity_id")),
+        "summary": truncate_text(maybe_text(item.get("summary")), 200),
+        "reasons": [truncate_text(maybe_text(reason), 120) for reason in item.get("reasons", []) if maybe_text(reason)][:3],
     }
 
 
@@ -3412,13 +3732,134 @@ def build_environment_signal_summary(signals: list[dict[str, Any]], observations
     }
 
 
-def link_claims_to_evidence(
+def claim_submission_from_claim(claim: dict[str, Any]) -> dict[str, Any]:
+    submission = {
+        "schema_version": SCHEMA_VERSION,
+        "submission_id": f"claimsub-{maybe_text(claim.get('claim_id'))}",
+        "run_id": maybe_text(claim.get("run_id")),
+        "round_id": maybe_text(claim.get("round_id")),
+        "agent_role": "sociologist",
+        "claim_id": maybe_text(claim.get("claim_id")),
+        "claim_type": maybe_text(claim.get("claim_type")),
+        "summary": maybe_text(claim.get("summary")),
+        "statement": maybe_text(claim.get("statement")),
+        "meaning": (
+            f"This public-side claim captures the mission-relevant narrative for {maybe_text(claim.get('claim_type')) or 'the current event'}."
+        ),
+        "priority": int(claim.get("priority") or 1),
+        "needs_physical_validation": bool(claim.get("needs_physical_validation")),
+        "worth_storing": True,
+        "source_signal_count": int(claim.get("source_signal_count") or max(1, len(claim.get("public_refs", [])))),
+        "time_window": claim.get("time_window"),
+        "place_scope": claim.get("place_scope"),
+        "public_refs": claim.get("public_refs", []),
+        "compact_audit": claim.get("compact_audit")
+        if isinstance(claim.get("compact_audit"), dict)
+        else build_compact_audit(
+            total_candidate_count=max(1, len(claim.get("public_refs", []))),
+            retained_count=min(max(1, len(claim.get("public_refs", []))), 8),
+            coverage_summary="Derived claim was materialized into a library submission without an explicit compact audit.",
+            concentration_flags=[],
+            sampling_notes=[],
+        ),
+    }
+    validate_payload("claim-submission", submission)
+    return submission
+
+
+def observation_submission_from_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    submission = {
+        "schema_version": SCHEMA_VERSION,
+        "submission_id": f"obssub-{maybe_text(observation.get('observation_id'))}",
+        "run_id": maybe_text(observation.get("run_id")),
+        "round_id": maybe_text(observation.get("round_id")),
+        "agent_role": "environmentalist",
+        "observation_id": maybe_text(observation.get("observation_id")),
+        "source_skill": maybe_text(observation.get("source_skill")),
+        "metric": maybe_text(observation.get("metric")),
+        "aggregation": maybe_text(observation.get("aggregation")),
+        "value": observation.get("value"),
+        "unit": maybe_text(observation.get("unit")),
+        "meaning": (
+            f"This observation records mission-window physical evidence for metric {maybe_text(observation.get('metric'))}."
+        ),
+        "worth_storing": True,
+        "time_window": observation.get("time_window"),
+        "place_scope": observation.get("place_scope"),
+        "quality_flags": observation.get("quality_flags", []),
+        "provenance": observation.get("provenance"),
+        "compact_audit": observation.get("compact_audit")
+        if isinstance(observation.get("compact_audit"), dict)
+        else build_compact_audit(
+            total_candidate_count=1,
+            retained_count=1,
+            coverage_summary="Derived observation was materialized into a library submission without an explicit compact audit.",
+            concentration_flags=[],
+            sampling_notes=[],
+        ),
+    }
+    validate_payload("observation-submission", submission)
+    return submission
+
+
+def claims_from_submissions(submissions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for index, submission in enumerate(submissions, start=1):
+        claim = {
+            "schema_version": SCHEMA_VERSION,
+            "claim_id": maybe_text(submission.get("claim_id")) or emit_row_id("claim", index),
+            "run_id": maybe_text(submission.get("run_id")),
+            "round_id": maybe_text(submission.get("round_id")),
+            "agent_role": "sociologist",
+            "claim_type": maybe_text(submission.get("claim_type")),
+            "status": "candidate",
+            "summary": maybe_text(submission.get("summary")),
+            "statement": maybe_text(submission.get("statement")),
+            "priority": int(submission.get("priority") or 1),
+            "needs_physical_validation": bool(submission.get("needs_physical_validation")),
+            "time_window": submission.get("time_window"),
+            "place_scope": submission.get("place_scope"),
+            "public_refs": submission.get("public_refs", []),
+            "source_signal_count": submission.get("source_signal_count"),
+            "compact_audit": submission.get("compact_audit"),
+        }
+        validate_payload("claim", claim)
+        claims.append(claim)
+    return claims
+
+
+def observations_from_submissions(submissions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    for index, submission in enumerate(submissions, start=1):
+        observation = {
+            "schema_version": SCHEMA_VERSION,
+            "observation_id": maybe_text(submission.get("observation_id")) or emit_row_id("obs", index),
+            "run_id": maybe_text(submission.get("run_id")),
+            "round_id": maybe_text(submission.get("round_id")),
+            "agent_role": "environmentalist",
+            "source_skill": maybe_text(submission.get("source_skill")),
+            "metric": maybe_text(submission.get("metric")),
+            "aggregation": maybe_text(submission.get("aggregation")),
+            "value": submission.get("value"),
+            "unit": maybe_text(submission.get("unit")),
+            "time_window": submission.get("time_window"),
+            "place_scope": submission.get("place_scope"),
+            "quality_flags": submission.get("quality_flags", []),
+            "provenance": submission.get("provenance"),
+            "compact_audit": submission.get("compact_audit"),
+        }
+        validate_payload("observation", observation)
+        observations.append(observation)
+    return observations
+
+
+def match_claims_to_observations(
     *,
     claims: list[dict[str, Any]],
     observations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    evidence_cards: list[dict[str, Any]] = []
-    for index, claim in enumerate(claims, start=1):
+    matches: list[dict[str, Any]] = []
+    for claim in claims:
         matching = [
             observation
             for observation in observations
@@ -3467,18 +3908,260 @@ def link_claims_to_evidence(
             if any("modeled-background" in item.get("quality_flags", []) for item in matching):
                 gaps.append("Modeled background fields should be cross-checked with station or local observations.")
 
+        matches.append(
+            {
+                "claim": claim,
+                "observations": matching,
+                "support_score": support_score,
+                "contradict_score": contradict_score,
+                "notes": notes,
+                "gaps": sorted(dict.fromkeys(gaps)),
+                "verdict": verdict,
+                "confidence": confidence,
+            }
+        )
+    return matches
+
+
+def build_matching_result(
+    *,
+    authorization: dict[str, Any],
+    claims: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    matches: list[dict[str, Any]],
+) -> dict[str, Any]:
+    matched_pairs = [
+        {
+            "claim_id": maybe_text(match["claim"].get("claim_id")),
+            "observation_ids": [maybe_text(item.get("observation_id")) for item in match["observations"] if maybe_text(item.get("observation_id"))],
+            "support_score": float(match["support_score"]),
+            "contradict_score": float(match["contradict_score"]),
+            "notes": [maybe_text(item) for item in match["notes"] if maybe_text(item)],
+        }
+        for match in matches
+        if match["observations"]
+    ]
+    matched_claim_ids = [maybe_text(item["claim_id"]) for item in matched_pairs if maybe_text(item.get("claim_id"))]
+    matched_observation_ids = unique_strings(
+        [
+            maybe_text(observation_id)
+            for pair in matched_pairs
+            for observation_id in pair.get("observation_ids", [])
+            if maybe_text(observation_id)
+        ]
+    )
+    all_claim_ids = [maybe_text(item.get("claim_id")) for item in claims if maybe_text(item.get("claim_id"))]
+    all_observation_ids = [maybe_text(item.get("observation_id")) for item in observations if maybe_text(item.get("observation_id"))]
+    unmatched_claim_ids = [claim_id for claim_id in all_claim_ids if claim_id not in set(matched_claim_ids)]
+    unmatched_observation_ids = [obs_id for obs_id in all_observation_ids if obs_id not in set(matched_observation_ids)]
+    if matched_pairs and (unmatched_claim_ids or unmatched_observation_ids):
+        result_status = "partial"
+    elif matched_pairs:
+        result_status = "matched"
+    else:
+        result_status = "unmatched"
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "result_id": f"matchres-{maybe_text(authorization.get('round_id')) or 'round'}",
+        "run_id": maybe_text(authorization.get("run_id")) or maybe_text(claims[0].get("run_id")) if claims else "",
+        "round_id": maybe_text(authorization.get("round_id")) or maybe_text(claims[0].get("round_id")) if claims else "",
+        "authorization_id": maybe_text(authorization.get("authorization_id")),
+        "result_status": result_status,
+        "summary": (
+            f"Matched {len(matched_pairs)} claim-observation clusters, leaving "
+            f"{len(unmatched_claim_ids)} unmatched claims and {len(unmatched_observation_ids)} unmatched observations."
+        ),
+        "matched_pairs": matched_pairs,
+        "matched_claim_ids": matched_claim_ids,
+        "matched_observation_ids": matched_observation_ids,
+        "unmatched_claim_ids": unmatched_claim_ids,
+        "unmatched_observation_ids": unmatched_observation_ids,
+    }
+    validate_payload("matching-result", payload)
+    return payload
+
+
+def build_isolated_entries(
+    *,
+    run_id: str,
+    round_id: str,
+    claims: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    matches: list[dict[str, Any]],
+    allow_isolated_evidence: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not allow_isolated_evidence:
+        return [], []
+    matched_observation_ids = {
+        maybe_text(observation.get("observation_id"))
+        for match in matches
+        for observation in match["observations"]
+        if maybe_text(observation.get("observation_id"))
+    }
+    isolated: list[dict[str, Any]] = []
+    for claim_index, match in enumerate(matches, start=1):
+        claim = match["claim"]
+        if match["observations"]:
+            continue
+        isolated.append(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "isolated_id": f"isolated-claim-{claim_index:03d}",
+                "run_id": run_id,
+                "round_id": round_id,
+                "entity_kind": "claim",
+                "entity_id": maybe_text(claim.get("claim_id")),
+                "summary": maybe_text(claim.get("summary")),
+                "reason": "Public-side evidence is currently isolated from physical corroboration.",
+            }
+        )
+    observation_index = 1
+    for observation in observations:
+        observation_id = maybe_text(observation.get("observation_id"))
+        if not observation_id or observation_id in matched_observation_ids:
+            continue
+        isolated.append(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "isolated_id": f"isolated-observation-{observation_index:03d}",
+                "run_id": run_id,
+                "round_id": round_id,
+                "entity_kind": "observation",
+                "entity_id": observation_id,
+                "summary": f"{maybe_text(observation.get('metric'))} from {maybe_text(observation.get('source_skill'))}",
+                "reason": "Physical-side evidence is currently isolated from attributable public recognition.",
+            }
+        )
+        observation_index += 1
+    return isolated, []
+
+
+def build_remand_entries(
+    *,
+    run_id: str,
+    round_id: str,
+    matches: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    allow_isolated_evidence: bool,
+) -> list[dict[str, Any]]:
+    remands: list[dict[str, Any]] = []
+    matched_observation_ids = {
+        maybe_text(observation.get("observation_id"))
+        for match in matches
+        for observation in match["observations"]
+        if maybe_text(observation.get("observation_id"))
+    }
+    for index, match in enumerate(matches, start=1):
+        claim = match["claim"]
+        claim_id = maybe_text(claim.get("claim_id"))
+        if not claim_id:
+            continue
+        has_observations = bool(match["observations"])
+        verdict = maybe_text(match["verdict"])
+        if not has_observations and allow_isolated_evidence:
+            continue
+        if verdict not in {"mixed", "insufficient"} and has_observations:
+            continue
+        remands.append(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "remand_id": f"remand-claim-{index:03d}",
+                "run_id": run_id,
+                "round_id": round_id,
+                "entity_kind": "claim",
+                "entity_id": claim_id,
+                "summary": maybe_text(claim.get("summary")),
+                "reasons": [maybe_text(item) for item in match["gaps"] if maybe_text(item)] or ["Matching remained partial."],
+            }
+        )
+    if allow_isolated_evidence:
+        return remands
+    observation_index = 1
+    for observation in observations:
+        observation_id = maybe_text(observation.get("observation_id"))
+        if not observation_id or observation_id in matched_observation_ids:
+            continue
+        remands.append(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "remand_id": f"remand-observation-{observation_index:03d}",
+                "run_id": run_id,
+                "round_id": round_id,
+                "entity_kind": "observation",
+                "entity_id": observation_id,
+                "summary": f"{maybe_text(observation.get('metric'))} from {maybe_text(observation.get('source_skill'))}",
+                "reasons": ["Observation remained unmatched and isolated evidence was not authorized."],
+            }
+        )
+        observation_index += 1
+    return remands
+
+
+def build_evidence_adjudication(
+    *,
+    authorization: dict[str, Any],
+    matching_result: dict[str, Any],
+    evidence_cards: list[dict[str, Any]],
+    isolated_entries: list[dict[str, Any]],
+    remands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if remands and evidence_cards:
+        status = "partial"
+    elif remands:
+        status = "remand-required"
+    else:
+        status = "complete"
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "adjudication_id": f"adjudication-{maybe_text(authorization.get('round_id')) or 'round'}",
+        "run_id": maybe_text(authorization.get("run_id")),
+        "round_id": maybe_text(authorization.get("round_id")),
+        "authorization_id": maybe_text(authorization.get("authorization_id")),
+        "matching_result_id": maybe_text(matching_result.get("result_id")),
+        "adjudication_status": status,
+        "summary": (
+            f"Produced {len(evidence_cards)} evidence cards, {len(isolated_entries)} isolated entries, "
+            f"and {len(remands)} open remands."
+        ),
+        "matching_reasonable": bool(evidence_cards or isolated_entries or remands),
+        "needs_additional_data": bool(remands),
+        "card_ids": [maybe_text(item.get("evidence_id")) for item in evidence_cards if maybe_text(item.get("evidence_id"))],
+        "isolated_entry_ids": [maybe_text(item.get("isolated_id")) for item in isolated_entries if maybe_text(item.get("isolated_id"))],
+        "remand_ids": [maybe_text(item.get("remand_id")) for item in remands if maybe_text(item.get("remand_id"))],
+        "open_questions": unique_strings(
+            [
+                f"How should the council resolve remand {maybe_text(item.get('remand_id'))}?"
+                for item in remands
+                if maybe_text(item.get("remand_id"))
+            ]
+        ),
+        "recommended_next_actions": [],
+    }
+    validate_payload("evidence-adjudication", payload)
+    return payload
+
+
+def link_claims_to_evidence(
+    *,
+    claims: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    evidence_cards: list[dict[str, Any]] = []
+    matches = match_claims_to_observations(claims=claims, observations=observations)
+    for index, match in enumerate(matches, start=1):
+        claim = match["claim"]
         evidence = {
             "schema_version": SCHEMA_VERSION,
             "evidence_id": emit_row_id("evidence", index),
             "run_id": claim["run_id"],
             "round_id": claim["round_id"],
             "claim_id": claim["claim_id"],
-            "verdict": verdict,
-            "confidence": confidence,
-            "summary": build_evidence_summary(claim, notes, verdict, gaps),
+            "verdict": match["verdict"],
+            "confidence": match["confidence"],
+            "summary": build_evidence_summary(claim, match["notes"], match["verdict"], match["gaps"]),
             "public_refs": claim.get("public_refs", []),
-            "observation_ids": [item["observation_id"] for item in matching],
-            "gaps": sorted(dict.fromkeys(gaps)),
+            "observation_ids": [item["observation_id"] for item in match["observations"]],
+            "gaps": match["gaps"],
         }
         validate_payload("evidence-card", evidence)
         evidence_cards.append(evidence)
@@ -3496,6 +4179,7 @@ def build_round_snapshot(
     evidence_cards: list[dict[str, Any]],
     role: str,
 ) -> dict[str, Any]:
+    state = library_state(run_dir, round_id)
     run = {
         "run_id": mission_run_id(mission),
         "round_id": round_id,
@@ -3517,6 +4201,13 @@ def build_round_snapshot(
         "claim_count": len(claims),
         "observation_count": len(observations),
         "evidence_count": len(evidence_cards),
+        "claim_submission_count": len(state["claim_submissions_current"]),
+        "observation_submission_count": len(state["observation_submissions_current"]),
+        "claims_active_count": len(state["claims_active"]),
+        "observations_active_count": len(state["observations_active"]),
+        "cards_active_count": len(state["cards_active"]),
+        "isolated_count": len(state["isolated_active"]),
+        "remand_count": len(state["remands_open"]),
     }
     focus = {
         "task_ids": [maybe_text(task.get("task_id")) for task in role_tasks],
@@ -3537,9 +4228,19 @@ def build_round_snapshot(
     ]
 
     return {
-        "context_layer": "compact-v1",
+        "context_layer": "evidence-library-v1",
         "run": run,
         "dataset": dataset,
+        "phase_state": {
+            "readiness_statuses": {
+                report_role: maybe_text(report.get("readiness_status"))
+                for report_role, report in state["readiness_reports"].items()
+                if isinstance(report, dict)
+            },
+            "matching_authorization_status": maybe_text(state["matching_authorization"].get("authorization_status")),
+            "matching_result_status": maybe_text(state["matching_result"].get("result_status")),
+            "adjudication_status": maybe_text(state["evidence_adjudication"].get("adjudication_status")),
+        },
         "aggregates": {
             "claim_type_counts": dict(Counter(maybe_text(item.get("claim_type")) for item in claims)),
             "observation_metric_counts": dict(Counter(maybe_text(item.get("metric")) for item in observations)),
@@ -3550,12 +4251,35 @@ def build_round_snapshot(
             "claims": str(shared_claims_path(run_dir, round_id)),
             "observations": str(shared_observations_path(run_dir, round_id)),
             "evidence_cards": str(shared_evidence_path(run_dir, round_id)),
+            "claim_submissions": str(claim_submissions_path(run_dir, round_id)),
+            "observation_submissions": str(observation_submissions_path(run_dir, round_id)),
+            "sociologist_data_readiness_report": str(data_readiness_report_path(run_dir, round_id, "sociologist")),
+            "environmentalist_data_readiness_report": str(data_readiness_report_path(run_dir, round_id, "environmentalist")),
+            "matching_authorization": str(matching_authorization_path(run_dir, round_id)),
+            "matching_result": str(matching_result_path(run_dir, round_id)),
+            "evidence_adjudication": str(evidence_adjudication_path(run_dir, round_id)),
+            "evidence_library_dir": str(evidence_library_dir(run_dir, round_id)),
         },
         "tasks": [compact_task(item) for item in role_tasks[:MAX_CONTEXT_TASKS]],
         "focus": focus,
         "claims": compact_claims_list,
         "observations": compact_observations,
         "evidence_cards": compact_evidence,
+        "evidence_library": {
+            "claim_submissions_current": [
+                compact_claim_submission(item) for item in state["claim_submissions_current"][:MAX_CONTEXT_CLAIMS]
+            ],
+            "observation_submissions_current": [
+                compact_observation_submission(item) for item in state["observation_submissions_current"][:MAX_CONTEXT_OBSERVATIONS]
+            ],
+            "claims_active": [compact_claim_submission(item) for item in state["claims_active"][:MAX_CONTEXT_CLAIMS]],
+            "observations_active": [
+                compact_observation_submission(item) for item in state["observations_active"][:MAX_CONTEXT_OBSERVATIONS]
+            ],
+            "cards_active": [compact_evidence_card(item) for item in state["cards_active"][:MAX_CONTEXT_EVIDENCE]],
+            "isolated_active": [compact_isolated_entry(item) for item in state["isolated_active"][:MAX_CONTEXT_EVIDENCE]],
+            "remands_open": [compact_remand_entry(item) for item in state["remands_open"][:MAX_CONTEXT_EVIDENCE]],
+        },
     }
 
 
@@ -3574,6 +4298,18 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
     for role in ("moderator", "sociologist", "environmentalist"):
         default_context_dir(run_dir_path, args.round_id, role).mkdir(parents=True, exist_ok=True)
     (round_dir(run_dir_path, args.round_id) / "shared" / "contexts").mkdir(parents=True, exist_ok=True)
+    evidence_library_dir(run_dir_path, args.round_id).mkdir(parents=True, exist_ok=True)
+    for path, payload in (
+        (claims_active_path(run_dir_path, args.round_id), []),
+        (observations_active_path(run_dir_path, args.round_id), []),
+        (cards_active_path(run_dir_path, args.round_id), []),
+        (isolated_active_path(run_dir_path, args.round_id), []),
+        (remands_open_path(run_dir_path, args.round_id), []),
+    ):
+        if not path.exists():
+            write_json(path, payload, pretty=args.pretty)
+    if not evidence_library_ledger_path(run_dir_path, args.round_id).exists():
+        atomic_write_text_file(evidence_library_ledger_path(run_dir_path, args.round_id), "")
 
     manifest = load_or_build_manifest(run_dir_path, mission)
     manifest["round_id_initialized"] = args.round_id
@@ -3600,6 +4336,7 @@ def command_normalize_public(args: argparse.Namespace) -> dict[str, Any]:
     run_dir_path = Path(args.run_dir).expanduser().resolve()
     mission = load_mission(run_dir_path)
     run_id = mission_run_id(mission)
+    constraints = mission_constraints(mission)
     public_db = Path(args.public_db).expanduser().resolve() if args.public_db else default_public_db_path(run_dir_path)
     inputs = parse_input_specs(args.input)
     all_signals: list[dict[str, Any]] = []
@@ -3629,12 +4366,20 @@ def command_normalize_public(args: argparse.Namespace) -> dict[str, Any]:
         ),
         reverse=False,
     )
+    configured_claim_cap = constraints.get("claim_hard_cap_per_round") or constraints.get("max_claims_per_round") or args.max_claims
+    claim_limit = max(1, min(args.max_claims, configured_claim_cap))
     claims = public_signals_to_claims(
         mission=mission,
         round_id=args.round_id,
         signals=signals,
-        max_claims=args.max_claims,
+        max_claims=claim_limit,
     )
+    current_submissions = [claim_submission_from_claim(item) for item in claims]
+    active_submissions = merge_claim_submissions(
+        previous_active_list(run_dir_path, args.round_id, claims_active_path),
+        current_submissions,
+    )
+    shared_claims = claims_from_submissions(active_submissions)
 
     save_public_db(public_db, signals, claims)
     normalized_dir = role_normalized_dir(run_dir_path, args.round_id, "sociologist")
@@ -3644,7 +4389,14 @@ def command_normalize_public(args: argparse.Namespace) -> dict[str, Any]:
     write_jsonl(public_signals_file, signals)
     write_json(claims_file, claims, pretty=args.pretty)
     write_json(summary_file, build_public_signal_summary(signals, claims), pretty=args.pretty)
-    write_json(shared_claims_path(run_dir_path, args.round_id), claims, pretty=args.pretty)
+    write_json(claim_submissions_path(run_dir_path, args.round_id), current_submissions, pretty=args.pretty)
+    write_json(claims_active_path(run_dir_path, args.round_id), active_submissions, pretty=args.pretty)
+    write_json(shared_claims_path(run_dir_path, args.round_id), shared_claims, pretty=args.pretty)
+    append_library_events(
+        run_dir_path,
+        args.round_id,
+        [{"object_kind": "claim-submission", "payload": item} for item in current_submissions],
+    )
 
     return {
         "public_db": str(public_db),
@@ -3652,9 +4404,13 @@ def command_normalize_public(args: argparse.Namespace) -> dict[str, Any]:
         "cache_misses": cache_misses,
         "signal_count": len(signals),
         "claim_count": len(claims),
+        "claim_submission_count": len(current_submissions),
+        "claims_active_count": len(active_submissions),
         "signals_path": str(public_signals_file),
         "signal_summary_path": str(summary_file),
         "claims_path": str(claims_file),
+        "claim_submissions_path": str(claim_submissions_path(run_dir_path, args.round_id)),
+        "claims_active_path": str(claims_active_path(run_dir_path, args.round_id)),
         "shared_claims_path": str(shared_claims_path(run_dir_path, args.round_id)),
     }
 
@@ -3707,10 +4463,22 @@ def command_normalize_environment(args: argparse.Namespace) -> dict[str, Any]:
         args.round_id,
         current_round_observations=observations,
     )
+    current_submissions = [observation_submission_from_observation(item) for item in observations]
+    active_submissions = merge_observation_submissions(
+        previous_active_list(run_dir_path, args.round_id, observations_active_path),
+        current_submissions,
+    )
     write_jsonl(signals_file, signals)
     write_json(observations_file, observations, pretty=args.pretty)
     write_json(summary_file, build_environment_signal_summary(signals, observations), pretty=args.pretty)
+    write_json(observation_submissions_path(run_dir_path, args.round_id), current_submissions, pretty=args.pretty)
+    write_json(observations_active_path(run_dir_path, args.round_id), active_submissions, pretty=args.pretty)
     write_json(shared_observations_path(run_dir_path, args.round_id), shared_observations, pretty=args.pretty)
+    append_library_events(
+        run_dir_path,
+        args.round_id,
+        [{"object_kind": "observation-submission", "payload": item} for item in current_submissions],
+    )
 
     return {
         "environment_db": str(environment_db),
@@ -3718,29 +4486,121 @@ def command_normalize_environment(args: argparse.Namespace) -> dict[str, Any]:
         "cache_misses": cache_misses,
         "signal_count": len(signals),
         "observation_count": len(observations),
+        "observation_submission_count": len(current_submissions),
+        "observations_active_count": len(active_submissions),
         "shared_observation_count": len(shared_observations),
         "signals_path": str(signals_file),
         "signal_summary_path": str(summary_file),
         "observations_path": str(observations_file),
+        "observation_submissions_path": str(observation_submissions_path(run_dir_path, args.round_id)),
+        "observations_active_path": str(observations_active_path(run_dir_path, args.round_id)),
         "shared_observations_path": str(shared_observations_path(run_dir_path, args.round_id)),
     }
 
 
 def command_link_evidence(args: argparse.Namespace) -> dict[str, Any]:
     run_dir_path = Path(args.run_dir).expanduser().resolve()
+    authorization_input = (
+        Path(args.authorization_input).expanduser().resolve()
+        if maybe_text(args.authorization_input)
+        else matching_authorization_path(run_dir_path, args.round_id)
+    )
+    authorization = load_object_if_exists(authorization_input)
+    if authorization is None:
+        raise ValueError(f"Matching authorization is missing or invalid: {authorization_input}")
+    validate_payload("matching-authorization", authorization)
+    if maybe_text(authorization.get("authorization_status")) != "authorized":
+        raise ValueError("Matching authorization exists but does not authorize matching.")
     claims = load_canonical_list(shared_claims_path(run_dir_path, args.round_id))
     observations = effective_shared_observations(run_dir_path, args.round_id)
-    evidence_cards = link_claims_to_evidence(claims=claims, observations=observations)
+    authorized_claim_ids = {
+        maybe_text(item)
+        for item in authorization.get("claim_ids", [])
+        if maybe_text(item)
+    }
+    authorized_observation_ids = {
+        maybe_text(item)
+        for item in authorization.get("observation_ids", [])
+        if maybe_text(item)
+    }
+    filtered_claims = [item for item in claims if not authorized_claim_ids or maybe_text(item.get("claim_id")) in authorized_claim_ids]
+    filtered_observations = [
+        item
+        for item in observations
+        if not authorized_observation_ids or maybe_text(item.get("observation_id")) in authorized_observation_ids
+    ]
+    matches = match_claims_to_observations(claims=filtered_claims, observations=filtered_observations)
+    evidence_cards = link_claims_to_evidence(claims=filtered_claims, observations=filtered_observations)
+    matching_result = build_matching_result(
+        authorization=authorization,
+        claims=filtered_claims,
+        observations=filtered_observations,
+        matches=matches,
+    )
+    allow_isolated_evidence = bool(authorization.get("allow_isolated_evidence"))
+    isolated_entries, _unused = build_isolated_entries(
+        run_id=maybe_text(authorization.get("run_id")) or mission_run_id(load_mission(run_dir_path)),
+        round_id=args.round_id,
+        claims=filtered_claims,
+        observations=filtered_observations,
+        matches=matches,
+        allow_isolated_evidence=allow_isolated_evidence,
+    )
+    remands = build_remand_entries(
+        run_id=maybe_text(authorization.get("run_id")) or mission_run_id(load_mission(run_dir_path)),
+        round_id=args.round_id,
+        matches=matches,
+        observations=filtered_observations,
+        allow_isolated_evidence=allow_isolated_evidence,
+    )
+    validate_payload("isolated-entry", isolated_entries)
+    validate_payload("remand-entry", remands)
+    adjudication = build_evidence_adjudication(
+        authorization=authorization,
+        matching_result=matching_result,
+        evidence_cards=evidence_cards,
+        isolated_entries=isolated_entries,
+        remands=remands,
+    )
 
     normalized_dir = role_normalized_dir(run_dir_path, args.round_id, "environmentalist")
     evidence_path = normalized_dir / "evidence_cards.json"
     write_json(evidence_path, evidence_cards, pretty=args.pretty)
     write_json(shared_evidence_path(run_dir_path, args.round_id), evidence_cards, pretty=args.pretty)
+    write_json(matching_result_path(run_dir_path, args.round_id), matching_result, pretty=args.pretty)
+    write_json(evidence_adjudication_path(run_dir_path, args.round_id), adjudication, pretty=args.pretty)
+    write_json(
+        cards_active_path(run_dir_path, args.round_id),
+        merge_evidence_cards(previous_active_list(run_dir_path, args.round_id, cards_active_path), evidence_cards),
+        pretty=args.pretty,
+    )
+    write_json(
+        isolated_active_path(run_dir_path, args.round_id),
+        merge_isolated_entries(previous_active_list(run_dir_path, args.round_id, isolated_active_path), isolated_entries),
+        pretty=args.pretty,
+    )
+    write_json(
+        remands_open_path(run_dir_path, args.round_id),
+        merge_remand_entries(previous_active_list(run_dir_path, args.round_id, remands_open_path), remands),
+        pretty=args.pretty,
+    )
+    append_library_events(
+        run_dir_path,
+        args.round_id,
+        [
+            {"object_kind": "matching-result", "payload": matching_result},
+            {"object_kind": "evidence-adjudication", "payload": adjudication},
+        ],
+    )
 
     return {
         "evidence_count": len(evidence_cards),
+        "isolated_count": len(isolated_entries),
+        "remand_count": len(remands),
         "evidence_path": str(evidence_path),
         "shared_evidence_path": str(shared_evidence_path(run_dir_path, args.round_id)),
+        "matching_result_path": str(matching_result_path(run_dir_path, args.round_id)),
+        "evidence_adjudication_path": str(evidence_adjudication_path(run_dir_path, args.round_id)),
     }
 
 
@@ -3767,6 +4627,7 @@ def command_build_round_context(args: argparse.Namespace) -> dict[str, Any]:
         )
         context_path = default_context_dir(run_dir_path, args.round_id, role) / f"context_{role}.json"
         write_json(context_path, payload, pretty=args.pretty)
+        write_json(library_context_path(run_dir_path, args.round_id, role), payload, pretty=args.pretty)
         outputs[role] = str(context_path)
 
     snapshot = build_round_snapshot(
@@ -3787,6 +4648,7 @@ def command_build_round_context(args: argparse.Namespace) -> dict[str, Any]:
         "claim_count": len(claims),
         "observation_count": len(observations),
         "evidence_count": len(evidence_cards),
+        "cards_active_count": len(library_state(run_dir_path, args.round_id)["cards_active"]),
         "outputs": outputs,
     }
 
@@ -3831,9 +4693,14 @@ def build_parser() -> argparse.ArgumentParser:
     normalize_environment.add_argument("--environment-db", default="", help="Override environment-signals SQLite path.")
     add_pretty_flag(normalize_environment)
 
-    link_evidence = sub.add_parser("link-evidence", help="Link shared claims and observations into evidence cards.")
+    link_evidence = sub.add_parser("link-evidence", help="Run authorized matching and materialize evidence cards.")
     link_evidence.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     link_evidence.add_argument("--round-id", required=True, help="Round identifier.")
+    link_evidence.add_argument(
+        "--authorization-input",
+        default="",
+        help="Optional matching-authorization JSON path. Defaults to the canonical moderator path for the round.",
+    )
     add_pretty_flag(link_evidence)
 
     build_context = sub.add_parser("build-round-context", help="Build role-specific round context payloads.")

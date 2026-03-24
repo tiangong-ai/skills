@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "remand_id": "remand-claim-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "entity_kind": "claim",
+  "entity_id": "claim-001",
+  "summary": "Smoke attribution claim still needs stronger physical corroboration.",
+  "reasons": [
+    "Matching remained partial because the current physical observations do not cover the strongest attribution hypothesis.",
+    "Another round should broaden physical-side coverage before the claim is promoted into a stable evidence card."
+  ]
+}

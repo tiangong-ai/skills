@@ -1,4 +1,4 @@
 interface:
   display_name: "Eco Council Orchestrate"
-  short_description: "Eco council orchestration and source planning"
-  default_prompt: "Use $eco-council-orchestrate to bootstrap an eco-council run, honor audited source selections, prepare doc-search, raw GDELT, public, and environment fetch plans, run deterministic normalization/reporting, and advance safely."
+  short_description: "Eco-council staged orchestration and handoffs"
+  default_prompt: "Use $eco-council-orchestrate to bootstrap eco-council runs, honor audited source selections, run the staged data plane, require moderator matching authorization before matching, and advance rounds safely."

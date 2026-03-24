@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "authorization_id": "matchauth-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "moderator",
+  "authorization_status": "authorized",
+  "summary": "Both roles report that the current evidence is ready for a first matching pass.",
+  "rationale": "The current claim and observation submissions are sufficiently prepared, so matching should proceed before requesting broader collection.",
+  "moderator_override": false,
+  "allow_isolated_evidence": true,
+  "referenced_readiness_ids": [
+    "readiness-sociologist-round-001",
+    "readiness-environmentalist-round-001"
+  ],
+  "claim_ids": [
+    "claim-001"
+  ],
+  "observation_ids": [
+    "obs-001"
+  ],
+  "open_questions": [],
+  "recommended_next_actions": []
+}

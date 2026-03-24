@@ -27,6 +27,8 @@ Use this note when working on the fixed moderator, sociologist, and environmenta
 
 - A role agent owns only the current JSON artifact named by the turn prompt.
 - A role agent must not advance stages, import files, or trigger raw-data shell stages unless the human explicitly reassigns it to act as the supervisor operator.
+- Moderator tasks and decisions should express evidence needs, priorities, and claim focus only; they should not prescribe concrete source skills.
+- Sociologist and environmentalist source-selection turns own the translation from evidence needs into `family_plans`, `layer_plans`, anchors, and exact source skills, but only within the packet `governance` boundary.
 
 ## Workspace files
 

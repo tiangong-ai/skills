@@ -48,6 +48,7 @@ RESERVED_DOC_PARAM_KEYS = {
     "sort",
     "timelinesmooth",
 }
+JSON_BODY_EXCERPT_LIMIT = 300
 
 
 @dataclass(frozen=True)
@@ -402,6 +403,18 @@ def decode_text(content: bytes) -> str:
     return content.decode("utf-8", errors="replace")
 
 
+def parse_json_response(payload_bytes: bytes) -> Any:
+    text = decode_text(payload_bytes)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        excerpt = " ".join(text.split())[:JSON_BODY_EXCERPT_LIMIT]
+        raise RuntimeError(
+            "DOC API returned non-JSON content while format=json. "
+            f"body_excerpt={excerpt!r}"
+        ) from exc
+
+
 def print_json(payload: dict[str, Any], pretty: bool) -> None:
     print(
         json.dumps(
@@ -452,6 +465,10 @@ def command_search(args: argparse.Namespace) -> int:
 
     client = RetryableHttpClient(config=config, logger=logger)
     payload_bytes, headers = client.get_bytes(request_url)
+    json_requested = args.format.strip().lower() == "json"
+    parsed_json: Any | None = None
+    if json_requested:
+        parsed_json = parse_json_response(payload_bytes)
 
     output_file = args.output.strip()
     if output_file:
@@ -470,17 +487,12 @@ def command_search(args: argparse.Namespace) -> int:
         return 0
 
     if args.format.strip().lower() == "json":
-        text = decode_text(payload_bytes)
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("DOC API returned non-JSON content while format=json.") from exc
         result = {
             "ok": True,
             "source": "gdelt-doc-api",
             "request_url": request_url,
             "content_type": headers.get("content-type"),
-            "data": data,
+            "data": parsed_json,
         }
         print_json(result, pretty=args.pretty)
         return 0

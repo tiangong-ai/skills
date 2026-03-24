@@ -32,5 +32,6 @@
       "objective": "Add OpenAQ or local station evidence for Chiang Mai if available in the same window.",
       "reason": "Station corroboration would increase confidence."
     }
-  ]
+  ],
+  "override_requests": []
 }

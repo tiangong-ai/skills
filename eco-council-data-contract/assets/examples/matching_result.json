@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "result_id": "matchres-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "authorization_id": "matchauth-round-001",
+  "result_status": "matched",
+  "summary": "One public claim aligned with one physical-observation cluster in the mission window.",
+  "matched_pairs": [
+    {
+      "claim_id": "claim-001",
+      "observation_ids": [
+        "obs-001"
+      ],
+      "support_score": 2.0,
+      "contradict_score": 0.0,
+      "notes": [
+        "pm2_5=42.7"
+      ]
+    }
+  ],
+  "matched_claim_ids": [
+    "claim-001"
+  ],
+  "matched_observation_ids": [
+    "obs-001"
+  ],
+  "unmatched_claim_ids": [],
+  "unmatched_observation_ids": []
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "override-sociologist-round-001-gdelt-bulk",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "sociologist",
+  "request_origin_kind": "source-selection",
+  "target_path": "source_governance.approved_layers",
+  "current_value": [],
+  "requested_value": {
+    "family_id": "gdelt",
+    "layer_id": "bulk",
+    "reason": "Broader table coverage is needed after l1 recon shows sparse but mission-relevant article hits."
+  },
+  "summary": "Request one upstream approval for the GDELT bulk layer.",
+  "reason": "Current l1 recon is directionally relevant but too sparse to judge public narrative coverage confidently.",
+  "evidence_refs": [
+    "req-sociologist-round-001-public-claims"
+  ],
+  "anchor_refs": [
+    "round-001:family:gdelt:recon"
+  ]
+}

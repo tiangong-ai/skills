@@ -1,4 +1,4 @@
 interface:
   display_name: "Eco Council Data Contract"
-  short_description: "Eco council schemas, source selections, validation"
-  default_prompt: "Use $eco-council-data-contract to define, validate, and scaffold shared data contracts for eco-council missions, round tasks, source selections, claims, observations, evidence cards, expert reports, and moderator decisions."
+  short_description: "Eco-council staged schemas and validation"
+  default_prompt: "Use $eco-council-data-contract to define, validate, and scaffold staged eco-council contracts for source selection, submissions, readiness, matching, evidence-library entries, reports, and decisions."

@@ -19,19 +19,18 @@ Current gap-to-type mappings:
 
 Each missing evidence type maps to one default next-round task shape:
 
-- `station-air-quality` -> `environmentalist` using `openaq-data-fetch`
-- `fire-detection` -> `environmentalist` using `nasa-firms-fire-fetch`
-- `meteorology-background` -> `environmentalist` using `open-meteo-historical-fetch`
-- `precipitation-hydrology` -> `environmentalist` using `open-meteo-historical-fetch` or `open-meteo-flood-fetch`
-- `temperature-extremes` -> `environmentalist` using `open-meteo-historical-fetch`
-- `precipitation-soil-moisture` -> `environmentalist` using `open-meteo-historical-fetch`
-- `policy-comment-coverage` -> `sociologist` using `regulationsgov-comments-fetch` and `regulationsgov-comment-detail-fetch`
-- `public-discussion-coverage` -> `sociologist` using GDELT, Bluesky, or YouTube fetch skills
+- `station-air-quality` -> `environmentalist` with one station-air-quality evidence requirement
+- `fire-detection` -> `environmentalist` with one fire-detection evidence requirement
+- `meteorology-background` -> `environmentalist` with one weather-context evidence requirement
+- `precipitation-hydrology` -> `environmentalist` with one hydrometeorological evidence requirement
+- `temperature-extremes` -> `environmentalist` with one temperature evidence requirement
+- `precipitation-soil-moisture` -> `environmentalist` with one drought-corroboration evidence requirement
+- `policy-comment-coverage` -> `sociologist` with one rulemaking-evidence requirement
+- `public-discussion-coverage` -> `sociologist` with one broader public-discussion coverage requirement
 
-The script intersects these source hints with `mission.source_policy` when available.
+The moderator side now seeds `task.inputs.evidence_requirements` instead of concrete source hints.
+Experts later translate those requirements into governed source families and layers during source-selection.
 When counting public-source diversity, `gdelt-doc-search` and the three raw GDELT table skills are treated as one GDELT family rather than four independent channels.
-The generated drafts only populate `task.inputs.preferred_sources`.
-They do not auto-emit `task.inputs.required_sources`; that field is reserved for moderator-authored overrides or rare system-level hard constraints outside reporting.
 
 ## Completion Logic
 

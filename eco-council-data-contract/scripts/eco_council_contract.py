@@ -33,9 +33,18 @@ OBJECT_KINDS = (
     "mission",
     "round-task",
     "source-selection",
+    "override-request",
     "claim",
+    "claim-submission",
     "observation",
+    "observation-submission",
     "evidence-card",
+    "data-readiness-report",
+    "matching-authorization",
+    "matching-result",
+    "evidence-adjudication",
+    "isolated-entry",
+    "remand-entry",
     "expert-report",
     "council-decision",
 )
@@ -60,8 +69,322 @@ CONFIDENCE_VALUES = {"low", "medium", "high"}
 REPORT_STATUSES = {"complete", "needs-more-evidence", "blocked"}
 MODERATOR_STATUSES = {"continue", "complete", "blocked"}
 EVIDENCE_SUFFICIENCY = {"sufficient", "partial", "insufficient"}
+READINESS_STATUSES = {"ready", "needs-more-data", "blocked"}
+AUTHORIZATION_STATUSES = {"authorized", "deferred", "not-authorized"}
+MATCHING_RESULT_STATUSES = {"matched", "partial", "unmatched"}
+ADJUDICATION_STATUSES = {"complete", "partial", "remand-required"}
+LIBRARY_ENTITY_KINDS = {"claim", "observation"}
 SOURCE_SELECTION_ROLES = {"sociologist", "environmentalist", "historian"}
 SOURCE_SELECTION_STATUSES = {"pending", "complete", "blocked"}
+SOURCE_LAYER_TIERS = {"l1", "l2"}
+EVIDENCE_PRIORITIES = {"low", "medium", "high"}
+ANCHOR_MODES = {"none", "same_round_l1", "prior_round_l1", "evidence_gap", "upstream_approval"}
+AUTHORIZATION_BASES = {"entry-layer", "policy-auto", "upstream-approval", "not-authorized"}
+APPROVAL_AUTHORITIES = {"human", "bot", "policy"}
+OVERRIDE_REQUEST_ORIGINS = {"source-selection", "data-readiness-report", "expert-report", "council-decision"}
+OVERRIDE_INT_TARGET_PATHS = {
+    "constraints.max_rounds",
+    "constraints.max_claims_per_round",
+    "constraints.max_tasks_per_round",
+    "constraints.claim_target_per_round",
+    "constraints.claim_hard_cap_per_round",
+    "source_governance.max_selected_sources_per_role",
+    "source_governance.max_active_families_per_role",
+    "source_governance.max_non_entry_layers_per_role",
+}
+OVERRIDE_BOOL_TARGET_PATHS = {"source_governance.allow_cross_round_anchors"}
+OVERRIDE_APPROVAL_TARGET_PATHS = {"source_governance.approved_layers"}
+OVERRIDE_TARGET_PATHS = OVERRIDE_INT_TARGET_PATHS | OVERRIDE_BOOL_TARGET_PATHS | OVERRIDE_APPROVAL_TARGET_PATHS
+CONSTRAINT_KEYS = (
+    "max_rounds",
+    "max_claims_per_round",
+    "max_tasks_per_round",
+    "claim_target_per_round",
+    "claim_hard_cap_per_round",
+)
+
+DEFAULT_POLICY_PROFILES: dict[str, dict[str, Any]] = {
+    "focused": {
+        "profile_id": "focused",
+        "label": "Focused",
+        "description": "Lower-cost targeted verification with tighter round, claim, and source caps.",
+        "constraints": {
+            "max_rounds": 2,
+            "max_claims_per_round": 2,
+            "max_tasks_per_round": 3,
+            "claim_target_per_round": 2,
+            "claim_hard_cap_per_round": 6,
+        },
+        "source_governance": {
+            "approval_authority": "policy",
+            "allow_cross_round_anchors": True,
+            "max_selected_sources_per_role": 3,
+            "max_active_families_per_role": 2,
+            "max_non_entry_layers_per_role": 1,
+            "approved_layers": [],
+        },
+    },
+    "standard": {
+        "profile_id": "standard",
+        "label": "Standard",
+        "description": "Balanced default envelope for most audited eco-council runs.",
+        "constraints": {
+            "max_rounds": 3,
+            "max_claims_per_round": 3,
+            "max_tasks_per_round": 4,
+            "claim_target_per_round": 3,
+            "claim_hard_cap_per_round": 9,
+        },
+        "source_governance": {
+            "approval_authority": "policy",
+            "allow_cross_round_anchors": True,
+            "max_selected_sources_per_role": 4,
+            "max_active_families_per_role": 3,
+            "max_non_entry_layers_per_role": 1,
+            "approved_layers": [],
+        },
+    },
+    "expanded": {
+        "profile_id": "expanded",
+        "label": "Expanded",
+        "description": "Broader collection envelope for multi-round or higher-coverage investigations.",
+        "constraints": {
+            "max_rounds": 5,
+            "max_claims_per_round": 4,
+            "max_tasks_per_round": 6,
+            "claim_target_per_round": 4,
+            "claim_hard_cap_per_round": 12,
+        },
+        "source_governance": {
+            "approval_authority": "policy",
+            "allow_cross_round_anchors": True,
+            "max_selected_sources_per_role": 6,
+            "max_active_families_per_role": 4,
+            "max_non_entry_layers_per_role": 2,
+            "approved_layers": [],
+        },
+    },
+}
+
+DEFAULT_SOURCE_FAMILY_CATALOG: list[dict[str, Any]] = [
+    {
+        "family_id": "gdelt",
+        "role": "sociologist",
+        "label": "GDELT public coverage",
+        "layers": [
+            {
+                "layer_id": "recon",
+                "tier": "l1",
+                "skills": ["gdelt-doc-search"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Small-batch article discovery for public-claim recon.",
+            },
+            {
+                "layer_id": "bulk",
+                "tier": "l2",
+                "skills": ["gdelt-events-fetch", "gdelt-mentions-fetch", "gdelt-gkg-fetch"],
+                "requires_anchor": True,
+                "auto_selectable": False,
+                "allowed_anchor_modes": ["same_round_l1", "prior_round_l1", "evidence_gap", "upstream_approval"],
+                "max_selected_skills": 3,
+                "description": "Bulk GDELT tables used only after an anchored recon pass or an explicit upstream approval.",
+            },
+        ],
+    },
+    {
+        "family_id": "youtube",
+        "role": "sociologist",
+        "label": "YouTube public discussion",
+        "layers": [
+            {
+                "layer_id": "videos",
+                "tier": "l1",
+                "skills": ["youtube-video-search"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Video discovery for public-discussion recon.",
+            },
+            {
+                "layer_id": "comments",
+                "tier": "l2",
+                "skills": ["youtube-comments-fetch"],
+                "requires_anchor": True,
+                "auto_selectable": False,
+                "allowed_anchor_modes": ["same_round_l1", "prior_round_l1", "evidence_gap", "upstream_approval"],
+                "max_selected_skills": 1,
+                "description": "Comment collection that should stay anchored to identified videos or an explicit evidence gap.",
+            },
+        ],
+    },
+    {
+        "family_id": "rulemaking",
+        "role": "sociologist",
+        "label": "Federal rulemaking record",
+        "layers": [
+            {
+                "layer_id": "documents",
+                "tier": "l1",
+                "skills": ["federal-register-doc-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Federal Register document discovery for rulemaking scope and chronology.",
+            },
+            {
+                "layer_id": "comments",
+                "tier": "l2",
+                "skills": ["regulationsgov-comments-fetch", "regulationsgov-comment-detail-fetch"],
+                "requires_anchor": True,
+                "auto_selectable": False,
+                "allowed_anchor_modes": ["same_round_l1", "prior_round_l1", "evidence_gap", "upstream_approval"],
+                "max_selected_skills": 2,
+                "description": "Regulations.gov comment collection used only after the rulemaking scope is anchored.",
+            },
+        ],
+    },
+    {
+        "family_id": "bluesky",
+        "role": "sociologist",
+        "label": "Bluesky discussion",
+        "layers": [
+            {
+                "layer_id": "posts",
+                "tier": "l1",
+                "skills": ["bluesky-cascade-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Fast-moving public discussion sampling from Bluesky.",
+            }
+        ],
+    },
+    {
+        "family_id": "airnow",
+        "role": "environmentalist",
+        "label": "AirNow monitoring",
+        "layers": [
+            {
+                "layer_id": "observations",
+                "tier": "l1",
+                "skills": ["airnow-hourly-obs-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Station-grade AirNow hourly observations.",
+            }
+        ],
+    },
+    {
+        "family_id": "openaq",
+        "role": "environmentalist",
+        "label": "OpenAQ stations",
+        "layers": [
+            {
+                "layer_id": "stations",
+                "tier": "l1",
+                "skills": ["openaq-data-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Station-based OpenAQ measurements.",
+            }
+        ],
+    },
+    {
+        "family_id": "openmeteo-air-quality",
+        "role": "environmentalist",
+        "label": "Open-Meteo air quality",
+        "layers": [
+            {
+                "layer_id": "modeled-air",
+                "tier": "l1",
+                "skills": ["open-meteo-air-quality-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Modeled air-quality background fields.",
+            }
+        ],
+    },
+    {
+        "family_id": "openmeteo-historical",
+        "role": "environmentalist",
+        "label": "Open-Meteo historical weather",
+        "layers": [
+            {
+                "layer_id": "meteorology",
+                "tier": "l1",
+                "skills": ["open-meteo-historical-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Meteorological background context.",
+            }
+        ],
+    },
+    {
+        "family_id": "openmeteo-flood",
+        "role": "environmentalist",
+        "label": "Open-Meteo flood",
+        "layers": [
+            {
+                "layer_id": "flood-model",
+                "tier": "l1",
+                "skills": ["open-meteo-flood-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Flood-risk or hydrological model context.",
+            }
+        ],
+    },
+    {
+        "family_id": "usgs",
+        "role": "environmentalist",
+        "label": "USGS water observations",
+        "layers": [
+            {
+                "layer_id": "hydrology",
+                "tier": "l1",
+                "skills": ["usgs-water-iv-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "USGS instantaneous values for streamflow or gage height.",
+            }
+        ],
+    },
+    {
+        "family_id": "firms",
+        "role": "environmentalist",
+        "label": "NASA FIRMS fire detections",
+        "layers": [
+            {
+                "layer_id": "fire-detections",
+                "tier": "l1",
+                "skills": ["nasa-firms-fire-fetch"],
+                "requires_anchor": False,
+                "auto_selectable": True,
+                "allowed_anchor_modes": [],
+                "max_selected_skills": 1,
+                "description": "Satellite fire-detection evidence.",
+            }
+        ],
+    },
+]
 
 
 def utc_now_iso() -> str:
@@ -98,6 +421,28 @@ def atomic_write_text_file(path: Path, content: str) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def normalize_space(value: Any) -> str:
+    return " ".join(str(value).split())
+
+
+def maybe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return normalize_space(value)
+
+
+def unique_strings(values: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(value)
+    return output
 
 
 def parse_utc_datetime(value: str) -> datetime | None:
@@ -320,6 +665,251 @@ def validate_region_scope(value: Any, path: str, issues: IssueCollector) -> None
     validate_geometry(obj.get("geometry"), f"{path}.geometry", issues)
 
 
+def family_catalog() -> list[dict[str, Any]]:
+    return copy.deepcopy(DEFAULT_SOURCE_FAMILY_CATALOG)
+
+
+def family_catalog_lookup() -> dict[str, dict[str, Any]]:
+    return {maybe_text(item.get("family_id")): item for item in family_catalog() if maybe_text(item.get("family_id"))}
+
+
+def layer_lookup_for_family(family: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    layers = family.get("layers")
+    if not isinstance(layers, list):
+        return {}
+    return {maybe_text(item.get("layer_id")): item for item in layers if isinstance(item, dict) and maybe_text(item.get("layer_id"))}
+
+
+def policy_profile_catalog() -> dict[str, dict[str, Any]]:
+    return copy.deepcopy(DEFAULT_POLICY_PROFILES)
+
+
+def policy_profile_id(mission: dict[str, Any]) -> str:
+    if not isinstance(mission, dict):
+        raise ValueError("mission must be an object.")
+    value = maybe_text(mission.get("policy_profile"))
+    if not value:
+        raise ValueError("mission.policy_profile is required.")
+    if value not in DEFAULT_POLICY_PROFILES:
+        allowed = ", ".join(sorted(DEFAULT_POLICY_PROFILES))
+        raise ValueError(f"mission.policy_profile must be one of: {allowed}.")
+    return value
+
+
+def policy_profile_spec(value: dict[str, Any] | str) -> dict[str, Any]:
+    profile_id = policy_profile_id(value) if isinstance(value, dict) else maybe_text(value)
+    spec = DEFAULT_POLICY_PROFILES.get(profile_id)
+    if not isinstance(spec, dict):
+        allowed = ", ".join(sorted(DEFAULT_POLICY_PROFILES))
+        raise ValueError(f"Unknown policy profile {profile_id!r}. Expected one of: {allowed}.")
+    return copy.deepcopy(spec)
+
+
+def validate_constraints_object(value: Any, path: str, issues: IssueCollector, *, require_core: bool) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    for key in ("max_rounds", "max_claims_per_round", "max_tasks_per_round"):
+        if require_core or key in obj:
+            require_int(obj, key, path, issues, minimum=1)
+    for key in ("claim_target_per_round", "claim_hard_cap_per_round"):
+        if key in obj:
+            require_int(obj, key, path, issues, minimum=1)
+
+    max_claims = int(obj.get("max_claims_per_round")) if is_int_not_bool(obj.get("max_claims_per_round")) else None
+    claim_target = int(obj.get("claim_target_per_round")) if is_int_not_bool(obj.get("claim_target_per_round")) else None
+    claim_hard_cap = int(obj.get("claim_hard_cap_per_round")) if is_int_not_bool(obj.get("claim_hard_cap_per_round")) else None
+    if claim_target is not None and claim_hard_cap is not None and claim_target > claim_hard_cap:
+        issues.add(
+            f"{path}.claim_target_per_round",
+            "claim_target_per_round cannot exceed claim_hard_cap_per_round.",
+            actual={"claim_target_per_round": claim_target, "claim_hard_cap_per_round": claim_hard_cap},
+        )
+    if max_claims is not None and claim_hard_cap is not None and max_claims > claim_hard_cap:
+        issues.add(
+            f"{path}.claim_hard_cap_per_round",
+            "claim_hard_cap_per_round must be >= max_claims_per_round.",
+            actual={"max_claims_per_round": max_claims, "claim_hard_cap_per_round": claim_hard_cap},
+        )
+
+
+def effective_constraints(mission: dict[str, Any]) -> dict[str, int]:
+    if not isinstance(mission, dict):
+        raise ValueError("mission must be an object.")
+    defaults = policy_profile_spec(mission).get("constraints", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("policy profile is missing default constraints.")
+    constraints = copy.deepcopy(defaults)
+    explicit = mission.get("constraints")
+    if explicit is not None and not isinstance(explicit, dict):
+        raise ValueError("mission.constraints must be an object when provided.")
+    explicit_obj = explicit if isinstance(explicit, dict) else {}
+    for key in CONSTRAINT_KEYS:
+        value = explicit_obj.get(key)
+        if is_int_not_bool(value) and int(value) > 0:
+            constraints[key] = int(value)
+    return {key: int(value) for key, value in constraints.items() if is_int_not_bool(value) and int(value) > 0}
+
+
+def normalize_governed_families(raw_families: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_families, list):
+        return []
+    normalized_families: list[dict[str, Any]] = []
+    for family in raw_families:
+        if not isinstance(family, dict):
+            continue
+        family_copy = copy.deepcopy(family)
+        normalized_layers: list[dict[str, Any]] = []
+        for layer in family_copy.get("layers", []):
+            if not isinstance(layer, dict):
+                continue
+            layer_copy = copy.deepcopy(layer)
+            skills = [maybe_text(skill) for skill in layer_copy.get("skills", []) if maybe_text(skill)]
+            if not skills:
+                continue
+            layer_copy["skills"] = unique_strings(skills)
+            max_selected = layer_copy.get("max_selected_skills")
+            if is_int_not_bool(max_selected):
+                layer_copy["max_selected_skills"] = max(1, min(int(max_selected), len(layer_copy["skills"])))
+            normalized_layers.append(layer_copy)
+        family_copy["layers"] = normalized_layers
+        family_copy["skills"] = unique_strings(
+            [maybe_text(skill) for layer in normalized_layers for skill in layer.get("skills", []) if maybe_text(skill)]
+        )
+        if family_copy["skills"]:
+            normalized_families.append(family_copy)
+    return normalized_families
+
+
+def source_governance(mission: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(mission, dict):
+        raise ValueError("mission must be an object.")
+    profile = policy_profile_spec(mission)
+    defaults = profile.get("source_governance", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("policy profile is missing default source_governance.")
+    explicit = mission.get("source_governance")
+    if explicit is not None and not isinstance(explicit, dict):
+        raise ValueError("mission.source_governance must be an object when provided.")
+    explicit_obj = explicit if isinstance(explicit, dict) else {}
+
+    governance = copy.deepcopy(defaults)
+    governance["approval_authority"] = maybe_text(explicit_obj.get("approval_authority")) or maybe_text(governance.get("approval_authority")) or "policy"
+    if "allow_cross_round_anchors" in explicit_obj:
+        governance["allow_cross_round_anchors"] = bool(explicit_obj.get("allow_cross_round_anchors"))
+    elif "allow_cross_round_anchors" not in governance:
+        governance["allow_cross_round_anchors"] = True
+    for key, fallback in (
+        ("max_selected_sources_per_role", 4),
+        ("max_active_families_per_role", 3),
+        ("max_non_entry_layers_per_role", 1),
+    ):
+        if is_int_not_bool(explicit_obj.get(key)):
+            governance[key] = int(explicit_obj[key])
+        elif not is_int_not_bool(governance.get(key)):
+            governance[key] = fallback
+
+    if isinstance(explicit_obj.get("approved_layers"), list):
+        governance["approved_layers"] = copy.deepcopy(explicit_obj["approved_layers"])
+    else:
+        governance["approved_layers"] = copy.deepcopy(governance.get("approved_layers", []))
+
+    raw_families = explicit_obj.get("families") if "families" in explicit_obj else family_catalog()
+    governance["families"] = normalize_governed_families(raw_families)
+    return governance
+
+
+def policy_profile_summary(mission: dict[str, Any]) -> dict[str, Any]:
+    profile = policy_profile_spec(mission)
+    governance = source_governance(mission)
+    return {
+        "profile_id": maybe_text(profile.get("profile_id")),
+        "label": maybe_text(profile.get("label")),
+        "description": maybe_text(profile.get("description")),
+        "defaults": {
+            "constraints": copy.deepcopy(profile.get("constraints", {})),
+            "source_governance": copy.deepcopy(profile.get("source_governance", {})),
+        },
+        "effective_constraints": effective_constraints(mission),
+        "effective_source_governance": {
+            "approval_authority": maybe_text(governance.get("approval_authority")),
+            "allow_cross_round_anchors": bool(governance.get("allow_cross_round_anchors")),
+            "max_selected_sources_per_role": governance.get("max_selected_sources_per_role"),
+            "max_active_families_per_role": governance.get("max_active_families_per_role"),
+            "max_non_entry_layers_per_role": governance.get("max_non_entry_layers_per_role"),
+            "approved_layers": copy.deepcopy(governance.get("approved_layers", [])),
+            "family_ids": [
+                maybe_text(family.get("family_id"))
+                for family in governance.get("families", [])
+                if isinstance(family, dict) and maybe_text(family.get("family_id"))
+            ],
+        },
+        "overrideable_paths": sorted(OVERRIDE_TARGET_PATHS),
+    }
+
+
+def source_governance_for_role(mission: dict[str, Any], role: str) -> list[dict[str, Any]]:
+    return [
+        copy.deepcopy(family)
+        for family in source_governance(mission).get("families", [])
+        if isinstance(family, dict) and maybe_text(family.get("role")) == role
+    ]
+
+
+def source_family_lookup(mission: dict[str, Any], *, role: str | None = None) -> dict[str, dict[str, Any]]:
+    families = source_governance(mission).get("families", [])
+    output: dict[str, dict[str, Any]] = {}
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        if role and maybe_text(family.get("role")) != role:
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        if family_id:
+            output[family_id] = copy.deepcopy(family)
+    return output
+
+
+def approved_layer_lookup(mission: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    approvals = source_governance(mission).get("approved_layers", [])
+    output: dict[tuple[str, str], dict[str, Any]] = {}
+    if not isinstance(approvals, list):
+        return output
+    for approval in approvals:
+        if not isinstance(approval, dict):
+            continue
+        family_id = maybe_text(approval.get("family_id"))
+        layer_id = maybe_text(approval.get("layer_id"))
+        if family_id and layer_id:
+            output[(family_id, layer_id)] = copy.deepcopy(approval)
+    return output
+
+
+def family_plans(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    value = payload.get("family_plans")
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def selected_sources_from_family_plans(payload: dict[str, Any] | None) -> list[str]:
+    output: list[str] = []
+    for family in family_plans(payload):
+        layers = family.get("layer_plans")
+        if not isinstance(layers, list):
+            continue
+        for layer in layers:
+            if not isinstance(layer, dict) or layer.get("selected") is not True:
+                continue
+            skills = layer.get("source_skills")
+            if not isinstance(skills, list):
+                continue
+            output.extend(maybe_text(skill) for skill in skills if maybe_text(skill))
+    return unique_strings(output)
+
+
 def validate_artifact_ref(value: Any, path: str, issues: IssueCollector) -> None:
     obj = require_object(value, path, issues)
     if obj is None:
@@ -345,6 +935,254 @@ def validate_recommendation(value: Any, path: str, issues: IssueCollector) -> No
     require_string(obj, "reason", path, issues)
 
 
+def validate_evidence_requirement(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "requirement_id", path, issues)
+    require_string(obj, "requirement_type", path, issues)
+    require_string(obj, "summary", path, issues)
+    require_enum(obj, "priority", path, issues, allowed=EVIDENCE_PRIORITIES)
+    focus_claim_ids = validate_string_list(obj.get("focus_claim_ids", []), f"{path}.focus_claim_ids", issues)
+    validate_unique_strings(focus_claim_ids, f"{path}.focus_claim_ids", issues)
+    anchor_refs = validate_string_list(obj.get("anchor_refs", []), f"{path}.anchor_refs", issues)
+    validate_unique_strings(anchor_refs, f"{path}.anchor_refs", issues)
+    if "notes" in obj and obj["notes"] is not None and not isinstance(obj["notes"], str):
+        issues.add(f"{path}.notes", "Expected a string when provided.", actual=obj["notes"])
+
+
+def validate_source_layer_policy(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "layer_id", path, issues)
+    require_enum(obj, "tier", path, issues, allowed=SOURCE_LAYER_TIERS)
+    skills = validate_string_list(obj.get("skills"), f"{path}.skills", issues, allow_empty=False)
+    validate_unique_strings(skills, f"{path}.skills", issues)
+    require_bool(obj, "requires_anchor", path, issues)
+    require_bool(obj, "auto_selectable", path, issues)
+    anchor_modes = validate_string_list(obj.get("allowed_anchor_modes", []), f"{path}.allowed_anchor_modes", issues)
+    validate_unique_strings(anchor_modes, f"{path}.allowed_anchor_modes", issues)
+    for index, anchor_mode in enumerate(anchor_modes):
+        if anchor_mode not in ANCHOR_MODES:
+            issues.add(
+                f"{path}.allowed_anchor_modes[{index}]",
+                f"Expected one of {sorted(ANCHOR_MODES)}.",
+                actual=anchor_mode,
+            )
+    requires_anchor = obj.get("requires_anchor")
+    if requires_anchor is True and not anchor_modes:
+        issues.add(f"{path}.allowed_anchor_modes", "Anchor-required layers must list at least one allowed anchor mode.")
+    if "max_selected_skills" in obj:
+        require_int(obj, "max_selected_skills", path, issues, minimum=1)
+    if "description" in obj and obj["description"] is not None and not isinstance(obj["description"], str):
+        issues.add(f"{path}.description", "Expected a string when provided.", actual=obj["description"])
+
+
+def validate_source_family_policy(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "family_id", path, issues)
+    require_enum(obj, "role", path, issues, allowed=SOURCE_SELECTION_ROLES)
+    if "label" in obj and obj["label"] is not None and not isinstance(obj["label"], str):
+        issues.add(f"{path}.label", "Expected a string when provided.", actual=obj["label"])
+    layers = obj.get("layers")
+    if not isinstance(layers, list) or not layers:
+        issues.add(f"{path}.layers", "Expected a non-empty list.", actual=layers)
+        layers = []
+    layer_keys: set[str] = set()
+    layer_skill_lookup: set[str] = set()
+    for index, layer in enumerate(layers):
+        item_path = f"{path}.layers[{index}]"
+        validate_source_layer_policy(layer, item_path, issues)
+        if not isinstance(layer, dict):
+            continue
+        layer_id = maybe_text(layer.get("layer_id"))
+        if layer_id:
+            key = layer_id.casefold()
+            if key in layer_keys:
+                issues.add(f"{item_path}.layer_id", "Duplicate layer_id entry.", actual=layer_id)
+            layer_keys.add(key)
+        if isinstance(layer.get("skills"), list):
+            layer_skill_lookup.update(skill.casefold() for skill in layer.get("skills") if isinstance(skill, str) and skill.strip())
+    if "skills" in obj:
+        family_skills = validate_string_list(obj.get("skills"), f"{path}.skills", issues, allow_empty=False)
+        validate_unique_strings(family_skills, f"{path}.skills", issues)
+        missing = sorted(skill for skill in layer_skill_lookup if skill not in {item.casefold() for item in family_skills})
+        if missing:
+            issues.add(f"{path}.skills", "Family skills must include every layer skill.", actual=missing)
+    if "max_active_layers" in obj:
+        require_int(obj, "max_active_layers", path, issues, minimum=1)
+
+
+def validate_layer_approval(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "family_id", path, issues)
+    require_string(obj, "layer_id", path, issues)
+    require_enum(obj, "approved_by", path, issues, allowed=APPROVAL_AUTHORITIES)
+    require_string(obj, "reason", path, issues)
+
+
+def validate_source_governance(value: Any, path: str, issues: IssueCollector, *, require_families: bool) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    if "approval_authority" in obj:
+        require_enum(obj, "approval_authority", path, issues, allowed=APPROVAL_AUTHORITIES)
+    if "allow_cross_round_anchors" in obj:
+        require_bool(obj, "allow_cross_round_anchors", path, issues)
+    if "max_selected_sources_per_role" in obj:
+        require_int(obj, "max_selected_sources_per_role", path, issues, minimum=1)
+    if "max_active_families_per_role" in obj:
+        require_int(obj, "max_active_families_per_role", path, issues, minimum=1)
+    if "max_non_entry_layers_per_role" in obj:
+        require_int(obj, "max_non_entry_layers_per_role", path, issues, minimum=0)
+
+    families = obj.get("families")
+    family_lookup: dict[str, dict[str, Any]] = {}
+    families_present = "families" in obj
+    if not isinstance(families, list):
+        if require_families or families_present:
+            issues.add(f"{path}.families", "Expected a non-empty list.", actual=families)
+        families = []
+    elif require_families and not families:
+        issues.add(f"{path}.families", "Expected a non-empty list.", actual=families)
+    for index, family in enumerate(families):
+        item_path = f"{path}.families[{index}]"
+        validate_source_family_policy(family, item_path, issues)
+        if not isinstance(family, dict):
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        if not family_id:
+            continue
+        key = family_id.casefold()
+        if key in family_lookup:
+            issues.add(f"{item_path}.family_id", "Duplicate family_id entry.", actual=family_id)
+        family_lookup[key] = family
+
+    approvals = obj.get("approved_layers", [])
+    if not isinstance(approvals, list):
+        issues.add(f"{path}.approved_layers", "Expected a list.", actual=approvals)
+        approvals = []
+    for index, approval in enumerate(approvals):
+        item_path = f"{path}.approved_layers[{index}]"
+        validate_layer_approval(approval, item_path, issues)
+        if not isinstance(approval, dict):
+            continue
+        family_id = maybe_text(approval.get("family_id"))
+        layer_id = maybe_text(approval.get("layer_id"))
+        if not family_lookup and not require_families and not families_present:
+            continue
+        family = family_lookup.get(family_id.casefold()) if family_id else None
+        if family is None:
+            issues.add(f"{item_path}.family_id", "Approved layer family_id must appear in source_governance.families.", actual=family_id)
+            continue
+        layer_lookup = layer_lookup_for_family(family)
+        if layer_id and layer_id not in layer_lookup:
+            issues.add(f"{item_path}.layer_id", "Approved layer_id must appear in the referenced family.", actual=layer_id)
+
+
+def validate_override_requested_approvals(value: Any, path: str, issues: IssueCollector) -> None:
+    approvals = value if isinstance(value, list) else [value]
+    for index, approval in enumerate(approvals):
+        item_path = f"{path}[{index}]" if isinstance(value, list) else path
+        obj = require_object(approval, item_path, issues)
+        if obj is None:
+            continue
+        require_string(obj, "family_id", item_path, issues)
+        require_string(obj, "layer_id", item_path, issues)
+        if "reason" in obj and obj["reason"] is not None and not isinstance(obj["reason"], str):
+            issues.add(f"{item_path}.reason", "Expected a string when provided.", actual=obj["reason"])
+
+
+def validate_override_requested_value(target_path: str, value: Any, path: str, issues: IssueCollector) -> None:
+    if target_path in OVERRIDE_INT_TARGET_PATHS:
+        if not is_int_not_bool(value) or int(value) <= 0:
+            issues.add(path, "Expected a positive integer for this override target.", actual=value)
+        return
+    if target_path in OVERRIDE_BOOL_TARGET_PATHS:
+        if not isinstance(value, bool):
+            issues.add(path, "Expected a boolean for this override target.", actual=value)
+        return
+    if target_path in OVERRIDE_APPROVAL_TARGET_PATHS:
+        validate_override_requested_approvals(value, path, issues)
+        return
+    issues.add(path, "Unsupported override target_path.", actual=target_path)
+
+
+def validate_override_request_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "request_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    require_enum(record, "request_origin_kind", path, issues, allowed=OVERRIDE_REQUEST_ORIGINS)
+    target_path = require_string(record, "target_path", path, issues)
+    if target_path and target_path not in OVERRIDE_TARGET_PATHS:
+        issues.add(
+            f"{path}.target_path",
+            f"Expected one of {sorted(OVERRIDE_TARGET_PATHS)}.",
+            actual=target_path,
+        )
+    if "current_value" in record and record["current_value"] is None:
+        issues.add(f"{path}.current_value", "current_value cannot be null when provided.", actual=record["current_value"])
+    if "requested_value" not in record:
+        issues.add(f"{path}.requested_value", "requested_value is required.")
+    elif target_path:
+        validate_override_requested_value(target_path, record.get("requested_value"), f"{path}.requested_value", issues)
+    require_string(record, "summary", path, issues)
+    require_string(record, "reason", path, issues)
+    evidence_refs = validate_string_list(record.get("evidence_refs", []), f"{path}.evidence_refs", issues)
+    validate_unique_strings(evidence_refs, f"{path}.evidence_refs", issues)
+    anchor_refs = validate_string_list(record.get("anchor_refs", []), f"{path}.anchor_refs", issues)
+    validate_unique_strings(anchor_refs, f"{path}.anchor_refs", issues)
+
+
+def validate_override_request_list(
+    value: Any,
+    path: str,
+    issues: IssueCollector,
+    *,
+    run_id: str,
+    round_id: str,
+    agent_role: str,
+    origin_kind: str,
+) -> None:
+    if not isinstance(value, list):
+        issues.add(path, "Expected a list.", actual=value)
+        return
+    request_ids: set[str] = set()
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        validate_override_request_object(item, item_path, issues)
+        if not isinstance(item, dict):
+            continue
+        request_id = maybe_text(item.get("request_id"))
+        if request_id:
+            key = request_id.casefold()
+            if key in request_ids:
+                issues.add(f"{item_path}.request_id", "Duplicate request_id entry.", actual=request_id)
+            request_ids.add(key)
+        if maybe_text(item.get("run_id")) and maybe_text(item.get("run_id")) != run_id:
+            issues.add(f"{item_path}.run_id", "Embedded override request must match parent run_id.", actual=item.get("run_id"))
+        if maybe_text(item.get("round_id")) and maybe_text(item.get("round_id")) != round_id:
+            issues.add(f"{item_path}.round_id", "Embedded override request must match parent round_id.", actual=item.get("round_id"))
+        if maybe_text(item.get("agent_role")) and maybe_text(item.get("agent_role")) != agent_role:
+            issues.add(f"{item_path}.agent_role", "Embedded override request must match parent agent_role.", actual=item.get("agent_role"))
+        if maybe_text(item.get("request_origin_kind")) and maybe_text(item.get("request_origin_kind")) != origin_kind:
+            issues.add(
+                f"{item_path}.request_origin_kind",
+                "Embedded override request must match the parent object kind.",
+                actual=item.get("request_origin_kind"),
+            )
+
+
 def validate_source_decision(value: Any, path: str, issues: IssueCollector) -> None:
     obj = require_object(value, path, issues)
     if obj is None:
@@ -352,6 +1190,60 @@ def validate_source_decision(value: Any, path: str, issues: IssueCollector) -> N
     require_string(obj, "source_skill", path, issues)
     require_bool(obj, "selected", path, issues)
     require_string(obj, "reason", path, issues)
+
+
+def validate_layer_plan(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "layer_id", path, issues)
+    require_enum(obj, "tier", path, issues, allowed=SOURCE_LAYER_TIERS)
+    selected = require_bool(obj, "selected", path, issues)
+    require_string(obj, "reason", path, issues)
+    skills = validate_string_list(obj.get("source_skills"), f"{path}.source_skills", issues, allow_empty=False)
+    validate_unique_strings(skills, f"{path}.source_skills", issues)
+    anchor_mode = require_enum(obj, "anchor_mode", path, issues, allowed=ANCHOR_MODES)
+    anchor_refs = validate_string_list(obj.get("anchor_refs", []), f"{path}.anchor_refs", issues)
+    validate_unique_strings(anchor_refs, f"{path}.anchor_refs", issues)
+    require_enum(obj, "authorization_basis", path, issues, allowed=AUTHORIZATION_BASES)
+    if anchor_mode == "none" and anchor_refs:
+        issues.add(f"{path}.anchor_refs", "anchor_refs must stay empty when anchor_mode is none.", actual=anchor_refs)
+    if selected is True and anchor_mode is not None and anchor_mode != "none" and not anchor_refs:
+        issues.add(f"{path}.anchor_refs", "Selected anchored layers must provide at least one anchor_ref.")
+
+
+def validate_family_plan(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "family_id", path, issues)
+    selected = require_bool(obj, "selected", path, issues)
+    require_string(obj, "reason", path, issues)
+    requirement_ids = validate_string_list(obj.get("evidence_requirement_ids", []), f"{path}.evidence_requirement_ids", issues)
+    validate_unique_strings(requirement_ids, f"{path}.evidence_requirement_ids", issues)
+    layer_plans = obj.get("layer_plans")
+    if not isinstance(layer_plans, list):
+        issues.add(f"{path}.layer_plans", "Expected a list.", actual=layer_plans)
+        layer_plans = []
+    selected_layer_count = 0
+    layer_ids: set[str] = set()
+    for index, layer in enumerate(layer_plans):
+        item_path = f"{path}.layer_plans[{index}]"
+        validate_layer_plan(layer, item_path, issues)
+        if not isinstance(layer, dict):
+            continue
+        layer_id = maybe_text(layer.get("layer_id"))
+        if layer_id:
+            key = layer_id.casefold()
+            if key in layer_ids:
+                issues.add(f"{item_path}.layer_id", "Duplicate layer_id entry.", actual=layer_id)
+            layer_ids.add(key)
+        if layer.get("selected") is True:
+            selected_layer_count += 1
+    if selected is True and selected_layer_count == 0:
+        issues.add(f"{path}.selected", "Family selected=true requires at least one selected layer.")
+    if selected is False and selected_layer_count > 0:
+        issues.add(f"{path}.selected", "Family selected=false cannot contain selected layer_plans.")
 
 
 def validate_round_task_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -376,8 +1268,50 @@ def validate_round_task_object(obj: Any, path: str, issues: IssueCollector) -> N
                     f"Expected one of {list(OBJECT_KINDS)}.",
                     actual=kind,
                 )
-    if "inputs" in record and record["inputs"] is not None and not isinstance(record["inputs"], dict):
-        issues.add(f"{path}.inputs", "Expected an object when provided.", actual=record["inputs"])
+    if "inputs" in record:
+        if record["inputs"] is not None and not isinstance(record["inputs"], dict):
+            issues.add(f"{path}.inputs", "Expected an object when provided.", actual=record["inputs"])
+        elif isinstance(record["inputs"], dict):
+            inputs = record["inputs"]
+            if "mission_geometry" in inputs and isinstance(inputs["mission_geometry"], dict):
+                validate_geometry(inputs["mission_geometry"], f"{path}.inputs.mission_geometry", issues)
+            if "mission_window" in inputs and isinstance(inputs["mission_window"], dict):
+                validate_time_window(inputs["mission_window"], f"{path}.inputs.mission_window", issues)
+            if "query_hints" in inputs:
+                query_hints = validate_string_list(inputs["query_hints"], f"{path}.inputs.query_hints", issues)
+                validate_unique_strings(query_hints, f"{path}.inputs.query_hints", issues)
+            if "focus_claim_ids" in inputs:
+                focus_claim_ids = validate_string_list(inputs["focus_claim_ids"], f"{path}.inputs.focus_claim_ids", issues)
+                validate_unique_strings(focus_claim_ids, f"{path}.inputs.focus_claim_ids", issues)
+            if "preferred_sources" in inputs:
+                issues.add(
+                    f"{path}.inputs.preferred_sources",
+                    "Task-level preferred_sources is no longer allowed. Express evidence needs in inputs.evidence_requirements and let expert source-selection choose families, layers, and skills.",
+                    actual=inputs["preferred_sources"],
+                )
+            if "required_sources" in inputs:
+                issues.add(
+                    f"{path}.inputs.required_sources",
+                    "Task-level required_sources is no longer allowed. Use mission source_governance plus expert source-selection instead.",
+                    actual=inputs["required_sources"],
+                )
+            evidence_requirements = inputs.get("evidence_requirements", [])
+            if not isinstance(evidence_requirements, list):
+                issues.add(f"{path}.inputs.evidence_requirements", "Expected a list.", actual=evidence_requirements)
+            else:
+                requirement_ids: set[str] = set()
+                for index, requirement in enumerate(evidence_requirements):
+                    item_path = f"{path}.inputs.evidence_requirements[{index}]"
+                    validate_evidence_requirement(requirement, item_path, issues)
+                    if not isinstance(requirement, dict):
+                        continue
+                    requirement_id = maybe_text(requirement.get("requirement_id"))
+                    if not requirement_id:
+                        continue
+                    key = requirement_id.casefold()
+                    if key in requirement_ids:
+                        issues.add(f"{item_path}.requirement_id", "Duplicate requirement_id entry.", actual=requirement_id)
+                    requirement_ids.add(key)
     if "notes" in record and record["notes"] is not None and not isinstance(record["notes"], str):
         issues.add(f"{path}.notes", "Expected a string when provided.", actual=record["notes"])
 
@@ -409,6 +1343,7 @@ def validate_source_selection_object(obj: Any, path: str, issues: IssueCollector
     selected_lookup = {item.casefold() for item in selected_sources}
     decision_keys: set[str] = set()
     selected_by_decision: set[str] = set()
+    selected_by_family_plans: set[str] = set()
 
     for index, decision in enumerate(decisions):
         item_path = f"{path}.source_decisions[{index}]"
@@ -456,6 +1391,74 @@ def validate_source_selection_object(obj: Any, path: str, issues: IssueCollector
                 actual=source_skill,
             )
 
+    family_plans_value = record.get("family_plans")
+    if not isinstance(family_plans_value, list):
+        issues.add(f"{path}.family_plans", "Expected a list.", actual=family_plans_value)
+        family_plans_value = []
+    family_keys: set[str] = set()
+    selected_layer_signatures: set[tuple[str, str]] = set()
+    for index, family_plan in enumerate(family_plans_value):
+        item_path = f"{path}.family_plans[{index}]"
+        validate_family_plan(family_plan, item_path, issues)
+        if not isinstance(family_plan, dict):
+            continue
+        family_id = maybe_text(family_plan.get("family_id"))
+        if family_id:
+            family_key = family_id.casefold()
+            if family_key in family_keys:
+                issues.add(f"{item_path}.family_id", "Duplicate family_id entry.", actual=family_id)
+            family_keys.add(family_key)
+        layer_plans = family_plan.get("layer_plans")
+        if not isinstance(layer_plans, list):
+            continue
+        for layer_index, layer_plan in enumerate(layer_plans):
+            if not isinstance(layer_plan, dict):
+                continue
+            if layer_plan.get("selected") is not True:
+                continue
+            layer_id = maybe_text(layer_plan.get("layer_id"))
+            if family_id and layer_id:
+                signature = (family_id.casefold(), layer_id.casefold())
+                if signature in selected_layer_signatures:
+                    issues.add(
+                        f"{item_path}.layer_plans[{layer_index}].layer_id",
+                        "Duplicate selected layer reference.",
+                        actual=layer_id,
+                    )
+                selected_layer_signatures.add(signature)
+            skills = layer_plan.get("source_skills")
+            if not isinstance(skills, list):
+                continue
+            for skill in skills:
+                skill_text = maybe_text(skill)
+                if not skill_text:
+                    continue
+                key = skill_text.casefold()
+                selected_by_family_plans.add(key)
+                if allowed_lookup and key not in allowed_lookup:
+                    issues.add(
+                        f"{item_path}.layer_plans[{layer_index}].source_skills",
+                        "Selected family-plan source_skill must also appear in allowed_sources.",
+                        actual=skill_text,
+                    )
+
+    if family_plans_value:
+        for index, source_skill in enumerate(selected_sources):
+            key = source_skill.casefold()
+            if key not in selected_by_family_plans:
+                issues.add(
+                    f"{path}.selected_sources[{index}]",
+                    "Selected source must also appear in one selected family_plans.layer_plans entry.",
+                    actual=source_skill,
+                )
+        for source_key in selected_by_family_plans:
+            if source_key not in selected_lookup:
+                issues.add(
+                    f"{path}.family_plans",
+                    "Selected family_plans sources must also appear in selected_sources.",
+                    actual=source_key,
+                )
+
     if status != "pending":
         for index, source_skill in enumerate(allowed_sources):
             if source_skill.casefold() not in decision_keys:
@@ -464,6 +1467,19 @@ def validate_source_selection_object(obj: Any, path: str, issues: IssueCollector
                     "Each allowed source must have one source_decisions entry once selection is complete or blocked.",
                     actual=source_skill,
                 )
+
+    if "override_requests" not in record:
+        issues.add(f"{path}.override_requests", "Expected a list.", actual=None)
+    else:
+        validate_override_request_list(
+            record.get("override_requests"),
+            f"{path}.override_requests",
+            issues,
+            run_id=maybe_text(record.get("run_id")),
+            round_id=maybe_text(record.get("round_id")),
+            agent_role=maybe_text(record.get("agent_role")),
+            origin_kind="source-selection",
+        )
 
 
 def validate_mission_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -478,18 +1494,25 @@ def validate_mission_object(obj: Any, path: str, issues: IssueCollector) -> None
     validate_region_scope(record.get("region"), f"{path}.region", issues)
     if "hypotheses" in record:
         validate_string_list(record["hypotheses"], f"{path}.hypotheses", issues)
-    constraints = require_object(record.get("constraints"), f"{path}.constraints", issues)
-    if constraints is not None:
-        require_int(constraints, "max_rounds", f"{path}.constraints", issues, minimum=1)
-        require_int(constraints, "max_claims_per_round", f"{path}.constraints", issues, minimum=1)
-        require_int(constraints, "max_tasks_per_round", f"{path}.constraints", issues, minimum=1)
-    source_policy = record.get("source_policy")
-    if source_policy is not None:
-        policy_obj = require_object(source_policy, f"{path}.source_policy", issues)
-        if policy_obj is not None:
-            for field_name in ("sociologist", "environmentalist", "historian"):
-                if field_name in policy_obj:
-                    validate_string_list(policy_obj[field_name], f"{path}.source_policy.{field_name}", issues)
+    profile_name = require_string(record, "policy_profile", path, issues)
+    if profile_name and profile_name not in DEFAULT_POLICY_PROFILES:
+        issues.add(
+            f"{path}.policy_profile",
+            f"Expected one of {sorted(DEFAULT_POLICY_PROFILES)}.",
+            actual=profile_name,
+        )
+    if record.get("constraints") is not None:
+        validate_constraints_object(record.get("constraints"), f"{path}.constraints", issues, require_core=False)
+    if record.get("source_governance") is not None:
+        validate_source_governance(record.get("source_governance"), f"{path}.source_governance", issues, require_families=False)
+    try:
+        validate_constraints_object(effective_constraints(record), f"{path}.effective_constraints", issues, require_core=True)
+    except ValueError as exc:
+        issues.add(f"{path}.policy_profile", str(exc))
+    try:
+        validate_source_governance(source_governance(record), f"{path}.effective_source_governance", issues, require_families=True)
+    except ValueError as exc:
+        issues.add(f"{path}.source_governance", str(exc))
 
 
 def validate_claim_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -517,6 +1540,36 @@ def validate_claim_object(obj: Any, path: str, issues: IssueCollector) -> None:
             validate_artifact_ref(ref, f"{path}.public_refs[{index}]", issues)
 
 
+def validate_claim_submission_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "submission_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    require_string(record, "claim_id", path, issues)
+    require_enum(record, "claim_type", path, issues, allowed=CLAIM_TYPES)
+    require_string(record, "summary", path, issues)
+    require_string(record, "statement", path, issues)
+    require_string(record, "meaning", path, issues)
+    require_int(record, "priority", path, issues, minimum=1, maximum=5)
+    require_bool(record, "needs_physical_validation", path, issues)
+    require_bool(record, "worth_storing", path, issues)
+    require_int(record, "source_signal_count", path, issues, minimum=1)
+    validate_time_window(record.get("time_window"), f"{path}.time_window", issues)
+    validate_region_scope(record.get("place_scope"), f"{path}.place_scope", issues)
+    public_refs = record.get("public_refs")
+    if not isinstance(public_refs, list):
+        issues.add(f"{path}.public_refs", "Expected a list.", actual=public_refs)
+    else:
+        for index, ref in enumerate(public_refs):
+            validate_artifact_ref(ref, f"{path}.public_refs[{index}]", issues)
+    if "compact_audit" in record and record["compact_audit"] is not None:
+        validate_compact_audit(record["compact_audit"], f"{path}.compact_audit", issues)
+
+
 def validate_statistics(value: Any, path: str, issues: IssueCollector) -> None:
     obj = require_object(value, path, issues)
     if obj is None:
@@ -527,6 +1580,21 @@ def validate_statistics(value: Any, path: str, issues: IssueCollector) -> None:
         field_value = obj[field_name]
         if field_value is not None and not is_number(field_value):
             issues.add(f"{path}.{field_name}", "Expected a number or null.", actual=field_value)
+
+
+def validate_compact_audit(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_bool(obj, "representative", path, issues)
+    require_int(obj, "retained_count", path, issues, minimum=0)
+    require_int(obj, "total_candidate_count", path, issues, minimum=0)
+    require_string(obj, "coverage_summary", path, issues)
+    concentration_flags = validate_string_list(obj.get("concentration_flags", []), f"{path}.concentration_flags", issues)
+    validate_unique_strings(concentration_flags, f"{path}.concentration_flags", issues)
+    if "sampling_notes" in obj:
+        sampling_notes = validate_string_list(obj.get("sampling_notes", []), f"{path}.sampling_notes", issues)
+        validate_unique_strings(sampling_notes, f"{path}.sampling_notes", issues)
 
 
 def validate_observation_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -551,6 +1619,33 @@ def validate_observation_object(obj: Any, path: str, issues: IssueCollector) -> 
     validate_region_scope(record.get("place_scope"), f"{path}.place_scope", issues)
     validate_string_list(record.get("quality_flags"), f"{path}.quality_flags", issues)
     validate_artifact_ref(record.get("provenance"), f"{path}.provenance", issues)
+
+
+def validate_observation_submission_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "submission_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    require_string(record, "observation_id", path, issues)
+    require_string(record, "source_skill", path, issues)
+    require_string(record, "metric", path, issues)
+    require_enum(record, "aggregation", path, issues, allowed=OBSERVATION_AGGREGATIONS)
+    value = record.get("value")
+    if value is not None and not is_number(value):
+        issues.add(f"{path}.value", "Expected a number or null.", actual=value)
+    require_string(record, "unit", path, issues)
+    require_string(record, "meaning", path, issues)
+    require_bool(record, "worth_storing", path, issues)
+    validate_time_window(record.get("time_window"), f"{path}.time_window", issues)
+    validate_region_scope(record.get("place_scope"), f"{path}.place_scope", issues)
+    validate_string_list(record.get("quality_flags"), f"{path}.quality_flags", issues)
+    validate_artifact_ref(record.get("provenance"), f"{path}.provenance", issues)
+    if "compact_audit" in record and record["compact_audit"] is not None:
+        validate_compact_audit(record["compact_audit"], f"{path}.compact_audit", issues)
 
 
 def validate_evidence_card_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -588,6 +1683,179 @@ def validate_finding(value: Any, path: str, issues: IssueCollector) -> None:
             validate_string_list(obj[field_name], f"{path}.{field_name}", issues)
 
 
+def validate_data_readiness_report_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "readiness_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    require_enum(record, "readiness_status", path, issues, allowed=READINESS_STATUSES)
+    require_bool(record, "sufficient_for_matching", path, issues)
+    require_string(record, "summary", path, issues)
+    findings = record.get("findings")
+    if not isinstance(findings, list):
+        issues.add(f"{path}.findings", "Expected a list.", actual=findings)
+    else:
+        for index, finding in enumerate(findings):
+            validate_finding(finding, f"{path}.findings[{index}]", issues)
+    validate_string_list(record.get("open_questions"), f"{path}.open_questions", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+    referenced_submission_ids = validate_string_list(
+        record.get("referenced_submission_ids"),
+        f"{path}.referenced_submission_ids",
+        issues,
+    )
+    validate_unique_strings(referenced_submission_ids, f"{path}.referenced_submission_ids", issues)
+    if "compact_audit" in record and record["compact_audit"] is not None:
+        validate_compact_audit(record["compact_audit"], f"{path}.compact_audit", issues)
+    if "override_requests" not in record:
+        issues.add(f"{path}.override_requests", "Expected a list.", actual=None)
+    else:
+        validate_override_request_list(
+            record.get("override_requests"),
+            f"{path}.override_requests",
+            issues,
+            run_id=maybe_text(record.get("run_id")),
+            round_id=maybe_text(record.get("round_id")),
+            agent_role=maybe_text(record.get("agent_role")),
+            origin_kind="data-readiness-report",
+        )
+
+
+def validate_matching_authorization_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "authorization_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    role = require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    if role is not None and role != "moderator":
+        issues.add(f"{path}.agent_role", "matching-authorization must be moderator-owned.", actual=role)
+    require_enum(record, "authorization_status", path, issues, allowed=AUTHORIZATION_STATUSES)
+    require_string(record, "summary", path, issues)
+    require_string(record, "rationale", path, issues)
+    require_bool(record, "moderator_override", path, issues)
+    require_bool(record, "allow_isolated_evidence", path, issues)
+    readiness_ids = validate_string_list(record.get("referenced_readiness_ids"), f"{path}.referenced_readiness_ids", issues)
+    validate_unique_strings(readiness_ids, f"{path}.referenced_readiness_ids", issues)
+    claim_ids = validate_string_list(record.get("claim_ids"), f"{path}.claim_ids", issues)
+    validate_unique_strings(claim_ids, f"{path}.claim_ids", issues)
+    observation_ids = validate_string_list(record.get("observation_ids"), f"{path}.observation_ids", issues)
+    validate_unique_strings(observation_ids, f"{path}.observation_ids", issues)
+    validate_string_list(record.get("open_questions"), f"{path}.open_questions", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+
+
+def validate_matching_pair(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "claim_id", path, issues)
+    observation_ids = validate_string_list(obj.get("observation_ids"), f"{path}.observation_ids", issues)
+    validate_unique_strings(observation_ids, f"{path}.observation_ids", issues)
+    require_number(obj, "support_score", path, issues, minimum=0.0)
+    require_number(obj, "contradict_score", path, issues, minimum=0.0)
+    validate_string_list(obj.get("notes"), f"{path}.notes", issues)
+
+
+def validate_matching_result_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "result_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_string(record, "authorization_id", path, issues)
+    require_enum(record, "result_status", path, issues, allowed=MATCHING_RESULT_STATUSES)
+    require_string(record, "summary", path, issues)
+    matched_pairs = record.get("matched_pairs")
+    if not isinstance(matched_pairs, list):
+        issues.add(f"{path}.matched_pairs", "Expected a list.", actual=matched_pairs)
+    else:
+        for index, pair in enumerate(matched_pairs):
+            validate_matching_pair(pair, f"{path}.matched_pairs[{index}]", issues)
+    for field_name in (
+        "matched_claim_ids",
+        "matched_observation_ids",
+        "unmatched_claim_ids",
+        "unmatched_observation_ids",
+    ):
+        values = validate_string_list(record.get(field_name), f"{path}.{field_name}", issues)
+        validate_unique_strings(values, f"{path}.{field_name}", issues)
+
+
+def validate_evidence_adjudication_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "adjudication_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_string(record, "authorization_id", path, issues)
+    require_string(record, "matching_result_id", path, issues)
+    require_enum(record, "adjudication_status", path, issues, allowed=ADJUDICATION_STATUSES)
+    require_string(record, "summary", path, issues)
+    require_bool(record, "matching_reasonable", path, issues)
+    require_bool(record, "needs_additional_data", path, issues)
+    for field_name in ("card_ids", "isolated_entry_ids", "remand_ids", "open_questions"):
+        values = validate_string_list(record.get(field_name), f"{path}.{field_name}", issues)
+        validate_unique_strings(values, f"{path}.{field_name}", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+
+
+def validate_isolated_entry_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "isolated_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "entity_kind", path, issues, allowed=LIBRARY_ENTITY_KINDS)
+    require_string(record, "entity_id", path, issues)
+    require_string(record, "summary", path, issues)
+    require_string(record, "reason", path, issues)
+
+
+def validate_remand_entry_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "remand_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "entity_kind", path, issues, allowed=LIBRARY_ENTITY_KINDS)
+    require_string(record, "entity_id", path, issues)
+    require_string(record, "summary", path, issues)
+    reasons = validate_string_list(record.get("reasons"), f"{path}.reasons", issues)
+    validate_unique_strings(reasons, f"{path}.reasons", issues)
+    if not reasons:
+        issues.add(f"{path}.reasons", "Expected at least one remand reason.")
+
+
 def validate_expert_report_object(obj: Any, path: str, issues: IssueCollector) -> None:
     record = require_object(obj, path, issues)
     if record is None:
@@ -620,6 +1888,18 @@ def validate_expert_report_object(obj: Any, path: str, issues: IssueCollector) -
                 f"{path}.recommended_next_actions[{index}]",
                 issues,
             )
+    if "override_requests" not in record:
+        issues.add(f"{path}.override_requests", "Expected a list.", actual=None)
+    else:
+        validate_override_request_list(
+            record.get("override_requests"),
+            f"{path}.override_requests",
+            issues,
+            run_id=maybe_text(record.get("run_id")),
+            round_id=maybe_text(record.get("round_id")),
+            agent_role=maybe_text(record.get("agent_role")),
+            origin_kind="expert-report",
+        )
 
 
 def validate_council_decision_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -644,15 +1924,36 @@ def validate_council_decision_object(obj: Any, path: str, issues: IssueCollector
             validate_round_task_object(task, f"{path}.next_round_tasks[{index}]", issues)
     if "final_brief" in record and record["final_brief"] is not None and not isinstance(record["final_brief"], str):
         issues.add(f"{path}.final_brief", "Expected a string when provided.", actual=record["final_brief"])
+    if "override_requests" not in record:
+        issues.add(f"{path}.override_requests", "Expected a list.", actual=None)
+    else:
+        validate_override_request_list(
+            record.get("override_requests"),
+            f"{path}.override_requests",
+            issues,
+            run_id=maybe_text(record.get("run_id")),
+            round_id=maybe_text(record.get("round_id")),
+            agent_role="moderator",
+            origin_kind="council-decision",
+        )
 
 
 VALIDATORS = {
     "mission": validate_mission_object,
     "round-task": validate_round_task_object,
     "source-selection": validate_source_selection_object,
+    "override-request": validate_override_request_object,
     "claim": validate_claim_object,
+    "claim-submission": validate_claim_submission_object,
     "observation": validate_observation_object,
+    "observation-submission": validate_observation_submission_object,
     "evidence-card": validate_evidence_card_object,
+    "data-readiness-report": validate_data_readiness_report_object,
+    "matching-authorization": validate_matching_authorization_object,
+    "matching-result": validate_matching_result_object,
+    "evidence-adjudication": validate_evidence_adjudication_object,
+    "isolated-entry": validate_isolated_entry_object,
+    "remand-entry": validate_remand_entry_object,
     "expert-report": validate_expert_report_object,
     "council-decision": validate_council_decision_object,
 }
@@ -661,9 +1962,18 @@ EXAMPLES: dict[str, Any] = {
     "mission": read_json(EXAMPLES_DIR / "mission.json"),
     "round-task": read_json(EXAMPLES_DIR / "round_task.json"),
     "source-selection": read_json(EXAMPLES_DIR / "source_selection.json"),
+    "override-request": read_json(EXAMPLES_DIR / "override_request.json"),
     "claim": read_json(EXAMPLES_DIR / "claim.json"),
+    "claim-submission": read_json(EXAMPLES_DIR / "claim_submission.json"),
     "observation": read_json(EXAMPLES_DIR / "observation.json"),
+    "observation-submission": read_json(EXAMPLES_DIR / "observation_submission.json"),
     "evidence-card": read_json(EXAMPLES_DIR / "evidence_card.json"),
+    "data-readiness-report": read_json(EXAMPLES_DIR / "data_readiness_report.json"),
+    "matching-authorization": read_json(EXAMPLES_DIR / "matching_authorization.json"),
+    "matching-result": read_json(EXAMPLES_DIR / "matching_result.json"),
+    "evidence-adjudication": read_json(EXAMPLES_DIR / "evidence_adjudication.json"),
+    "isolated-entry": read_json(EXAMPLES_DIR / "isolated_entry.json"),
+    "remand-entry": read_json(EXAMPLES_DIR / "remand_entry.json"),
     "expert-report": read_json(EXAMPLES_DIR / "expert_report.json"),
     "council-decision": read_json(EXAMPLES_DIR / "council_decision.json"),
 }
@@ -758,22 +2068,22 @@ def round_sort_key(round_id: str) -> tuple[int, str]:
         return (sys.maxsize, round_id)
 
 
-def source_policy_for_role(mission: dict[str, Any], role: str) -> list[str]:
-    policy = mission.get("source_policy")
-    if not isinstance(policy, dict):
-        return []
-    selected = policy.get(role)
-    if not isinstance(selected, list):
-        return []
-    values = [item for item in selected if isinstance(item, str) and item.strip()]
-    return values
+def allowed_sources_for_role(mission: dict[str, Any], role: str) -> list[str]:
+    governance_families = source_governance_for_role(mission, role)
+    values = [
+        maybe_text(skill)
+        for family in governance_families
+        for skill in family.get("skills", [])
+        if maybe_text(skill)
+    ]
+    return unique_strings(values)
 
 
 def expected_output_kinds_for_role(role: str) -> list[str]:
     if role == "sociologist":
-        return ["source-selection", "claim", "expert-report"]
+        return ["source-selection", "claim", "claim-submission", "data-readiness-report", "expert-report"]
     if role == "environmentalist":
-        return ["source-selection", "observation", "expert-report"]
+        return ["source-selection", "observation", "observation-submission", "data-readiness-report", "expert-report"]
     if role == "historian":
         return ["expert-report"]
     return ["expert-report"]
@@ -790,9 +2100,23 @@ def default_round_tasks(*, mission: dict[str, Any], round_id: str) -> list[dict[
     sociologist_task["round_id"] = round_id
     sociologist_task["assigned_role"] = "sociologist"
     sociologist_task["objective"] = (
-        "Identify up to three public claims within the mission window that are worth physical validation."
+        "Identify mission-window public claims and judge whether the current public-evidence preparation is sufficient for later matching."
     )
     sociologist_task["expected_output_kinds"] = expected_output_kinds_for_role("sociologist")
+    sociologist_task["inputs"] = {
+        "mission_geometry": geometry,
+        "mission_window": mission_window,
+        "evidence_requirements": [
+            {
+                "requirement_id": f"req-sociologist-{round_id}-public-claims",
+                "requirement_type": "public-claim-discovery",
+                "summary": "Collect attributable public claims that explain who is saying what in the mission window.",
+                "priority": "high",
+                "focus_claim_ids": [],
+                "anchor_refs": [],
+            }
+        ],
+    }
 
     environmental_task = copy.deepcopy(EXAMPLES["round-task"])
     environmental_task["task_id"] = f"task-environmentalist-{round_id}-01"
@@ -800,10 +2124,23 @@ def default_round_tasks(*, mission: dict[str, Any], round_id: str) -> list[dict[
     environmental_task["round_id"] = round_id
     environmental_task["assigned_role"] = "environmentalist"
     environmental_task["objective"] = (
-        "Validate mission-relevant physical evidence in the same window using the configured environment skills."
+        "Collect mission-relevant physical observations and judge whether the current physical-evidence preparation is sufficient for later matching."
     )
     environmental_task["expected_output_kinds"] = expected_output_kinds_for_role("environmentalist")
-    environmental_task["inputs"] = {"mission_geometry": geometry, "mission_window": mission_window}
+    environmental_task["inputs"] = {
+        "mission_geometry": geometry,
+        "mission_window": mission_window,
+        "evidence_requirements": [
+            {
+                "requirement_id": f"req-environmentalist-{round_id}-physical-corroboration",
+                "requirement_type": "physical-corroboration",
+                "summary": "Collect mission-window physical observations that can support or contradict candidate claims.",
+                "priority": "high",
+                "focus_claim_ids": [],
+                "anchor_refs": [],
+            }
+        ],
+    }
 
     return [sociologist_task, environmental_task]
 
@@ -828,6 +2165,8 @@ def placeholder_source_selection(
         "allowed_sources": allowed_sources,
         "selected_sources": [],
         "source_decisions": [],
+        "family_plans": [],
+        "override_requests": [],
     }
 
 
@@ -843,6 +2182,7 @@ def placeholder_report(*, run_id: str, round_id: str, role: str) -> dict[str, An
         "findings": [],
         "open_questions": [],
         "recommended_next_actions": [],
+        "override_requests": [],
     }
 
 
@@ -892,7 +2232,7 @@ def scaffold_round(
                 for item in normalized_tasks
                 if item.get("assigned_role") == role and isinstance(item.get("task_id"), str)
             ],
-            allowed_sources=source_policy_for_role(mission or {}, role),
+            allowed_sources=allowed_sources_for_role(mission or {}, role),
         )
         for role in source_selection_roles
     }
@@ -902,6 +2242,12 @@ def scaffold_round(
         round_path / "shared" / "claims.json": [],
         round_path / "shared" / "observations.json": [],
         round_path / "shared" / "evidence_cards.json": [],
+        round_path / "moderator" / "override_requests.json": [],
+        round_path / "sociologist" / "claim_submissions.json": [],
+        round_path / "sociologist" / "override_requests.json": [],
+        round_path / "environmentalist" / "observation_submissions.json": [],
+        round_path / "environmentalist" / "override_requests.json": [],
+        round_path / "historian" / "override_requests.json": [],
         round_path / "sociologist" / "source_selection.json": source_selection_files["sociologist"],
         round_path / "environmentalist" / "source_selection.json": source_selection_files["environmentalist"],
         round_path / "sociologist" / "sociologist_report.json": placeholder_report(
@@ -928,6 +2274,7 @@ def scaffold_round(
         round_path / "historian" / "derived",
         round_path / "moderator" / "derived",
         round_path / "shared" / "contexts",
+        round_path / "shared" / "evidence-library",
     )
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -935,10 +2282,24 @@ def scaffold_round(
     for path, payload in files_to_write.items():
         write_json(path, payload, pretty=pretty)
 
+    library_views = {
+        round_path / "shared" / "evidence-library" / "claims_active.json": [],
+        round_path / "shared" / "evidence-library" / "observations_active.json": [],
+        round_path / "shared" / "evidence-library" / "cards_active.json": [],
+        round_path / "shared" / "evidence-library" / "isolated_active.json": [],
+        round_path / "shared" / "evidence-library" / "remands_open.json": [],
+        round_path / "shared" / "evidence-library" / "context_sociologist.json": {},
+        round_path / "shared" / "evidence-library" / "context_environmentalist.json": {},
+        round_path / "shared" / "evidence-library" / "context_moderator.json": {},
+    }
+    for path, payload in library_views.items():
+        write_json(path, payload, pretty=pretty)
+    atomic_write_text_file(round_path / "shared" / "evidence-library" / "ledger.jsonl", "")
+
     return {
         "round_id": round_id,
         "round_dir": str(round_path),
-        "files_written": [str(path) for path in sorted(files_to_write)],
+        "files_written": [str(path) for path in sorted({*files_to_write, *library_views, round_path / "shared" / "evidence-library" / "ledger.jsonl"})],
         "directories_ready": [str(path) for path in sorted(directories)],
     }
 
@@ -1049,14 +2410,30 @@ def validate_bundle(run_dir: Path) -> dict[str, Any]:
             round_path / "shared" / "claims.json": "claim",
             round_path / "shared" / "observations.json": "observation",
             round_path / "shared" / "evidence_cards.json": "evidence-card",
+            round_path / "sociologist" / "claim_submissions.json": "claim-submission",
+            round_path / "environmentalist" / "observation_submissions.json": "observation-submission",
             round_path / "sociologist" / "source_selection.json": "source-selection",
             round_path / "environmentalist" / "source_selection.json": "source-selection",
             round_path / "sociologist" / "sociologist_report.json": "expert-report",
             round_path / "environmentalist" / "environmentalist_report.json": "expert-report",
         }
         round_optional = {
-            round_path / "historian" / "historian_report.json": "expert-report",
-            round_path / "moderator" / "council_decision.json": "council-decision",
+        round_path / "historian" / "historian_report.json": "expert-report",
+        round_path / "moderator" / "council_decision.json": "council-decision",
+        round_path / "moderator" / "override_requests.json": "override-request",
+        round_path / "sociologist" / "override_requests.json": "override-request",
+        round_path / "environmentalist" / "override_requests.json": "override-request",
+        round_path / "historian" / "override_requests.json": "override-request",
+        round_path / "sociologist" / "data_readiness_report.json": "data-readiness-report",
+        round_path / "environmentalist" / "data_readiness_report.json": "data-readiness-report",
+        round_path / "moderator" / "matching_authorization.json": "matching-authorization",
+            round_path / "shared" / "matching_result.json": "matching-result",
+            round_path / "shared" / "evidence_adjudication.json": "evidence-adjudication",
+            round_path / "shared" / "evidence-library" / "claims_active.json": "claim-submission",
+            round_path / "shared" / "evidence-library" / "observations_active.json": "observation-submission",
+            round_path / "shared" / "evidence-library" / "cards_active.json": "evidence-card",
+            round_path / "shared" / "evidence-library" / "isolated_active.json": "isolated-entry",
+            round_path / "shared" / "evidence-library" / "remands_open.json": "remand-entry",
         }
 
         round_results: list[dict[str, Any]] = []

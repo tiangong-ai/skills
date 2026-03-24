@@ -1,6 +1,6 @@
 ---
 name: eco-council-data-contract
-description: Define, validate, and scaffold shared data contracts for eco-council multi-agent runs, rounds, tasks, expert source selections, claims, observations, evidence cards, expert reports, and moderator decisions. Use when Codex needs to standardize data exchange between moderator, sociologist, environmentalist, and historian agents, create canonical JSON or SQLite schemas, or plan deterministic normalization before OpenClaw orchestration and case-retrieval RAG.
+description: Define, validate, and scaffold shared data contracts for eco-council multi-agent runs, rounds, source governance, canonical submissions, readiness reports, moderator matching authorization/results, evidence-library entries, expert reports, and moderator decisions. Use when Codex needs to standardize staged data exchange between moderator, sociologist, environmentalist, and historian agents, create canonical JSON or SQLite schemas, or plan deterministic normalization and evidence-library persistence before OpenClaw orchestration.
 ---
 
 # Eco Council Data Contract
@@ -8,8 +8,9 @@ description: Define, validate, and scaffold shared data contracts for eco-counci
 ## Core Goal
 
 - Keep one shared contract for the eco-council control plane and evidence plane.
-- Validate mission, round-task, source-selection, claim, observation, evidence-card, expert-report, and moderator-decision payloads before OpenClaw agents exchange them.
+- Validate mission, round-task, source-selection, override-request, claim, observation, claim-submission, observation-submission, data-readiness-report, matching-authorization, matching-result, evidence-adjudication, isolated-entry, remand-entry, expert-report, and moderator-decision payloads before OpenClaw agents exchange them.
 - Scaffold a repeatable run directory and initialize a canonical SQLite store for downstream normalization and linking.
+- Expand audited `policy_profile` defaults into the effective mission caps and source-governance envelope used by the rest of the stack.
 
 ## Workflow
 
@@ -92,8 +93,17 @@ python3 scripts/eco_council_contract.py validate-bundle \
 - `mission`: moderator-owned run charter and shared window/region constraints.
 - `round-task`: moderator-assigned work item for one expert role in one round.
 - `source-selection`: expert-owned audited decision about whether any source is needed and which allowed sources may run.
+- `override-request`: explicit request for an upstream human/bot to change a mission cap or source-governance boundary without letting moderator or experts self-apply it.
 - `claim`: sociologist-produced public or policy assertion that may need physical validation.
+- `claim-submission`: sociologist-owned compact claim candidate that is explicitly audited for worth-storing and representativeness.
 - `observation`: environmentalist-produced normalized measurement or event summary from one physical source.
+- `observation-submission`: environmentalist-owned compact observation candidate that is explicitly audited for worth-storing and representativeness.
+- `data-readiness-report`: per-data-role sufficiency judgment over the current active evidence-library submissions.
+- `matching-authorization`: moderator-owned gate that decides whether a matching pass may run.
+- `matching-result`: deterministic claim-observation matching output constrained by moderator authorization.
+- `evidence-adjudication`: moderator-facing result summary over cards, isolated entries, and remands after matching.
+- `isolated-entry`: evidence-library object for claims or observations that remain reasonably unmatched.
+- `remand-entry`: evidence-library object for claims or observations that require another round of collection before adjudication is stable.
 - `evidence-card`: linked assessment between one claim and one or more observations.
 - `expert-report`: per-role round report for sociologist, environmentalist, historian, or moderator.
 - `council-decision`: moderator verdict for whether the round is sufficient or another round is required.
@@ -104,6 +114,8 @@ python3 scripts/eco_council_contract.py validate-bundle \
 - Do not fetch source data here.
 - Do not perform geocoding, embedding, or RAG retrieval here.
 - Do not let moderator or experts exchange raw skill payloads directly; normalize first, then pass canonical objects.
+- Treat `shared/evidence-library/` as the persistent cross-round ledger surface for active submissions, cards, isolated entries, and remands.
+- Treat `mission.policy_profile` plus optional mission overrides as the only authority for default caps; agents may only ask for changes through `override_requests`.
 
 ## References
 
@@ -126,4 +138,5 @@ python3 scripts/eco_council_contract.py validate-bundle \
 - Keep raw fetch outputs under `raw/` and canonical outputs under `normalized/` or `shared/`.
 - Use moderator rounds externally in OpenClaw; this skill only scaffolds and validates round state.
 - Scaffolded rounds now include placeholder `source_selection.json` files for sociologist and environmentalist so audited source choice has one canonical location.
+- Scaffolded rounds also include an `evidence-library/` directory for active submissions, cards, isolated entries, remands, and the append-only ledger.
 - Use `scaffold-round` after moderator approval instead of mutating earlier round folders in place.

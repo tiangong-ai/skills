@@ -7,9 +7,11 @@ Keep these phases separate:
 1. moderator review
    - mission is already fixed
    - moderator edits `tasks.json` only
+   - moderator expresses evidence needs and claim focus; moderator does not prescribe source skills
 2. expert source selection
    - sociologist and environmentalist decide whether any source is needed
-   - only explicitly selected sources may run, plus any moderator-authored task-level `required_sources`
+   - they choose `family_plans`, `layer_plans`, anchors, and exact source skills under mission `source_governance`
+   - only explicitly selected sources may run
    - canonical outputs live at `round_xxx/<role>/source_selection.json`
 3. expert raw collection
    - sociologist and environmentalist execute fetch commands

@@ -190,6 +190,9 @@ def moderator_status_rank(value: str) -> int:
 
 
 def mission_constraints(mission: dict[str, Any]) -> dict[str, Any]:
+    values = SUP.contract_call("effective_constraints", mission)
+    if isinstance(values, dict):
+        return values
     constraints = mission.get("constraints")
     return constraints if isinstance(constraints, dict) else {}
 
@@ -265,7 +268,7 @@ def insert_case(conn: sqlite3.Connection, snapshot: dict[str, Any], run_dir: Pat
         INSERT INTO cases (
             case_id, run_dir, topic, objective, region_label, region_geometry_json,
             window_start_utc, window_end_utc, max_rounds, max_claims_per_round, max_tasks_per_round,
-            source_policy_json, current_round_id, current_stage, round_count, latest_decision_round_id,
+            source_governance_json, current_round_id, current_stage, round_count, latest_decision_round_id,
             final_moderator_status, final_evidence_sufficiency, final_decision_summary, final_brief,
             final_missing_evidence_types_json, latest_claim_count, latest_observation_count, latest_evidence_count,
             imported_at_utc, mission_json
@@ -283,7 +286,7 @@ def insert_case(conn: sqlite3.Connection, snapshot: dict[str, Any], run_dir: Pat
             constraints.get("max_rounds"),
             constraints.get("max_claims_per_round"),
             constraints.get("max_tasks_per_round"),
-            json_text(mission.get("source_policy", {})),
+            json_text(SUP.contract_call("source_governance", mission) or {}),
             maybe_text(state.get("current_round_id")),
             maybe_text(state.get("stage")),
             len(snapshot["round_ids"]),

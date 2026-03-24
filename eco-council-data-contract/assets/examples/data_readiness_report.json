@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0.0",
+  "readiness_id": "readiness-sociologist-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "sociologist",
+  "readiness_status": "ready",
+  "sufficient_for_matching": true,
+  "summary": "Public-side data is sufficiently prepared for a first matching pass.",
+  "findings": [
+    {
+      "finding_id": "finding-001",
+      "title": "Dominant attribution narrative captured",
+      "summary": "The compact claim set preserves the strongest smoke-attribution narrative in the mission window.",
+      "confidence": "medium",
+      "claim_ids": [
+        "claim-001"
+      ],
+      "observation_ids": [],
+      "evidence_ids": []
+    }
+  ],
+  "open_questions": [
+    "Should the next round diversify channels if matching fails?"
+  ],
+  "recommended_next_actions": [],
+  "override_requests": [],
+  "referenced_submission_ids": [
+    "claimsub-001"
+  ],
+  "compact_audit": {
+    "representative": true,
+    "retained_count": 3,
+    "total_candidate_count": 12,
+    "coverage_summary": "Compact public evidence retained the dominant cluster and source diversity needed for matching.",
+    "concentration_flags": [],
+    "sampling_notes": []
+  }
+}

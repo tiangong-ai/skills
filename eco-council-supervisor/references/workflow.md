@@ -32,7 +32,8 @@ The supervisor keeps a strict split:
 - `awaiting-source-selection`
   - Prefer `run-agent-step --role sociologist` and `run-agent-step --role environmentalist`.
   - Manual fallback: send the two expert source-selection outbox prompts, then use `import-source-selection`.
-  - `task.inputs.required_sources` should be rare and moderator-authored; experts otherwise decide whether any source is needed.
+  - Moderator tasks should describe evidence needs through `task.inputs.evidence_requirements`; they should not prescribe concrete source skills.
+  - Expert source-selection must use packet `governance` plus `family_memory` to choose `family_plans`, `layer_plans`, and exact `selected_sources`.
 - `ready-to-prepare-round`
   - Run `continue-run`.
 - `ready-to-execute-fetch-plan`

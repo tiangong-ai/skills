@@ -21,7 +21,8 @@
   "roles": {
     "sociologist": {
       "allowed_sources": [],
-      "required_sources": [],
+      "evidence_requirements": [],
+      "governed_families": [],
       "source_selection_path": "",
       "source_selection_status": "",
       "selected_sources": []
@@ -63,7 +64,9 @@ Some steps may also include:
 - `command` is the exact shell snippet the expert agent or local runner should execute.
 - `artifact_path` is the contract path that downstream normalization expects.
 - `input_snapshot` records the task list and source-selection files that `prepare-round` planned against; if they change, rerun `prepare-round`.
-- `roles.<role>.selected_sources` is the only set that may execute automatically, plus any explicit moderator-authored task-level `required_sources`.
+- `roles.<role>.evidence_requirements` records the moderator-side evidence gaps that motivated this role's selection work.
+- `roles.<role>.governed_families` records which family/layer policy surface applied to that role.
+- `roles.<role>.selected_sources` is the only set that may execute automatically.
 - `steps` may be an empty list when experts decided no source is needed for the round.
 - `depends_on` is used for chained steps such as:
   - `youtube-video-search` -> `youtube-comments-fetch` when both were explicitly selected

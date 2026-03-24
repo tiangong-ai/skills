@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/eco-council-data-contract/eco_council.schema.json",
   "title": "Eco Council Data Contract",
-  "description": "Shared schema definitions for eco-council missions, round tasks, expert source selections, claims, observations, evidence cards, expert reports, and moderator decisions.",
+  "description": "Shared schema definitions for eco-council missions, round tasks, source selections, override requests, submissions, readiness reports, matching authorization/results, evidence-library entries, evidence cards, expert reports, and moderator decisions.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -138,6 +138,45 @@
         "artifact_path"
       ]
     },
+    "compactAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "representative": {
+          "type": "boolean"
+        },
+        "retained_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "concentration_flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "sampling_notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "required": [
+        "representative",
+        "retained_count",
+        "total_candidate_count",
+        "coverage_summary",
+        "concentration_flags"
+      ]
+    },
     "recommendation": {
       "type": "object",
       "additionalProperties": false,
@@ -161,6 +200,77 @@
         "assigned_role",
         "objective",
         "reason"
+      ]
+    },
+    "overrideRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "request_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_role": {
+          "enum": [
+            "moderator",
+            "sociologist",
+            "environmentalist",
+            "historian"
+          ]
+        },
+        "request_origin_kind": {
+          "enum": [
+            "source-selection",
+            "data-readiness-report",
+            "expert-report",
+            "council-decision"
+          ]
+        },
+        "target_path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "current_value": {},
+        "requested_value": {},
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "anchor_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "run_id",
+        "round_id",
+        "agent_role",
+        "request_origin_kind",
+        "target_path",
+        "requested_value",
+        "summary",
+        "reason",
+        "evidence_refs",
+        "anchor_refs"
       ]
     },
     "sourceDecision": {
@@ -232,7 +342,15 @@
               "round-task",
               "source-selection",
               "claim",
+              "claim-submission",
               "observation",
+              "observation-submission",
+              "data-readiness-report",
+              "matching-authorization",
+              "matching-result",
+              "evidence-adjudication",
+              "isolated-entry",
+              "remand-entry",
               "evidence-card",
               "expert-report",
               "council-decision"
@@ -312,6 +430,18 @@
           "items": {
             "$ref": "#/$defs/sourceDecision"
           }
+        },
+        "override_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/overrideRequest"
+          }
+        },
+        "family_plans": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       },
       "required": [
@@ -325,7 +455,9 @@
         "task_ids",
         "allowed_sources",
         "selected_sources",
-        "source_decisions"
+        "source_decisions",
+        "override_requests",
+        "family_plans"
       ]
     },
     "mission": {
@@ -342,6 +474,9 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "objective": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "policy_profile": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "window": {
@@ -371,37 +506,19 @@
             "max_tasks_per_round": {
               "type": "integer",
               "minimum": 1
-            }
-          },
-          "required": [
-            "max_rounds",
-            "max_claims_per_round",
-            "max_tasks_per_round"
-          ]
-        },
-        "source_policy": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "sociologist": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/nonEmptyString"
-              }
             },
-            "environmentalist": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/nonEmptyString"
-              }
+            "claim_target_per_round": {
+              "type": "integer",
+              "minimum": 1
             },
-            "historian": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/nonEmptyString"
-              }
+            "claim_hard_cap_per_round": {
+              "type": "integer",
+              "minimum": 1
             }
           }
+        },
+        "source_governance": {
+          "type": "object"
         }
       },
       "required": [
@@ -409,9 +526,9 @@
         "run_id",
         "topic",
         "objective",
+        "policy_profile",
         "window",
-        "region",
-        "constraints"
+        "region"
       ]
     },
     "claim": {
@@ -728,6 +845,615 @@
         "confidence"
       ]
     },
+    "claimSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_role": {
+          "enum": [
+            "moderator",
+            "sociologist",
+            "environmentalist",
+            "historian"
+          ]
+        },
+        "claim_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "claim_type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "statement": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "meaning": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "needs_physical_validation": {
+          "type": "boolean"
+        },
+        "worth_storing": {
+          "type": "boolean"
+        },
+        "source_signal_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_window": {
+          "$ref": "#/$defs/timeWindow"
+        },
+        "place_scope": {
+          "$ref": "#/$defs/regionScope"
+        },
+        "public_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactRef"
+          }
+        },
+        "compact_audit": {
+          "$ref": "#/$defs/compactAudit"
+        }
+      },
+      "required": [
+        "schema_version",
+        "submission_id",
+        "run_id",
+        "round_id",
+        "agent_role",
+        "claim_id",
+        "claim_type",
+        "summary",
+        "statement",
+        "meaning",
+        "priority",
+        "needs_physical_validation",
+        "worth_storing",
+        "time_window",
+        "place_scope",
+        "public_refs"
+      ]
+    },
+    "observationSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_role": {
+          "enum": [
+            "moderator",
+            "sociologist",
+            "environmentalist",
+            "historian"
+          ]
+        },
+        "observation_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source_skill": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "metric": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "aggregation": {
+          "enum": [
+            "point",
+            "window-summary",
+            "series-summary",
+            "event-count"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "meaning": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "worth_storing": {
+          "type": "boolean"
+        },
+        "time_window": {
+          "$ref": "#/$defs/timeWindow"
+        },
+        "place_scope": {
+          "$ref": "#/$defs/regionScope"
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "provenance": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "compact_audit": {
+          "$ref": "#/$defs/compactAudit"
+        }
+      },
+      "required": [
+        "schema_version",
+        "submission_id",
+        "run_id",
+        "round_id",
+        "agent_role",
+        "observation_id",
+        "source_skill",
+        "metric",
+        "aggregation",
+        "unit",
+        "meaning",
+        "worth_storing",
+        "time_window",
+        "place_scope",
+        "quality_flags",
+        "provenance"
+      ]
+    },
+    "dataReadinessReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "readiness_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_role": {
+          "enum": [
+            "moderator",
+            "sociologist",
+            "environmentalist",
+            "historian"
+          ]
+        },
+        "readiness_status": {
+          "enum": [
+            "ready",
+            "needs-more-data",
+            "blocked"
+          ]
+        },
+        "sufficient_for_matching": {
+          "type": "boolean"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "recommended_next_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recommendation"
+          }
+        },
+        "override_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/overrideRequest"
+          }
+        },
+        "referenced_submission_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "compact_audit": {
+          "$ref": "#/$defs/compactAudit"
+        }
+      },
+      "required": [
+        "schema_version",
+        "readiness_id",
+        "run_id",
+        "round_id",
+        "agent_role",
+        "readiness_status",
+        "sufficient_for_matching",
+        "summary",
+        "findings",
+        "open_questions",
+        "recommended_next_actions",
+        "override_requests",
+        "referenced_submission_ids"
+      ]
+    },
+    "matchingAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "authorization_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "agent_role": {
+          "enum": [
+            "moderator"
+          ]
+        },
+        "authorization_status": {
+          "enum": [
+            "authorized",
+            "deferred",
+            "not-authorized"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "moderator_override": {
+          "type": "boolean"
+        },
+        "allow_isolated_evidence": {
+          "type": "boolean"
+        },
+        "referenced_readiness_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "claim_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "observation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "recommended_next_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recommendation"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "authorization_id",
+        "run_id",
+        "round_id",
+        "agent_role",
+        "authorization_status",
+        "summary",
+        "rationale",
+        "moderator_override",
+        "allow_isolated_evidence",
+        "referenced_readiness_ids",
+        "claim_ids",
+        "observation_ids",
+        "open_questions",
+        "recommended_next_actions"
+      ]
+    },
+    "matchingResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "result_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "authorization_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "result_status": {
+          "enum": [
+            "matched",
+            "partial",
+            "unmatched"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "matched_pairs": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "matched_claim_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "matched_observation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "unmatched_claim_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "unmatched_observation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "result_id",
+        "run_id",
+        "round_id",
+        "authorization_id",
+        "result_status",
+        "summary",
+        "matched_pairs",
+        "matched_claim_ids",
+        "matched_observation_ids",
+        "unmatched_claim_ids",
+        "unmatched_observation_ids"
+      ]
+    },
+    "evidenceAdjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "adjudication_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "authorization_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "matching_result_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "adjudication_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "remand-required"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "matching_reasonable": {
+          "type": "boolean"
+        },
+        "needs_additional_data": {
+          "type": "boolean"
+        },
+        "card_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "isolated_entry_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "remand_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "recommended_next_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recommendation"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "adjudication_id",
+        "run_id",
+        "round_id",
+        "authorization_id",
+        "matching_result_id",
+        "adjudication_status",
+        "summary",
+        "matching_reasonable",
+        "needs_additional_data",
+        "card_ids",
+        "isolated_entry_ids",
+        "remand_ids",
+        "open_questions",
+        "recommended_next_actions"
+      ]
+    },
+    "isolatedEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "isolated_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "entity_kind": {
+          "enum": [
+            "claim",
+            "observation"
+          ]
+        },
+        "entity_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "schema_version",
+        "isolated_id",
+        "run_id",
+        "round_id",
+        "entity_kind",
+        "entity_id",
+        "summary",
+        "reason"
+      ]
+    },
+    "remandEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "$ref": "#/$defs/schemaVersion"
+        },
+        "remand_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "entity_kind": {
+          "enum": [
+            "claim",
+            "observation"
+          ]
+        },
+        "entity_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "remand_id",
+        "run_id",
+        "round_id",
+        "entity_kind",
+        "entity_id",
+        "summary",
+        "reasons"
+      ]
+    },
     "expertReport": {
       "type": "object",
       "additionalProperties": false,
@@ -779,6 +1505,12 @@
           "items": {
             "$ref": "#/$defs/recommendation"
           }
+        },
+        "override_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/overrideRequest"
+          }
         }
       },
       "required": [
@@ -791,7 +1523,8 @@
         "summary",
         "findings",
         "open_questions",
-        "recommended_next_actions"
+        "recommended_next_actions",
+        "override_requests"
       ]
     },
     "councilDecision": {
@@ -847,6 +1580,12 @@
             "$ref": "#/$defs/roundTask"
           }
         },
+        "override_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/overrideRequest"
+          }
+        },
         "final_brief": {
           "type": "string"
         }
@@ -862,7 +1601,8 @@
         "decision_summary",
         "next_round_required",
         "missing_evidence_types",
-        "next_round_tasks"
+        "next_round_tasks",
+        "override_requests"
       ]
     }
   }

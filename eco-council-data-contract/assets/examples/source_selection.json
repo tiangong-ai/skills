@@ -26,6 +26,132 @@
     "gdelt-gkg-fetch",
     "bluesky-cascade-fetch"
   ],
+  "override_requests": [],
+  "family_plans": [
+    {
+      "family_id": "gdelt",
+      "selected": true,
+      "reason": "Use GDELT article recon plus one anchored bulk supplement for broader public-claim coverage.",
+      "evidence_requirement_ids": [
+        "req-sociologist-round-001-public-claims"
+      ],
+      "layer_plans": [
+        {
+          "layer_id": "recon",
+          "tier": "l1",
+          "selected": true,
+          "reason": "Article discovery is the primary entry layer for mission-window public-claim recon.",
+          "source_skills": [
+            "gdelt-doc-search"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "entry-layer"
+        },
+        {
+          "layer_id": "bulk",
+          "tier": "l2",
+          "selected": true,
+          "reason": "Add one approved bulk table after recon to enrich themes and locations without over-expanding cost.",
+          "source_skills": [
+            "gdelt-gkg-fetch"
+          ],
+          "anchor_mode": "same_round_l1",
+          "anchor_refs": [
+            "round-001:family:gdelt:recon"
+          ],
+          "authorization_basis": "upstream-approval"
+        }
+      ]
+    },
+    {
+      "family_id": "youtube",
+      "selected": false,
+      "reason": "Video and comment collection are unnecessary for this narrow smoke round.",
+      "evidence_requirement_ids": [],
+      "layer_plans": [
+        {
+          "layer_id": "videos",
+          "tier": "l1",
+          "selected": false,
+          "reason": "Video discovery is not necessary for the current public-claim coverage target.",
+          "source_skills": [
+            "youtube-video-search"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "entry-layer"
+        },
+        {
+          "layer_id": "comments",
+          "tier": "l2",
+          "selected": false,
+          "reason": "Comment collection is unnecessary without a video-driven evidence gap.",
+          "source_skills": [
+            "youtube-comments-fetch"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "not-authorized"
+        }
+      ]
+    },
+    {
+      "family_id": "rulemaking",
+      "selected": false,
+      "reason": "Official rulemaking records are not necessary for this public-discussion-heavy smoke round.",
+      "evidence_requirement_ids": [],
+      "layer_plans": [
+        {
+          "layer_id": "documents",
+          "tier": "l1",
+          "selected": false,
+          "reason": "Federal Register discovery is out of scope for this round.",
+          "source_skills": [
+            "federal-register-doc-fetch"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "entry-layer"
+        },
+        {
+          "layer_id": "comments",
+          "tier": "l2",
+          "selected": false,
+          "reason": "Regulations.gov comments remain out of scope because no rulemaking document anchor is needed.",
+          "source_skills": [
+            "regulationsgov-comments-fetch",
+            "regulationsgov-comment-detail-fetch"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "not-authorized"
+        }
+      ]
+    },
+    {
+      "family_id": "bluesky",
+      "selected": true,
+      "reason": "Fast-moving public discussion is relevant for diffusion and recency.",
+      "evidence_requirement_ids": [
+        "req-sociologist-round-001-public-claims"
+      ],
+      "layer_plans": [
+        {
+          "layer_id": "posts",
+          "tier": "l1",
+          "selected": true,
+          "reason": "One fast-moving discussion source broadens channel diversity without escalating cost.",
+          "source_skills": [
+            "bluesky-cascade-fetch"
+          ],
+          "anchor_mode": "none",
+          "anchor_refs": [],
+          "authorization_basis": "entry-layer"
+        }
+      ]
+    }
+  ],
   "source_decisions": [
     {
       "source_skill": "gdelt-doc-search",

@@ -1,6 +1,6 @@
 ---
 name: eco-council-orchestrate
-description: Orchestrate eco-council multi-round runs around moderator task review, audited expert source selection, expert raw-data collection handoffs, deterministic normalization/reporting, and next-round scaffolding. Use when an OpenClaw-based eco-council needs one control-plane skill to bootstrap a run from mission JSON, prepare fetch plans only from explicitly selected sources, run the shared data plane after raw artifacts land, or advance from one moderator decision to the next round safely.
+description: Orchestrate eco-council multi-round runs around moderator task review, audited expert source selection, expert raw-data collection handoffs, deterministic normalization, data-readiness, moderator matching authorization, post-match reporting, and next-round scaffolding. Use when an OpenClaw-based eco-council needs one control-plane skill to bootstrap a run from mission JSON, prepare fetch plans only from explicitly selected sources, run the shared data plane after raw artifacts land, gate matching behind explicit moderator authorization, or advance from one moderator decision to the next round safely.
 ---
 
 # Eco Council Orchestrate
@@ -11,7 +11,7 @@ description: Orchestrate eco-council multi-round runs around moderator task revi
   - moderator reviews or revises `tasks.json`
   - sociologist and environmentalist first write audited `source_selection.json`
   - sociologist and environmentalist then fetch raw artifacts
-  - deterministic scripts normalize, link, aggregate, and seed report drafts
+  - deterministic scripts normalize, aggregate readiness packets, gate matching, link evidence, and seed later drafts
 - Bridge these phases with stable files:
   - round task review prompt
   - role-specific fetch prompts
@@ -35,8 +35,8 @@ python3 scripts/eco_council_orchestrate.py bootstrap-run \
 3. Let each expert write one canonical source-selection object before any fetch stage:
 - `round_001/sociologist/source_selection.json`
 - `round_001/environmentalist/source_selection.json`
-- `task.inputs.preferred_sources` are hints only
-- `task.inputs.required_sources` are the only task-level force override
+- moderator tasks should express `task.inputs.evidence_requirements`, not concrete source skills
+- source-selection must choose exact source families, layers, and source skills under mission `source_governance`
 
 4. Prepare one round after source selection. This writes:
 - `round_001/moderator/derived/fetch_plan.json`
@@ -55,7 +55,7 @@ python3 scripts/eco_council_orchestrate.py prepare-round \
   - Raw GDELT table steps keep one canonical manifest JSON at the contract `raw/` path and store downloaded ZIP sidecars under a sibling raw subdirectory.
   - Environment fetches can be zero-step, or can include `airnow-hourly-obs-fetch`, `usgs-water-iv-fetch`, `open-meteo-*`, `nasa-firms-fire-fetch`, and `openaq-data-fetch`, depending on audited source selection and mission source policy.
 
-6. Run the deterministic data plane after raw artifacts exist.
+6. Run the deterministic data plane after raw artifacts exist. This stage ends at expert data-readiness packets and does not run matching yet.
 
 ```bash
 python3 scripts/eco_council_orchestrate.py run-data-plane \
@@ -64,9 +64,20 @@ python3 scripts/eco_council_orchestrate.py run-data-plane \
   --pretty
 ```
 
-7. Let OpenClaw experts revise the generated report drafts and let the moderator revise the decision draft through the prompt files produced by `$eco-council-reporting`.
+7. Let OpenClaw experts revise the generated data-readiness drafts, then let the moderator revise the matching-authorization draft.
 
-8. Promote approved drafts, then scaffold the next round if the moderator decision says `next_round_required=true`.
+8. Run matching/adjudication only after canonical `matching_authorization.json` says `authorization_status=authorized`.
+
+```bash
+python3 scripts/eco_council_orchestrate.py run-matching-adjudication \
+  --run-dir ./runs/20260321-chiangmai-smoke \
+  --round-id round-001 \
+  --pretty
+```
+
+9. Let OpenClaw experts revise the post-match report drafts and let the moderator revise the decision draft through the prompt files produced by `$eco-council-reporting`.
+
+10. Promote approved drafts, then scaffold the next round if the moderator decision says `next_round_required=true`.
 
 ```bash
 python3 ../eco-council-reporting/scripts/eco_council_reporting.py promote-all \
@@ -89,6 +100,7 @@ python3 scripts/eco_council_orchestrate.py advance-round \
 - Do not let this skill replace expert judgment inside OpenClaw.
 - Do not let this skill auto-run every allowed source. `prepare-round` should emit zero fetch steps when experts selected none.
 - Do not let expert agents exchange raw payloads directly; normalize first.
+- Do not let matching/adjudication run before moderator matching authorization exists and is explicitly authorized.
 
 ## Special Capability
 

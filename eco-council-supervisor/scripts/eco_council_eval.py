@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ REPORTING_SCRIPT = REPO_DIR / "eco-council-reporting" / "scripts" / "eco_council
 CONTRACT_SCRIPT = REPO_DIR / "eco-council-data-contract" / "scripts" / "eco_council_contract.py"
 DEFAULT_SUITE_DIR = SKILL_DIR / "assets" / "eval-cases"
 DEFAULT_OUTPUT_ROOT = Path("/tmp/eco-council-eval-runs")
+SCHEMA_VERSION = "1.0.0"
 
 
 def pretty_json(data: Any, *, pretty: bool) -> str:
@@ -54,6 +57,55 @@ def source_selection_path(run_dir: Path, round_id: str, role: str) -> Path:
     return round_dir(run_dir, round_id) / role / "source_selection.json"
 
 
+def claim_submissions_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "claim_submissions.json"
+
+
+def observation_submissions_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "observation_submissions.json"
+
+
+def data_readiness_report_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "data_readiness_report.json"
+
+
+def data_readiness_draft_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "derived" / f"{role}_data_readiness_draft.json"
+
+
+def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
+
+
+def matching_authorization_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_authorization_draft.json"
+
+
+def claims_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "claims_active.json"
+
+
+def observations_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "observations_active.json"
+
+
+def cards_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "cards_active.json"
+
+
+def isolated_active_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "isolated_active.json"
+
+
+def remands_open_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "shared" / "evidence-library" / "remands_open.json"
+
+
+def promote_json_artifact(*, source_path: Path, target_path: Path, pretty: bool) -> None:
+    payload = read_json(source_path)
+    write_json(target_path, payload, pretty=pretty)
+
+
 def unique_strings(values: list[str]) -> list[str]:
     output: list[str] = []
     seen: set[str] = set()
@@ -67,6 +119,52 @@ def unique_strings(values: list[str]) -> list[str]:
         seen.add(key)
         output.append(text)
     return output
+
+
+def load_python_module(module_path: Path, module_name: str) -> Any | None:
+    if not module_path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+CONTRACT_MODULE = load_python_module(CONTRACT_SCRIPT, "eco_council_contract_eval")
+NORMALIZE_MODULE = load_python_module(NORMALIZE_SCRIPT, "eco_council_normalize_eval")
+if CONTRACT_MODULE is not None and hasattr(CONTRACT_MODULE, "SCHEMA_VERSION"):
+    SCHEMA_VERSION = CONTRACT_MODULE.SCHEMA_VERSION
+
+
+def seed_library_state_from_case(case: dict[str, Any], run_dir: Path, round_id: str, *, pretty: bool) -> None:
+    if NORMALIZE_MODULE is None:
+        raise ValueError("Unable to load eco-council-normalize module for eval replay.")
+    claims = [item for item in case.get("claims", []) if isinstance(item, dict)]
+    observations = [item for item in case.get("observations", []) if isinstance(item, dict)]
+    evidence_cards = [item for item in case.get("evidence_cards", []) if isinstance(item, dict)]
+    isolated_entries = [item for item in case.get("isolated_entries", []) if isinstance(item, dict)]
+    remand_entries = [item for item in case.get("remand_entries", []) if isinstance(item, dict)]
+
+    claim_submissions = [NORMALIZE_MODULE.claim_submission_from_claim(item) for item in claims]
+    observation_submissions = [NORMALIZE_MODULE.observation_submission_from_observation(item) for item in observations]
+
+    write_json(claim_submissions_path(run_dir, round_id), claim_submissions, pretty=pretty)
+    write_json(observation_submissions_path(run_dir, round_id), observation_submissions, pretty=pretty)
+    write_json(claims_active_path(run_dir, round_id), claim_submissions, pretty=pretty)
+    write_json(observations_active_path(run_dir, round_id), observation_submissions, pretty=pretty)
+    write_json(cards_active_path(run_dir, round_id), evidence_cards, pretty=pretty)
+    write_json(isolated_active_path(run_dir, round_id), isolated_entries, pretty=pretty)
+    write_json(remands_open_path(run_dir, round_id), remand_entries, pretty=pretty)
+
+
+def contract_call(name: str, *args: Any) -> Any | None:
+    if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, name):
+        return None
+    helper = getattr(CONTRACT_MODULE, name)
+    return helper(*args)
 
 
 def extract_json_suffix(text: str) -> Any:
@@ -111,49 +209,207 @@ def load_case(case_path: Path) -> dict[str, Any]:
     return payload
 
 
-def source_policy_for_role(mission: dict[str, Any], role: str) -> list[str]:
-    policy = mission.get("source_policy")
-    if not isinstance(policy, dict):
-        return []
-    selected = policy.get(role)
-    if not isinstance(selected, list):
-        return []
-    return unique_strings([maybe_text(item) for item in selected if maybe_text(item)])
+def allowed_sources_for_role(mission: dict[str, Any], role: str) -> list[str]:
+    values = contract_call("allowed_sources_for_role", mission, role)
+    if isinstance(values, list):
+        return unique_strings([maybe_text(item) for item in values if maybe_text(item)])
+    return []
 
 
 def tasks_for_role(tasks: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
     return [task for task in tasks if maybe_text(task.get("assigned_role")) == role]
 
 
-def task_selected_sources(tasks: list[dict[str, Any]]) -> list[str]:
-    preferred: list[str] = []
+def role_source_governance(mission: dict[str, Any], role: str) -> list[dict[str, Any]]:
+    families = contract_call("source_governance_for_role", mission, role)
+    if isinstance(families, list):
+        return [item for item in families if isinstance(item, dict)]
+    return []
+
+
+def approved_layer_lookup(mission: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    value = contract_call("approved_layer_lookup", mission)
+    if not isinstance(value, dict):
+        return {}
+    output: dict[tuple[str, str], dict[str, Any]] = {}
+    for key, item in value.items():
+        if not isinstance(key, tuple) or len(key) != 2 or not isinstance(item, dict):
+            continue
+        family_id = maybe_text(key[0])
+        layer_id = maybe_text(key[1])
+        if family_id and layer_id:
+            output[(family_id, layer_id)] = item
+    return output
+
+
+def task_requirement_ids(tasks: list[dict[str, Any]]) -> list[str]:
+    requirement_ids: list[str] = []
     for task in tasks:
         inputs = task.get("inputs") if isinstance(task.get("inputs"), dict) else {}
-        values = inputs.get("preferred_sources")
-        if isinstance(values, list):
-            preferred.extend(maybe_text(item) for item in values if maybe_text(item))
-    return unique_strings(preferred)
+        values = inputs.get("evidence_requirements")
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if isinstance(item, dict) and maybe_text(item.get("requirement_id")):
+                requirement_ids.append(maybe_text(item.get("requirement_id")))
+    return unique_strings(requirement_ids)
+
+
+def status_selected_sources(statuses: list[dict[str, Any]], role: str) -> list[str]:
+    selected: list[str] = []
+    for status in statuses:
+        if not isinstance(status, dict):
+            continue
+        if maybe_text(status.get("assigned_role")) != role:
+            continue
+        if maybe_text(status.get("status")) != "completed":
+            continue
+        source_skill = maybe_text(status.get("source_skill")) or maybe_text(status.get("source"))
+        if source_skill:
+            selected.append(source_skill)
+    return unique_strings(selected)
+
+
+def selected_sources_by_family(family: dict[str, Any], selected_lookup: set[str]) -> dict[str, list[str]]:
+    by_layer: dict[str, list[str]] = {}
+    layers = family.get("layers")
+    if not isinstance(layers, list):
+        return by_layer
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        layer_id = maybe_text(layer.get("layer_id"))
+        if not layer_id:
+            continue
+        skills = layer.get("skills")
+        if not isinstance(skills, list):
+            continue
+        chosen = [maybe_text(skill) for skill in skills if maybe_text(skill) and maybe_text(skill).casefold() in selected_lookup]
+        by_layer[layer_id] = unique_strings(chosen)
+    return by_layer
+
+
+def build_family_plans(
+    *,
+    mission: dict[str, Any],
+    role: str,
+    round_id: str,
+    selected_sources: list[str],
+    evidence_requirement_ids: list[str],
+) -> list[dict[str, Any]]:
+    selected_lookup = {source.casefold() for source in selected_sources}
+    families = role_source_governance(mission, role)
+    approved_lookup = approved_layer_lookup(mission)
+    plans: list[dict[str, Any]] = []
+
+    for family in families:
+        family_id = maybe_text(family.get("family_id"))
+        if not family_id:
+            continue
+        by_layer = selected_sources_by_family(family, selected_lookup)
+        selected_l1_layers = [
+            maybe_text(layer.get("layer_id"))
+            for layer in family.get("layers", [])
+            if isinstance(layer, dict)
+            and maybe_text(layer.get("tier")) == "l1"
+            and by_layer.get(maybe_text(layer.get("layer_id")))
+        ]
+        selected_l1_layers = [item for item in selected_l1_layers if item]
+
+        layer_plans: list[dict[str, Any]] = []
+        family_selected = False
+        for layer in family.get("layers", []):
+            if not isinstance(layer, dict):
+                continue
+            layer_id = maybe_text(layer.get("layer_id"))
+            tier = maybe_text(layer.get("tier"))
+            layer_skills = by_layer.get(layer_id, [])
+            selected = bool(layer_skills)
+            if selected:
+                family_selected = True
+            anchor_mode = "none"
+            anchor_refs: list[str] = []
+            if selected and tier == "l2":
+                if selected_l1_layers:
+                    anchor_mode = "same_round_l1"
+                    anchor_refs = [f"{round_id}:family:{family_id}:{selected_l1_layers[0]}"]
+                else:
+                    anchor_mode = "upstream_approval"
+                    anchor_refs = [f"mission:approval:{family_id}:{layer_id}"]
+            if selected:
+                if tier == "l1":
+                    authorization_basis = "entry-layer"
+                else:
+                    approval = approved_lookup.get((family_id, layer_id), {})
+                    if approval:
+                        authorization_basis = "upstream-approval"
+                    elif layer.get("auto_selectable") is True:
+                        authorization_basis = "policy-auto"
+                    else:
+                        authorization_basis = "not-authorized"
+            else:
+                authorization_basis = "entry-layer" if tier == "l1" else "not-authorized"
+            reason = (
+                f"Replay fixture fetched {', '.join(layer_skills)}."
+                if selected
+                else f"Replay fixture did not fetch any {family_id}.{layer_id} skills."
+            )
+            layer_plans.append(
+                {
+                    "layer_id": layer_id,
+                    "tier": tier,
+                    "selected": selected,
+                    "reason": reason,
+                    "source_skills": layer_skills if selected else [maybe_text(skill) for skill in layer.get("skills", []) if maybe_text(skill)],
+                    "anchor_mode": anchor_mode,
+                    "anchor_refs": anchor_refs,
+                    "authorization_basis": authorization_basis,
+                }
+            )
+        plans.append(
+            {
+                "family_id": family_id,
+                "selected": family_selected,
+                "reason": (
+                    f"Replay fixture selected {family_id} sources from completed fetch statuses."
+                    if family_selected
+                    else f"Replay fixture did not use the {family_id} family."
+                ),
+                "evidence_requirement_ids": evidence_requirement_ids if family_selected else [],
+                "layer_plans": layer_plans,
+            }
+        )
+    return plans
 
 
 def default_source_selection(
     *,
     mission: dict[str, Any],
     tasks: list[dict[str, Any]],
+    fetch_statuses: list[dict[str, Any]],
     round_id: str,
     role: str,
 ) -> dict[str, Any]:
     run_id = maybe_text(mission.get("run_id"))
     role_tasks = tasks_for_role(tasks, role)
-    allowed_sources = source_policy_for_role(mission, role)
-    selected_lookup = {source.casefold() for source in task_selected_sources(role_tasks)}
+    allowed_sources = allowed_sources_for_role(mission, role)
+    selected_lookup = {source.casefold() for source in status_selected_sources(fetch_statuses, role)}
     selected_sources = [source for source in allowed_sources if source.casefold() in selected_lookup]
+    evidence_requirement_ids = task_requirement_ids(role_tasks)
+    family_plans = build_family_plans(
+        mission=mission,
+        role=role,
+        round_id=round_id,
+        selected_sources=selected_sources,
+        evidence_requirement_ids=evidence_requirement_ids,
+    )
     summary = (
         f"Replay fixture selected {', '.join(selected_sources)}."
         if selected_sources
         else "Replay fixture intentionally selected no sources for this role."
     )
     return {
-        "schema_version": "1.0.0",
+        "schema_version": SCHEMA_VERSION,
         "selection_id": f"source-selection-{role}-{round_id}",
         "run_id": run_id,
         "round_id": round_id,
@@ -163,14 +419,16 @@ def default_source_selection(
         "task_ids": [maybe_text(task.get("task_id")) for task in role_tasks if maybe_text(task.get("task_id"))],
         "allowed_sources": allowed_sources,
         "selected_sources": selected_sources,
+        "override_requests": [],
+        "family_plans": family_plans,
         "source_decisions": [
             {
                 "source_skill": source,
                 "selected": source.casefold() in selected_lookup,
                 "reason": (
-                    "Selected by replay fixture task preferred_sources."
+                    "Selected by replay fixture completed fetch statuses."
                     if source.casefold() in selected_lookup
-                    else "Not selected by replay fixture task preferred_sources."
+                    else "Not selected by replay fixture completed fetch statuses."
                 ),
             }
             for source in allowed_sources
@@ -193,6 +451,7 @@ def materialize_case(case: dict[str, Any], run_dir: Path, *, pretty: bool) -> st
     write_json(base_round / "shared" / "claims.json", case.get("claims", []), pretty=pretty)
     write_json(base_round / "shared" / "observations.json", case.get("observations", []), pretty=pretty)
     write_json(base_round / "shared" / "evidence_cards.json", case.get("evidence_cards", []), pretty=pretty)
+    fetch_statuses = case.get("fetch_statuses") if isinstance(case.get("fetch_statuses"), list) else []
     source_selections = case.get("source_selections") if isinstance(case.get("source_selections"), dict) else {}
     task_dicts = [item for item in tasks if isinstance(item, dict)]
     for role in ("sociologist", "environmentalist"):
@@ -201,13 +460,14 @@ def materialize_case(case: dict[str, Any], run_dir: Path, *, pretty: bool) -> st
             payload = default_source_selection(
                 mission=mission,
                 tasks=task_dicts,
+                fetch_statuses=[item for item in fetch_statuses if isinstance(item, dict)],
                 round_id=round_id,
                 role=role,
             )
         write_json(source_selection_path(run_dir, round_id, role), payload, pretty=pretty)
     write_json(
         base_round / "moderator" / "derived" / "fetch_execution.json",
-        {"statuses": case.get("fetch_statuses", [])},
+        {"statuses": fetch_statuses},
         pretty=pretty,
     )
     return round_id
@@ -334,12 +594,65 @@ def run_case(case_path: Path, *, output_root: Path, pretty: bool, overwrite: boo
 
     round_id = materialize_case(case, run_dir_path, pretty=pretty)
     run_json_command(["python3", str(NORMALIZE_SCRIPT), "init-run", "--run-dir", str(run_dir_path), "--round-id", round_id, "--pretty"])
+    seed_library_state_from_case(case, run_dir_path, round_id, pretty=pretty)
     run_json_command(["python3", str(NORMALIZE_SCRIPT), "build-round-context", "--run-dir", str(run_dir_path), "--round-id", round_id, "--pretty"])
     run_json_command(
         [
             "python3",
             str(REPORTING_SCRIPT),
-            "build-all",
+            "build-data-readiness-packets",
+            "--run-dir",
+            str(run_dir_path),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    for role in ("sociologist", "environmentalist"):
+        promote_json_artifact(
+            source_path=data_readiness_draft_path(run_dir_path, round_id, role),
+            target_path=data_readiness_report_path(run_dir_path, round_id, role),
+            pretty=pretty,
+        )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-matching-authorization-packet",
+            "--run-dir",
+            str(run_dir_path),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    promote_json_artifact(
+        source_path=matching_authorization_draft_path(run_dir_path, round_id),
+        target_path=matching_authorization_path(run_dir_path, round_id),
+        pretty=pretty,
+    )
+    if (
+        read_json(cards_active_path(run_dir_path, round_id))
+        or read_json(isolated_active_path(run_dir_path, round_id))
+        or read_json(remands_open_path(run_dir_path, round_id))
+    ):
+        run_json_command(
+            [
+                "python3",
+                str(REPORTING_SCRIPT),
+                "build-report-packets",
+                "--run-dir",
+                str(run_dir_path),
+                "--round-id",
+                round_id,
+                "--pretty",
+            ]
+        )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-decision-packet",
             "--run-dir",
             str(run_dir_path),
             "--round-id",

@@ -1,12 +1,13 @@
 {
   "case_id": "policy_preferred_continue",
-  "description": "Policy-reaction evidence remains unresolved, so the next-round task should suggest Regulations.gov sources without auto-forcing required_sources.",
+  "description": "Policy-reaction evidence remains unresolved, so the next-round task should carry a rulemaking evidence requirement without emitting old preferred_sources or required_sources hints.",
   "round_id": "round-001",
   "mission": {
     "schema_version": "1.0.0",
     "run_id": "eval-policy-preferred-continue",
     "topic": "Policy comment follow-up",
-    "objective": "Check that reporting keeps policy-comment follow-up in preferred_sources only.",
+    "objective": "Check that reporting keeps policy-comment follow-up in evidence_requirements only.",
+    "policy_profile": "standard",
     "window": {
       "start_utc": "2026-04-15T00:00:00Z",
       "end_utc": "2026-04-16T23:59:59Z"
@@ -27,16 +28,86 @@
       "max_claims_per_round": 3,
       "max_tasks_per_round": 4
     },
-    "source_policy": {
-      "sociologist": [
-        "gdelt-doc-search",
-        "regulationsgov-comments-fetch",
-        "regulationsgov-comment-detail-fetch"
-      ],
-      "environmentalist": [
-        "open-meteo-historical-fetch"
-      ],
-      "historian": []
+    "source_governance": {
+      "approval_authority": "policy",
+      "allow_cross_round_anchors": true,
+      "max_selected_sources_per_role": 3,
+      "max_active_families_per_role": 3,
+      "max_non_entry_layers_per_role": 1,
+      "approved_layers": [],
+      "families": [
+        {
+          "family_id": "gdelt",
+          "role": "sociologist",
+          "label": "GDELT public coverage",
+          "layers": [
+            {
+              "layer_id": "recon",
+              "tier": "l1",
+              "skills": [
+                "gdelt-doc-search"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "rulemaking",
+          "role": "sociologist",
+          "label": "Federal rulemaking record",
+          "layers": [
+            {
+              "layer_id": "documents",
+              "tier": "l1",
+              "skills": [
+                "federal-register-doc-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            },
+            {
+              "layer_id": "comments",
+              "tier": "l2",
+              "skills": [
+                "regulationsgov-comments-fetch",
+                "regulationsgov-comment-detail-fetch"
+              ],
+              "requires_anchor": true,
+              "auto_selectable": false,
+              "allowed_anchor_modes": [
+                "same_round_l1",
+                "prior_round_l1",
+                "evidence_gap",
+                "upstream_approval"
+              ],
+              "max_selected_skills": 2
+            }
+          ]
+        },
+        {
+          "family_id": "openmeteo-historical",
+          "role": "environmentalist",
+          "label": "Open-Meteo historical weather",
+          "layers": [
+            {
+              "layer_id": "meteorology",
+              "tier": "l1",
+              "skills": [
+                "open-meteo-historical-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        }
+      ]
     }
   },
   "tasks": [
@@ -64,8 +135,15 @@
           "start_utc": "2026-04-15T00:00:00Z",
           "end_utc": "2026-04-16T23:59:59Z"
         },
-        "preferred_sources": [
-          "gdelt-doc-search"
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-sociologist-round-001-policy-public",
+            "requirement_type": "public-claim-discovery",
+            "summary": "Collect attributable public policy-reaction claims for the mission window.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Replay fixture."
@@ -142,10 +220,8 @@
     "decision": {
       "moderator_status": "continue",
       "next_round_required": true,
-      "evidence_sufficiency": "insufficient",
-      "missing_evidence_types": [
-        "policy-comment-coverage"
-      ]
+      "evidence_sufficiency": "sufficient",
+      "missing_evidence_types": []
     },
     "next_round_tasks": [
       {
@@ -153,13 +229,15 @@
         "objective": "Collect more policy-comment or docket evidence for the same environmental issue.",
         "expected_output_kinds": [
           "source-selection",
-          "claim",
+          "claim-submission",
+          "data-readiness-report",
           "expert-report"
         ],
         "inputs": {
-          "preferred_sources": [
-            "regulationsgov-comments-fetch",
-            "regulationsgov-comment-detail-fetch"
+          "evidence_requirements": [
+            {
+              "requirement_type": "policy-comment-coverage"
+            }
           ]
         }
       }
@@ -171,12 +249,13 @@
           "objective": "Collect more policy-comment or docket evidence for the same environmental issue."
         },
         "fields": [
+          "inputs.preferred_sources",
           "inputs.required_sources"
         ]
       }
     ],
     "context": {
-      "context_layer": "compact-v1",
+      "context_layer": "evidence-library-v1",
       "max_observations": 4,
       "max_claims": 4
     }

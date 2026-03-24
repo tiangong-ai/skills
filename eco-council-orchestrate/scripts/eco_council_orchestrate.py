@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -88,6 +89,54 @@ GDELT_EXPECTED_COLUMNS = {
     "gdelt-mentions-fetch": "16",
     "gdelt-gkg-fetch": "27",
 }
+GENERIC_QUERY_NOISE_TOKENS = {
+    "analysis",
+    "assess",
+    "assessment",
+    "attention",
+    "attributable",
+    "cause",
+    "claims",
+    "collect",
+    "concern",
+    "cross",
+    "determine",
+    "dialogue",
+    "discourse",
+    "discovery",
+    "event",
+    "evidence",
+    "framing",
+    "health",
+    "high",
+    "identify",
+    "linked",
+    "local",
+    "mission",
+    "patterns",
+    "plausibly",
+    "public",
+    "regional",
+    "risk",
+    "risks",
+    "salience",
+    "same",
+    "severity",
+    "signals",
+    "social",
+    "spike",
+    "three",
+    "through",
+    "triggered",
+    "unusual",
+    "value",
+    "validation",
+    "verification",
+    "versus",
+    "whether",
+    "window",
+}
+QUERY_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
 GDELT_MAX_FILE_INPUT_KEYS = {
     "gdelt-events-fetch": "gdelt_events_max_files",
     "gdelt-mentions-fetch": "gdelt_mentions_max_files",
@@ -143,6 +192,22 @@ DEFAULT_OPEN_METEO_HIST_HOURLY_VARS = [
     "wind_speed_10m",
     "soil_moisture_0_to_7cm",
 ]
+
+
+def load_contract_module() -> Any | None:
+    if not CONTRACT_SCRIPT.exists():
+        return None
+    module_name = "eco_council_contract_orchestrate"
+    spec = importlib.util.spec_from_file_location(module_name, CONTRACT_SCRIPT)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+CONTRACT_MODULE = load_contract_module()
 DEFAULT_OPEN_METEO_HIST_DAILY_VARS = [
     "precipitation_sum",
     "et0_fao_evapotranspiration",
@@ -247,6 +312,13 @@ def unique_strings(values: list[str]) -> list[str]:
         seen.add(key)
         output.append(text)
     return output
+
+
+def contract_call(name: str, *args: Any, **kwargs: Any) -> Any | None:
+    if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, name):
+        return None
+    helper = getattr(CONTRACT_MODULE, name)
+    return helper(*args, **kwargs)
 
 
 def ensure_object(value: Any, label: str) -> dict[str, Any]:
@@ -369,6 +441,18 @@ def fetch_plan_path(run_dir: Path, round_id: str) -> Path:
 
 def fetch_execution_path(run_dir: Path, round_id: str) -> Path:
     return moderator_derived_dir(run_dir, round_id) / "fetch_execution.json"
+
+
+def data_plane_execution_path(run_dir: Path, round_id: str) -> Path:
+    return moderator_derived_dir(run_dir, round_id) / "data_plane_execution.json"
+
+
+def matching_execution_path(run_dir: Path, round_id: str) -> Path:
+    return moderator_derived_dir(run_dir, round_id) / "matching_adjudication_execution.json"
+
+
+def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
 
 
 def round_manifest_path(run_dir: Path, round_id: str) -> Path:
@@ -553,14 +637,26 @@ def mission_region(mission: dict[str, Any]) -> dict[str, Any]:
     return ensure_object(mission.get("region"), "mission.region")
 
 
-def source_policy_for_role(mission: dict[str, Any], role: str) -> list[str]:
-    policy = mission.get("source_policy")
-    if not isinstance(policy, dict):
-        return []
-    selected = policy.get(role)
-    if not isinstance(selected, list):
-        return []
-    return [maybe_text(item) for item in selected if maybe_text(item)]
+def allowed_sources_for_role(mission: dict[str, Any], role: str) -> list[str]:
+    values = contract_call("allowed_sources_for_role", mission, role)
+    if isinstance(values, list):
+        return [maybe_text(item) for item in values if maybe_text(item)]
+    return []
+
+
+def effective_constraints(mission: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("effective_constraints", mission)
+    if isinstance(value, dict):
+        return value
+    constraints = mission.get("constraints")
+    return constraints if isinstance(constraints, dict) else {}
+
+
+def policy_profile_summary(mission: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("policy_profile_summary", mission)
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 def task_inputs(task: dict[str, Any]) -> dict[str, Any]:
@@ -602,8 +698,46 @@ def task_objective_text(tasks: list[dict[str, Any]]) -> str:
 def role_supported_sources(role: str) -> list[str]:
     return list(SUPPORTED_SOURCES_BY_ROLE.get(role, []))
 
-def role_required_sources(tasks: list[dict[str, Any]]) -> list[str]:
-    return merged_task_string_list(tasks, "required_sources")
+
+def role_source_governance(mission: dict[str, Any], role: str) -> dict[str, Any]:
+    governance = contract_call("source_governance", mission)
+    if not isinstance(governance, dict):
+        return {}
+    family_lookup = contract_call("source_family_lookup", mission, role=role)
+    if isinstance(family_lookup, dict):
+        role_families = list(family_lookup.values())
+    else:
+        role_families = [
+            family
+            for family in governance.get("families", [])
+            if isinstance(family, dict) and maybe_text(family.get("role")) == role
+        ]
+    family_ids = {maybe_text(family.get("family_id")) for family in role_families if maybe_text(family.get("family_id"))}
+    approvals = [
+        item
+        for item in governance.get("approved_layers", [])
+        if isinstance(item, dict) and maybe_text(item.get("family_id")) in family_ids
+    ]
+    return {
+        "approval_authority": maybe_text(governance.get("approval_authority")),
+        "allow_cross_round_anchors": bool(governance.get("allow_cross_round_anchors")),
+        "max_selected_sources_per_role": governance.get("max_selected_sources_per_role"),
+        "max_active_families_per_role": governance.get("max_active_families_per_role"),
+        "max_non_entry_layers_per_role": governance.get("max_non_entry_layers_per_role"),
+        "approved_layers": approvals,
+        "families": role_families,
+    }
+
+
+def override_requests_path(run_dir: Path, round_id: str, role: str) -> Path:
+    return round_dir(run_dir, round_id) / role / "override_requests.json"
+
+
+def load_override_requests(run_dir: Path, round_id: str, role: str) -> list[dict[str, Any]]:
+    payload = load_json_if_exists(override_requests_path(run_dir, round_id, role))
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
 
 
 def source_selection_selected_sources(source_selection: dict[str, Any] | None) -> list[str]:
@@ -611,10 +745,156 @@ def source_selection_selected_sources(source_selection: dict[str, Any] | None) -
         return []
     if maybe_text(source_selection.get("status")) == "pending":
         return []
+    family_selected = contract_call("selected_sources_from_family_plans", source_selection)
+    if isinstance(family_selected, list) and family_selected:
+        return unique_strings([maybe_text(item) for item in family_selected if maybe_text(item)])
     value = source_selection.get("selected_sources")
     if not isinstance(value, list):
         return []
     return unique_strings([maybe_text(item) for item in value if maybe_text(item)])
+
+
+def ensure_source_selection_respects_governance(
+    *,
+    mission: dict[str, Any],
+    role: str,
+    source_selection: dict[str, Any] | None,
+) -> None:
+    if not isinstance(source_selection, dict):
+        return
+    governance = role_source_governance(mission, role)
+    families = governance.get("families") if isinstance(governance.get("families"), list) else []
+    if not families:
+        return
+    family_plans = source_selection.get("family_plans")
+    if not isinstance(family_plans, list):
+        raise ValueError(f"Role {role} source_selection must include family_plans.")
+
+    family_lookup: dict[str, dict[str, Any]] = {}
+    for family in families:
+        if not isinstance(family, dict):
+            continue
+        family_id = maybe_text(family.get("family_id"))
+        if family_id:
+            family_lookup[family_id] = family
+    payload_lookup: dict[str, dict[str, Any]] = {}
+    for family_plan in family_plans:
+        if not isinstance(family_plan, dict):
+            continue
+        family_id = maybe_text(family_plan.get("family_id"))
+        if family_id:
+            payload_lookup[family_id] = family_plan
+    if set(payload_lookup) != set(family_lookup):
+        missing = sorted(set(family_lookup) - set(payload_lookup))
+        extra = sorted(set(payload_lookup) - set(family_lookup))
+        raise ValueError(f"Role {role} family_plans must match governed families. Missing={missing}, extra={extra}")
+
+    selected_sources = source_selection_selected_sources(source_selection)
+    max_sources = governance.get("max_selected_sources_per_role")
+    if isinstance(max_sources, int) and max_sources > 0 and len(selected_sources) > max_sources:
+        raise ValueError(
+            f"Role {role} selected {len(selected_sources)} sources but governance max_selected_sources_per_role={max_sources}."
+        )
+
+    approved_lookup = {
+        (maybe_text(item.get("family_id")), maybe_text(item.get("layer_id"))): item
+        for item in governance.get("approved_layers", [])
+        if isinstance(item, dict) and maybe_text(item.get("family_id")) and maybe_text(item.get("layer_id"))
+    }
+    allow_cross_round_anchors = bool(governance.get("allow_cross_round_anchors"))
+    selected_family_count = 0
+    selected_non_entry_layers = 0
+
+    for family_id, family_plan in payload_lookup.items():
+        family_policy = family_lookup.get(family_id)
+        if not isinstance(family_policy, dict):
+            continue
+        if family_plan.get("selected") is True:
+            selected_family_count += 1
+        layer_lookup = {
+            maybe_text(layer.get("layer_id")): layer
+            for layer in family_policy.get("layers", [])
+            if isinstance(layer, dict) and maybe_text(layer.get("layer_id"))
+        }
+        layer_plans = family_plan.get("layer_plans")
+        if not isinstance(layer_plans, list):
+            raise ValueError(f"Role {role} family {family_id} must include layer_plans.")
+        payload_layer_ids = {
+            maybe_text(layer_plan.get("layer_id"))
+            for layer_plan in layer_plans
+            if isinstance(layer_plan, dict) and maybe_text(layer_plan.get("layer_id"))
+        }
+        if set(layer_lookup) != payload_layer_ids:
+            missing = sorted(set(layer_lookup) - payload_layer_ids)
+            extra = sorted(payload_layer_ids - set(layer_lookup))
+            raise ValueError(f"Role {role} family {family_id} layer_plans mismatch. Missing={missing}, extra={extra}")
+
+        for layer_plan in layer_plans:
+            if not isinstance(layer_plan, dict):
+                continue
+            layer_id = maybe_text(layer_plan.get("layer_id"))
+            layer_policy = layer_lookup.get(layer_id)
+            if not isinstance(layer_policy, dict):
+                continue
+            if maybe_text(layer_plan.get("tier")) != maybe_text(layer_policy.get("tier")):
+                raise ValueError(f"Role {role} family {family_id} layer {layer_id} tier mismatch.")
+            selected = layer_plan.get("selected") is True
+            selected_skill_set = {
+                maybe_text(skill)
+                for skill in layer_plan.get("source_skills", [])
+                if maybe_text(skill)
+            }
+            allowed_skill_set = {
+                maybe_text(skill)
+                for skill in layer_policy.get("skills", [])
+                if maybe_text(skill)
+            }
+            if not selected_skill_set <= allowed_skill_set:
+                invalid = sorted(selected_skill_set - allowed_skill_set)
+                raise ValueError(f"Role {role} family {family_id} layer {layer_id} selected invalid skills {invalid}.")
+            max_selected_skills = layer_policy.get("max_selected_skills")
+            if isinstance(max_selected_skills, int) and max_selected_skills > 0 and len(selected_skill_set) > max_selected_skills:
+                raise ValueError(
+                    f"Role {role} family {family_id} layer {layer_id} selected {len(selected_skill_set)} skills but max_selected_skills={max_selected_skills}."
+                )
+            if not selected:
+                continue
+
+            tier = maybe_text(layer_policy.get("tier"))
+            authorization_basis = maybe_text(layer_plan.get("authorization_basis"))
+            anchor_mode = maybe_text(layer_plan.get("anchor_mode"))
+            anchor_refs = layer_plan.get("anchor_refs") if isinstance(layer_plan.get("anchor_refs"), list) else []
+            if tier == "l2":
+                selected_non_entry_layers += 1
+            if layer_policy.get("requires_anchor") is True and (anchor_mode == "none" or not anchor_refs):
+                raise ValueError(f"Role {role} family {family_id} layer {layer_id} requires anchors.")
+            if anchor_mode == "prior_round_l1" and not allow_cross_round_anchors:
+                raise ValueError(f"Role {role} family {family_id} layer {layer_id} cannot use prior_round_l1 anchors.")
+            approval_key = (family_id, layer_id)
+            if tier == "l1":
+                if authorization_basis != "entry-layer":
+                    raise ValueError(f"Role {role} family {family_id} layer {layer_id} must use entry-layer authorization.")
+            else:
+                auto_selectable = layer_policy.get("auto_selectable") is True
+                if approval_key in approved_lookup:
+                    if authorization_basis != "upstream-approval":
+                        raise ValueError(f"Role {role} family {family_id} layer {layer_id} must use upstream-approval.")
+                elif auto_selectable:
+                    if authorization_basis != "policy-auto":
+                        raise ValueError(f"Role {role} family {family_id} layer {layer_id} must use policy-auto authorization.")
+                else:
+                    raise ValueError(f"Role {role} family {family_id} layer {layer_id} is not approved by governance.")
+
+    max_families = governance.get("max_active_families_per_role")
+    if isinstance(max_families, int) and max_families > 0 and selected_family_count > max_families:
+        raise ValueError(
+            f"Role {role} selected {selected_family_count} families but governance max_active_families_per_role={max_families}."
+        )
+    max_l2_layers = governance.get("max_non_entry_layers_per_role")
+    if isinstance(max_l2_layers, int) and max_l2_layers >= 0 and selected_non_entry_layers > max_l2_layers:
+        raise ValueError(
+            f"Role {role} selected {selected_non_entry_layers} non-entry layers but governance max_non_entry_layers_per_role={max_l2_layers}."
+        )
 
 
 def role_selected_sources(
@@ -624,20 +904,21 @@ def role_selected_sources(
     role: str,
     source_selection: dict[str, Any] | None,
 ) -> list[str]:
-    allowed = source_policy_for_role(mission, role)
+    ensure_source_selection_respects_governance(mission=mission, role=role, source_selection=source_selection)
+    allowed = allowed_sources_for_role(mission, role)
     supported = role_supported_sources(role)
     allowed_lookup = {source.casefold() for source in allowed}
     supported_lookup = {source.casefold() for source in supported}
     selected_lookup = {
         source.casefold()
-        for source in source_selection_selected_sources(source_selection) + role_required_sources(tasks)
+        for source in source_selection_selected_sources(source_selection)
         if source.casefold() in supported_lookup
     }
     if not selected_lookup:
         return []
     if not allowed_lookup:
         selected = sorted(selected_lookup)
-        raise ValueError(f"Role {role} selected sources {selected}, but mission.source_policy.{role} is empty.")
+        raise ValueError(f"Role {role} selected sources {selected}, but mission.source_governance exposes no allowed sources.")
     invalid = [source for source in supported if source.casefold() in selected_lookup and source.casefold() not in allowed_lookup]
     if invalid:
         raise ValueError(f"Role {role} selected unsupported or disallowed sources: {invalid}.")
@@ -648,17 +929,34 @@ def build_plain_query(*, mission: dict[str, Any], tasks: list[dict[str, Any]]) -
     query_hints = merged_task_string_list(tasks, "query_hints")
     if query_hints:
         return query_hints[0]
-    topic = maybe_text(mission.get("topic"))
-    region_label = maybe_text(mission_region(mission).get("label"))
-    objective = truncate_text(task_objective_text(tasks) or maybe_text(mission.get("objective")), 96)
-    parts = unique_strings([topic, region_label, objective])
-    return " ".join(parts[:2]) if parts else "environment public signals"
+    region_label = primary_region_search_label(mission=mission)
+    topic_tokens = compact_query_terms(mission=mission, tasks=tasks, max_terms=4)
+    parts = []
+    if topic_tokens:
+        parts.append(" ".join(topic_tokens))
+    if region_label:
+        parts.append(region_label)
+    return " ".join(parts) if parts else "environment public signals"
 
 
 def build_gdelt_query(*, mission: dict[str, Any], tasks: list[dict[str, Any]]) -> str:
     query_hints = merged_task_string_list(tasks, "query_hints")
     if not query_hints:
-        query_hints = [build_plain_query(mission=mission, tasks=tasks)]
+        region_label = primary_region_search_label(mission=mission)
+        topic_terms = compact_query_terms(mission=mission, tasks=tasks, max_terms=4)
+        clauses: list[str] = []
+        if region_label:
+            clauses.append(gdelt_literal_term(region_label))
+        if topic_terms:
+            if len(topic_terms) == 1:
+                clauses.append(topic_terms[0])
+            else:
+                clauses.append("(" + " OR ".join(topic_terms) + ")")
+        if not clauses:
+            return '"environment"'
+        if len(clauses) == 1:
+            return clauses[0]
+        return " AND ".join(clauses)
     terms: list[str] = []
     for hint in query_hints[:3]:
         clean = normalize_space(hint)
@@ -667,7 +965,7 @@ def build_gdelt_query(*, mission: dict[str, Any], tasks: list[dict[str, Any]]) -
         if any(token in clean for token in ('"', "(", ")", " OR ", " AND ", "sourcecountry:")):
             terms.append(clean)
         elif " " in clean:
-            terms.append(f'"{clean}"')
+            terms.append(gdelt_literal_term(clean))
         else:
             terms.append(clean)
     if not terms:
@@ -675,6 +973,92 @@ def build_gdelt_query(*, mission: dict[str, Any], tasks: list[dict[str, Any]]) -
     if len(terms) == 1:
         return terms[0]
     return "(" + " OR ".join(terms) + ")"
+
+
+def primary_region_search_label(*, mission: dict[str, Any]) -> str:
+    region_label = maybe_text(mission_region(mission).get("label"))
+    if not region_label:
+        return ""
+    primary = normalize_space(region_label.split(",")[0])
+    return primary or region_label
+
+
+def iter_evidence_requirement_summaries(tasks: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for task in tasks:
+        inputs = task_inputs(task)
+        evidence_requirements = inputs.get("evidence_requirements")
+        if not isinstance(evidence_requirements, list):
+            continue
+        for item in evidence_requirements:
+            if isinstance(item, dict) and maybe_text(item.get("summary")):
+                summaries.append(maybe_text(item.get("summary")))
+    return summaries
+
+
+def extract_query_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for raw in QUERY_TOKEN_PATTERN.findall(text):
+        token = raw.strip()
+        if not token:
+            continue
+        key = token.casefold()
+        if key in GENERIC_QUERY_NOISE_TOKENS:
+            continue
+        if len(token) < 3 and not token.isupper():
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        tokens.append(token)
+    return tokens
+
+
+def compact_query_terms(*, mission: dict[str, Any], tasks: list[dict[str, Any]], max_terms: int) -> list[str]:
+    region_tokens = {
+        token.casefold()
+        for token in extract_query_tokens(primary_region_search_label(mission=mission))
+    }
+    primary_text = maybe_text(mission.get("topic"))
+    fallback_texts = [
+        task_objective_text(tasks),
+        maybe_text(mission.get("objective")),
+        *iter_evidence_requirement_summaries(tasks),
+    ]
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def collect(text: str) -> bool:
+        nonlocal terms
+        for token in extract_query_tokens(text):
+            key = token.casefold()
+            if key in region_tokens or key in seen:
+                continue
+            seen.add(key)
+            terms.append(token)
+            if len(terms) >= max_terms:
+                return True
+        return False
+
+    if primary_text:
+        collect(primary_text)
+    if terms:
+        return terms
+    for text in fallback_texts:
+        if collect(text):
+            break
+    return terms
+
+
+def gdelt_literal_term(text: str) -> str:
+    clean = normalize_space(text)
+    if not clean:
+        return clean
+    word_count = len(QUERY_TOKEN_PATTERN.findall(clean))
+    if " " in clean and word_count <= 4 and len(clean) <= 48:
+        return f'"{clean}"'
+    return clean
 
 
 def geometry_from_task_or_mission(*, mission: dict[str, Any], tasks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1485,6 +1869,8 @@ def build_fetch_plan(
         "plan_kind": "eco-council-fetch-plan",
         "schema_version": "1.0.0",
         "generated_at_utc": utc_now_iso(),
+        "policy_profile": policy_profile_summary(mission),
+        "effective_constraints": effective_constraints(mission),
         "input_snapshot": fetch_plan_input_snapshot(
             run_dir=run_dir,
             round_id=round_id,
@@ -1503,8 +1889,23 @@ def build_fetch_plan(
             "sociologist": {
                 "task_ids": step_task_ids(sociologist_tasks),
                 "objective": task_objective_text(sociologist_tasks),
-                "allowed_sources": source_policy_for_role(mission, "sociologist"),
-                "required_sources": role_required_sources(sociologist_tasks),
+                "allowed_sources": allowed_sources_for_role(mission, "sociologist"),
+                "evidence_requirements": [
+                    requirement
+                    for task in sociologist_tasks
+                    for requirement in (
+                        task_inputs(task).get("evidence_requirements")
+                        if isinstance(task_inputs(task).get("evidence_requirements"), list)
+                        else []
+                    )
+                    if isinstance(requirement, dict)
+                ],
+                "governed_families": [
+                    maybe_text(family.get("family_id"))
+                    for family in role_source_governance(mission, "sociologist").get("families", [])
+                    if isinstance(family, dict) and maybe_text(family.get("family_id"))
+                ],
+                "override_requests": load_override_requests(run_dir, round_id, "sociologist"),
                 "source_selection_path": str(source_selection_path(run_dir, round_id, "sociologist")),
                 "source_selection_status": maybe_text((sociologist_selection or {}).get("status")),
                 "selected_sources": role_selected_sources(
@@ -1517,8 +1918,23 @@ def build_fetch_plan(
             "environmentalist": {
                 "task_ids": step_task_ids(environmentalist_tasks),
                 "objective": task_objective_text(environmentalist_tasks),
-                "allowed_sources": source_policy_for_role(mission, "environmentalist"),
-                "required_sources": role_required_sources(environmentalist_tasks),
+                "allowed_sources": allowed_sources_for_role(mission, "environmentalist"),
+                "evidence_requirements": [
+                    requirement
+                    for task in environmentalist_tasks
+                    for requirement in (
+                        task_inputs(task).get("evidence_requirements")
+                        if isinstance(task_inputs(task).get("evidence_requirements"), list)
+                        else []
+                    )
+                    if isinstance(requirement, dict)
+                ],
+                "governed_families": [
+                    maybe_text(family.get("family_id"))
+                    for family in role_source_governance(mission, "environmentalist").get("families", [])
+                    if isinstance(family, dict) and maybe_text(family.get("family_id"))
+                ],
+                "override_requests": load_override_requests(run_dir, round_id, "environmentalist"),
                 "source_selection_path": str(source_selection_path(run_dir, round_id, "environmentalist")),
                 "source_selection_status": maybe_text((environmentalist_selection or {}).get("status")),
                 "selected_sources": role_selected_sources(
@@ -1557,8 +1973,8 @@ def render_moderator_task_review_prompt(*, run_dir: Path, round_id: str) -> Path
         "1. Keep the file as a JSON list of valid round-task objects.",
         "2. Keep run_id and round_id unchanged.",
         "3. Use only moderator-owned task assignment; do not write claims, observations, evidence cards, or reports here.",
-        "4. Keep task.inputs.preferred_sources as guidance only; they do not auto-run any source.",
-        "5. Use task.inputs.required_sources only for moderator-authored overrides or rare system-level hard constraints.",
+        "4. Use task.inputs.evidence_requirements to describe evidence gaps, claim focus, and priority instead of prescribing concrete source skills.",
+        "5. Leave exact source-family, layer, and source-skill choice to the expert source-selection stage under mission governance.",
         "6. Keep objectives concrete enough that sociologist and environmentalist can choose and fetch raw artifacts deterministically.",
         "",
         "After editing, validate with:",
@@ -1688,6 +2104,18 @@ def write_round_manifest(
             "--pretty",
         ]
     )
+    matching_command = shell_join(
+        [
+            "python3",
+            str(SCRIPT_DIR / "eco_council_orchestrate.py"),
+            "run-matching-adjudication",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
     execute_fetch_command = shell_join(
         [
             "python3",
@@ -1713,6 +2141,7 @@ def write_round_manifest(
         "next_commands": {
             "prepare_round": prepare_command,
             "run_data_plane": data_plane_command,
+            "run_matching_adjudication": matching_command,
             "execute_fetch_plan": execute_fetch_command,
         },
     }
@@ -1796,8 +2225,6 @@ def run_json_cli(argv: list[str], *, cwd: Path | None = None, env: dict[str, str
 
 
 def materialize_json_artifact_from_stdout(*, artifact_path: Path, stdout_path: Path) -> bool:
-    if artifact_path.exists():
-        return True
     if not stdout_path.exists():
         return False
     try:
@@ -1807,6 +2234,116 @@ def materialize_json_artifact_from_stdout(*, artifact_path: Path, stdout_path: P
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(artifact_path, payload, pretty=True)
     return artifact_path.exists()
+
+
+def validate_json_artifact_if_applicable(artifact_path: Path | None) -> str:
+    if artifact_path is None:
+        return ""
+    if artifact_path.suffix.casefold() != ".json":
+        return ""
+    try:
+        read_json(artifact_path)
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+    return ""
+
+
+def build_fetch_execution_payload(
+    *,
+    run_dir: Path,
+    round_id: str,
+    plan_path: Path,
+    plan_sha256: str,
+    step_count: int,
+    statuses: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "updated_at_utc": utc_now_iso(),
+        "run_dir": str(run_dir),
+        "round_id": round_id,
+        "plan_path": str(plan_path),
+        "plan_sha256": plan_sha256,
+        "step_count": step_count,
+        "completed_count": sum(1 for status in statuses if status.get("status") == "completed"),
+        "failed_count": sum(1 for status in statuses if status.get("status") == "failed"),
+        "statuses": statuses,
+    }
+
+
+def write_fetch_execution_snapshot(
+    *,
+    execution_path: Path,
+    run_dir: Path,
+    round_id: str,
+    plan_path: Path,
+    plan_sha256: str,
+    step_count: int,
+    statuses: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload = build_fetch_execution_payload(
+        run_dir=run_dir,
+        round_id=round_id,
+        plan_path=plan_path,
+        plan_sha256=plan_sha256,
+        step_count=step_count,
+        statuses=statuses,
+    )
+    write_json(execution_path, payload, pretty=True)
+    payload["execution_path"] = str(execution_path)
+    return payload
+
+
+def build_data_plane_execution_payload(
+    *,
+    run_dir: Path,
+    round_id: str,
+    public_inputs: list[str],
+    environment_inputs: list[str],
+    step_count: int,
+    statuses: list[dict[str, Any]],
+    reporting_handoff_path: Path | None,
+) -> dict[str, Any]:
+    payload = {
+        "updated_at_utc": utc_now_iso(),
+        "run_dir": str(run_dir),
+        "round_id": round_id,
+        "step_count": step_count,
+        "completed_count": sum(1 for status in statuses if status.get("status") == "completed"),
+        "failed_count": sum(1 for status in statuses if status.get("status") == "failed"),
+        "public_inputs": public_inputs,
+        "environment_inputs": environment_inputs,
+        "statuses": statuses,
+        "reporting_handoff_path": str(reporting_handoff_path) if reporting_handoff_path is not None else "",
+    }
+    first_failed = next((status for status in statuses if status.get("status") == "failed"), None)
+    if isinstance(first_failed, dict):
+        payload["failed_step_id"] = maybe_text(first_failed.get("step_id"))
+    return payload
+
+
+def write_data_plane_execution_snapshot(
+    *,
+    execution_path: Path,
+    run_dir: Path,
+    round_id: str,
+    public_inputs: list[str],
+    environment_inputs: list[str],
+    step_count: int,
+    statuses: list[dict[str, Any]],
+    reporting_handoff_path: Path | None,
+) -> dict[str, Any]:
+    payload = build_data_plane_execution_payload(
+        run_dir=run_dir,
+        round_id=round_id,
+        public_inputs=public_inputs,
+        environment_inputs=environment_inputs,
+        step_count=step_count,
+        statuses=statuses,
+        reporting_handoff_path=reporting_handoff_path,
+    )
+    write_json(execution_path, payload, pretty=True)
+    payload["execution_path"] = str(execution_path)
+    return payload
 
 
 def ensure_ok_envelope(payload: dict[str, Any], label: str) -> dict[str, Any]:
@@ -1871,9 +2408,24 @@ def execute_fetch_plan(
         plan = ensure_object(read_json(plan_path), f"{plan_path}")
         ensure_fetch_plan_inputs_match(run_dir=run_path, round_id=current_round_id, plan=plan)
         steps = ensure_object_list(plan.get("steps"), f"{plan_path}.steps")
+        execution_path = fetch_execution_path(run_path, current_round_id)
+        plan_sha256 = file_sha256(plan_path)
 
         statuses: list[dict[str, Any]] = []
         succeeded: set[str] = set()
+
+        def snapshot() -> dict[str, Any]:
+            return write_fetch_execution_snapshot(
+                execution_path=execution_path,
+                run_dir=run_path,
+                round_id=current_round_id,
+                plan_path=plan_path,
+                plan_sha256=plan_sha256,
+                step_count=len(steps),
+                statuses=statuses,
+            )
+
+        snapshot()
         for step in steps:
             step_id = maybe_text(step.get("step_id"))
             role = maybe_text(step.get("role"))
@@ -1898,11 +2450,16 @@ def execute_fetch_plan(
                     "reason": f"Unmet dependencies: {depends_on}",
                 }
                 statuses.append(status)
+                snapshot()
                 if not continue_on_error:
                     break
                 continue
 
-            if skip_existing and artifact_path is not None and artifact_path.exists():
+            existing_artifact_invalid = ""
+            if artifact_path is not None and artifact_path.exists():
+                existing_artifact_invalid = validate_json_artifact_if_applicable(artifact_path)
+
+            if skip_existing and artifact_path is not None and artifact_path.exists() and not existing_artifact_invalid:
                 statuses.append(
                     {
                         "step_id": step_id,
@@ -1914,6 +2471,7 @@ def execute_fetch_plan(
                     }
                 )
                 succeeded.add(step_id)
+                snapshot()
                 continue
 
             stdout_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1941,7 +2499,8 @@ def execute_fetch_plan(
                     stdout_path=stdout_path,
                 )
             artifact_missing = artifact_path is not None and not artifact_path.exists()
-            if returncode == 0 and not artifact_missing:
+            artifact_invalid_json = validate_json_artifact_if_applicable(artifact_path) if returncode == 0 and not artifact_missing else ""
+            if returncode == 0 and not artifact_missing and not artifact_invalid_json:
                 succeeded.add(step_id)
                 completed_status = {
                     "step_id": step_id,
@@ -1956,6 +2515,7 @@ def execute_fetch_plan(
                 if artifact_materialized:
                     completed_status["artifact_materialized"] = True
                 statuses.append(completed_status)
+                snapshot()
                 continue
 
             if artifact_missing:
@@ -1973,6 +2533,28 @@ def execute_fetch_plan(
                 if artifact_path is not None:
                     failure_status["artifact_path"] = str(artifact_path)
                 statuses.append(failure_status)
+                snapshot()
+                if not continue_on_error:
+                    break
+                continue
+
+            if artifact_invalid_json:
+                failure_status = {
+                    "step_id": step_id,
+                    "role": role,
+                    "source_skill": maybe_text(step.get("source_skill")),
+                    "status": "failed",
+                    "reason": "artifact_invalid_json",
+                    "stdout_path": str(stdout_path),
+                    "stderr_path": str(stderr_path),
+                    "returncode": returncode,
+                    "timed_out": timed_out,
+                    "artifact_validation_error": artifact_invalid_json,
+                }
+                if artifact_path is not None:
+                    failure_status["artifact_path"] = str(artifact_path)
+                statuses.append(failure_status)
+                snapshot()
                 if not continue_on_error:
                     break
                 continue
@@ -1990,23 +2572,11 @@ def execute_fetch_plan(
             if artifact_path is not None:
                 failure_status["artifact_path"] = str(artifact_path)
             statuses.append(failure_status)
+            snapshot()
             if not continue_on_error:
                 break
 
-        result = {
-            "run_dir": str(run_path),
-            "round_id": current_round_id,
-            "plan_path": str(plan_path),
-            "plan_sha256": file_sha256(plan_path),
-            "step_count": len(steps),
-            "completed_count": sum(1 for status in statuses if status.get("status") == "completed"),
-            "failed_count": sum(1 for status in statuses if status.get("status") == "failed"),
-            "statuses": statuses,
-        }
-        execution_path = moderator_derived_dir(run_path, current_round_id) / "fetch_execution.json"
-        write_json(execution_path, result, pretty=True)
-        result["execution_path"] = str(execution_path)
-        return result
+        return snapshot()
 
 
 def fetch_status_role(status: dict[str, Any]) -> str:
@@ -2062,6 +2632,9 @@ def discover_normalize_inputs(run_dir: Path, round_id: str, *, role: str, source
 
 def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
     base_round_dir = round_dir(run_dir, round_id)
+    def existing_path(path: Path) -> str:
+        return str(path) if path.exists() else ""
+
     promote_all_command = shell_join(
         [
             "python3",
@@ -2084,6 +2657,31 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
             "--pretty",
         ]
     )
+    build_decision_packet_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-decision-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--prefer-draft-reports",
+            "--pretty",
+        ]
+    )
+    run_matching_adjudication_command = shell_join(
+        [
+            "python3",
+            str(SCRIPT_DIR / "eco_council_orchestrate.py"),
+            "run-matching-adjudication",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
     advance_round_command = shell_join(
         [
             "python3",
@@ -2102,18 +2700,28 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
         "generated_at_utc": utc_now_iso(),
         "run_dir": str(run_dir),
         "round_id": round_id,
-        "expert_report_prompt_paths": {
-            "sociologist": str(base_round_dir / "sociologist" / "derived" / "openclaw_report_prompt.txt"),
-            "environmentalist": str(base_round_dir / "environmentalist" / "derived" / "openclaw_report_prompt.txt"),
+        "data_readiness_prompt_paths": {
+            "sociologist": existing_path(base_round_dir / "sociologist" / "derived" / "openclaw_data_readiness_prompt.txt"),
+            "environmentalist": existing_path(base_round_dir / "environmentalist" / "derived" / "openclaw_data_readiness_prompt.txt"),
         },
-        "decision_prompt_path": str(base_round_dir / "moderator" / "derived" / "openclaw_decision_prompt.txt"),
+        "matching_authorization_prompt_path": existing_path(base_round_dir / "moderator" / "derived" / "openclaw_matching_authorization_prompt.txt"),
+        "expert_report_prompt_paths": {
+            "sociologist": existing_path(base_round_dir / "sociologist" / "derived" / "openclaw_report_prompt.txt"),
+            "environmentalist": existing_path(base_round_dir / "environmentalist" / "derived" / "openclaw_report_prompt.txt"),
+        },
+        "decision_prompt_path": existing_path(base_round_dir / "moderator" / "derived" / "openclaw_decision_prompt.txt"),
         "draft_paths": {
-            "sociologist": str(base_round_dir / "sociologist" / "derived" / "sociologist_report_draft.json"),
-            "environmentalist": str(base_round_dir / "environmentalist" / "derived" / "environmentalist_report_draft.json"),
-            "moderator": str(base_round_dir / "moderator" / "derived" / "council_decision_draft.json"),
+            "sociologist_data_readiness": existing_path(base_round_dir / "sociologist" / "derived" / "sociologist_data_readiness_draft.json"),
+            "environmentalist_data_readiness": existing_path(base_round_dir / "environmentalist" / "derived" / "environmentalist_data_readiness_draft.json"),
+            "matching_authorization": existing_path(base_round_dir / "moderator" / "derived" / "matching_authorization_draft.json"),
+            "sociologist_report": existing_path(base_round_dir / "sociologist" / "derived" / "sociologist_report_draft.json"),
+            "environmentalist_report": existing_path(base_round_dir / "environmentalist" / "derived" / "environmentalist_report_draft.json"),
+            "moderator_decision": existing_path(base_round_dir / "moderator" / "derived" / "council_decision_draft.json"),
         },
         "promotion_commands": {
             "promote_all": promote_all_command,
+            "build_decision_packet": build_decision_packet_command,
+            "run_matching_adjudication": run_matching_adjudication_command,
             "validate_bundle": validate_bundle_command,
             "advance_round": advance_round_command,
         },
@@ -2123,21 +2731,127 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
     return output_path
 
 
+def run_data_plane_json_step(
+    *,
+    step_id: str,
+    label: str,
+    argv: list[str],
+    cwd: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    started_at_utc = utc_now_iso()
+    try:
+        result = ensure_ok_envelope(run_json_cli(argv, cwd=cwd), label)
+        return (
+            {
+                "step_id": step_id,
+                "label": label,
+                "status": "completed",
+                "command": shell_join(argv),
+                "started_at_utc": started_at_utc,
+                "finished_at_utc": utc_now_iso(),
+                "result": result,
+            },
+            result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            {
+                "step_id": step_id,
+                "label": label,
+                "status": "failed",
+                "command": shell_join(argv),
+                "started_at_utc": started_at_utc,
+                "finished_at_utc": utc_now_iso(),
+                "error": truncate_text(str(exc), 4000),
+            },
+            None,
+        )
+
+
+def run_data_plane_callable_step(
+    *,
+    step_id: str,
+    label: str,
+    callback: Any,
+) -> tuple[dict[str, Any], Any | None]:
+    started_at_utc = utc_now_iso()
+    try:
+        result = callback()
+        return (
+            {
+                "step_id": step_id,
+                "label": label,
+                "status": "completed",
+                "started_at_utc": started_at_utc,
+                "finished_at_utc": utc_now_iso(),
+                "result": result,
+            },
+            result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            {
+                "step_id": step_id,
+                "label": label,
+                "status": "failed",
+                "started_at_utc": started_at_utc,
+                "finished_at_utc": utc_now_iso(),
+                "error": truncate_text(str(exc), 4000),
+            },
+            None,
+        )
+
+
 def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
     run_path = run_dir.expanduser().resolve()
     current_round_id = resolve_round_id(run_path, round_id)
-
-    init_payload = ensure_ok_envelope(
-        run_json_cli(["python3", str(NORMALIZE_SCRIPT), "init-run", "--run-dir", str(run_path), "--round-id", current_round_id]),
-        "normalize init-run",
-    )
     public_inputs = discover_normalize_inputs(run_path, current_round_id, role="sociologist", sources=PUBLIC_SOURCES)
     environment_inputs = discover_normalize_inputs(run_path, current_round_id, role="environmentalist", sources=ENVIRONMENT_SOURCES)
+    execution_path = data_plane_execution_path(run_path, current_round_id)
+    reporting_handoff: Path | None = None
+    statuses: list[dict[str, Any]] = []
+    step_count = 8
+
+    def snapshot() -> dict[str, Any]:
+        return write_data_plane_execution_snapshot(
+            execution_path=execution_path,
+            run_dir=run_path,
+            round_id=current_round_id,
+            public_inputs=public_inputs,
+            environment_inputs=environment_inputs,
+            step_count=step_count,
+            statuses=statuses,
+            reporting_handoff_path=reporting_handoff,
+        )
+
+    snapshot()
+
+    def append_status_or_raise(status: dict[str, Any], result: Any | None) -> Any:
+        statuses.append(status)
+        snapshot()
+        if result is None:
+            raise RuntimeError(
+                f"Data plane failed at {maybe_text(status.get('step_id'))}. "
+                f"Inspect {execution_path}. {maybe_text(status.get('error'))}"
+            )
+        return result
+
+    init_status, init_payload = run_data_plane_json_step(
+        step_id="normalize-init-run",
+        label="normalize init-run",
+        argv=["python3", str(NORMALIZE_SCRIPT), "init-run", "--run-dir", str(run_path), "--round-id", current_round_id],
+    )
+    init_payload = append_status_or_raise(init_status, init_payload)
 
     normalize_public_cmd = ["python3", str(NORMALIZE_SCRIPT), "normalize-public", "--run-dir", str(run_path), "--round-id", current_round_id]
     for input_spec in public_inputs:
         normalize_public_cmd.extend(["--input", input_spec])
-    public_payload = ensure_ok_envelope(run_json_cli(normalize_public_cmd), "normalize public")
+    public_status, public_payload = run_data_plane_json_step(
+        step_id="normalize-public",
+        label="normalize public",
+        argv=normalize_public_cmd,
+    )
+    public_payload = append_status_or_raise(public_status, public_payload)
 
     normalize_environment_cmd = [
         "python3",
@@ -2150,50 +2864,66 @@ def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
     ]
     for input_spec in environment_inputs:
         normalize_environment_cmd.extend(["--input", input_spec])
-    environment_payload = ensure_ok_envelope(run_json_cli(normalize_environment_cmd), "normalize environment")
+    environment_status, environment_payload = run_data_plane_json_step(
+        step_id="normalize-environment",
+        label="normalize environment",
+        argv=normalize_environment_cmd,
+    )
+    environment_payload = append_status_or_raise(environment_status, environment_payload)
 
-    evidence_payload = ensure_ok_envelope(
-        run_json_cli(["python3", str(NORMALIZE_SCRIPT), "link-evidence", "--run-dir", str(run_path), "--round-id", current_round_id]),
-        "link evidence",
+    context_status, context_payload = run_data_plane_json_step(
+        step_id="build-round-context",
+        label="build round context",
+        argv=["python3", str(NORMALIZE_SCRIPT), "build-round-context", "--run-dir", str(run_path), "--round-id", current_round_id],
     )
-    context_payload = ensure_ok_envelope(
-        run_json_cli(["python3", str(NORMALIZE_SCRIPT), "build-round-context", "--run-dir", str(run_path), "--round-id", current_round_id]),
-        "build round context",
+    context_payload = append_status_or_raise(context_status, context_payload)
+
+    reporting_status, reporting_payload = run_data_plane_json_step(
+        step_id="reporting-build-data-readiness-packets",
+        label="reporting build data readiness packets",
+        argv=[
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-data-readiness-packets",
+            "--run-dir",
+            str(run_path),
+            "--round-id",
+            current_round_id,
+        ],
     )
-    reporting_payload = ensure_ok_envelope(
-        run_json_cli(
-            [
-                "python3",
-                str(REPORTING_SCRIPT),
-                "build-all",
-                "--run-dir",
-                str(run_path),
-                "--round-id",
-                current_round_id,
-                "--prefer-draft-reports",
-            ]
-        ),
-        "reporting build-all",
+    reporting_payload = append_status_or_raise(reporting_status, reporting_payload)
+
+    prompt_status, prompt_payload = run_data_plane_json_step(
+        step_id="render-openclaw-prompts",
+        label="render openclaw prompts",
+        argv=[
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_path),
+            "--round-id",
+            current_round_id,
+        ],
     )
-    prompt_payload = ensure_ok_envelope(
-        run_json_cli(
-            [
-                "python3",
-                str(REPORTING_SCRIPT),
-                "render-openclaw-prompts",
-                "--run-dir",
-                str(run_path),
-                "--round-id",
-                current_round_id,
-            ]
-        ),
-        "render openclaw prompts",
+    prompt_payload = append_status_or_raise(prompt_status, prompt_payload)
+
+    bundle_status, bundle_payload = run_data_plane_json_step(
+        step_id="validate-bundle",
+        label="validate bundle",
+        argv=["python3", str(CONTRACT_SCRIPT), "validate-bundle", "--run-dir", str(run_path)],
     )
-    bundle_payload = ensure_ok_envelope(
-        run_json_cli(["python3", str(CONTRACT_SCRIPT), "validate-bundle", "--run-dir", str(run_path)]),
-        "validate bundle",
+    bundle_payload = append_status_or_raise(bundle_status, bundle_payload)
+
+    handoff_status, handoff_payload = run_data_plane_callable_step(
+        step_id="build-reporting-handoff",
+        label="build reporting handoff",
+        callback=lambda: {"reporting_handoff_path": str(build_reporting_handoff(run_dir=run_path, round_id=current_round_id))},
     )
-    handoff_path = build_reporting_handoff(run_dir=run_path, round_id=current_round_id)
+    handoff_payload = append_status_or_raise(handoff_status, handoff_payload)
+    reporting_handoff = Path(maybe_text(handoff_payload.get("reporting_handoff_path"))).expanduser().resolve()
+    snapshot()
+
     return {
         "run_dir": str(run_path),
         "round_id": current_round_id,
@@ -2202,12 +2932,128 @@ def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
         "normalize_init": init_payload,
         "normalize_public": public_payload,
         "normalize_environment": environment_payload,
+        "build_context": context_payload,
+        "reporting": reporting_payload,
+        "prompt_render": prompt_payload,
+        "bundle_validation": bundle_payload,
+        "reporting_handoff_path": str(reporting_handoff),
+        "execution_path": str(execution_path),
+    }
+
+
+def run_matching_adjudication(*, run_dir: Path, round_id: str) -> dict[str, Any]:
+    run_path = run_dir.expanduser().resolve()
+    current_round_id = resolve_round_id(run_path, round_id)
+    authorization = load_json_if_exists(matching_authorization_path(run_path, current_round_id))
+    if not isinstance(authorization, dict):
+        raise ValueError(
+            f"Matching/adjudication requires canonical moderator matching_authorization.json: "
+            f"{matching_authorization_path(run_path, current_round_id)}"
+        )
+    if maybe_text(authorization.get("authorization_status")) != "authorized":
+        raise ValueError(
+            "Matching/adjudication is only allowed after moderator authorization_status=authorized. "
+            f"Current status={authorization.get('authorization_status')!r}."
+        )
+    execution_path = matching_execution_path(run_path, current_round_id)
+    reporting_handoff: Path | None = None
+    statuses: list[dict[str, Any]] = []
+    step_count = 6
+
+    def snapshot() -> dict[str, Any]:
+        return write_data_plane_execution_snapshot(
+            execution_path=execution_path,
+            run_dir=run_path,
+            round_id=current_round_id,
+            public_inputs=[],
+            environment_inputs=[],
+            step_count=step_count,
+            statuses=statuses,
+            reporting_handoff_path=reporting_handoff,
+        )
+
+    snapshot()
+
+    def append_status_or_raise(status: dict[str, Any], result: Any | None) -> Any:
+        statuses.append(status)
+        snapshot()
+        if result is None:
+            raise RuntimeError(
+                f"Matching/adjudication failed at {maybe_text(status.get('step_id'))}. "
+                f"Inspect {execution_path}. {maybe_text(status.get('error'))}"
+            )
+        return result
+
+    evidence_status, evidence_payload = run_data_plane_json_step(
+        step_id="link-evidence",
+        label="link evidence",
+        argv=["python3", str(NORMALIZE_SCRIPT), "link-evidence", "--run-dir", str(run_path), "--round-id", current_round_id],
+    )
+    evidence_payload = append_status_or_raise(evidence_status, evidence_payload)
+
+    context_status, context_payload = run_data_plane_json_step(
+        step_id="build-round-context",
+        label="build round context",
+        argv=["python3", str(NORMALIZE_SCRIPT), "build-round-context", "--run-dir", str(run_path), "--round-id", current_round_id],
+    )
+    context_payload = append_status_or_raise(context_status, context_payload)
+
+    reporting_status, reporting_payload = run_data_plane_json_step(
+        step_id="reporting-build-report-packets",
+        label="reporting build report packets",
+        argv=[
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-report-packets",
+            "--run-dir",
+            str(run_path),
+            "--round-id",
+            current_round_id,
+        ],
+    )
+    reporting_payload = append_status_or_raise(reporting_status, reporting_payload)
+
+    prompt_status, prompt_payload = run_data_plane_json_step(
+        step_id="render-openclaw-prompts",
+        label="render openclaw prompts",
+        argv=[
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_path),
+            "--round-id",
+            current_round_id,
+        ],
+    )
+    prompt_payload = append_status_or_raise(prompt_status, prompt_payload)
+
+    bundle_status, bundle_payload = run_data_plane_json_step(
+        step_id="validate-bundle",
+        label="validate bundle",
+        argv=["python3", str(CONTRACT_SCRIPT), "validate-bundle", "--run-dir", str(run_path)],
+    )
+    bundle_payload = append_status_or_raise(bundle_status, bundle_payload)
+
+    handoff_status, handoff_payload = run_data_plane_callable_step(
+        step_id="build-reporting-handoff",
+        label="build reporting handoff",
+        callback=lambda: {"reporting_handoff_path": str(build_reporting_handoff(run_dir=run_path, round_id=current_round_id))},
+    )
+    handoff_payload = append_status_or_raise(handoff_status, handoff_payload)
+    reporting_handoff = Path(maybe_text(handoff_payload.get("reporting_handoff_path"))).expanduser().resolve()
+    snapshot()
+
+    return {
+        "run_dir": str(run_path),
+        "round_id": current_round_id,
         "link_evidence": evidence_payload,
         "build_context": context_payload,
         "reporting": reporting_payload,
         "prompt_render": prompt_payload,
         "bundle_validation": bundle_payload,
-        "reporting_handoff_path": str(handoff_path),
+        "reporting_handoff_path": str(reporting_handoff),
+        "execution_path": str(execution_path),
     }
 
 
@@ -2477,6 +3323,10 @@ def command_run_data_plane(args: argparse.Namespace) -> dict[str, Any]:
     return run_data_plane(run_dir=Path(args.run_dir), round_id=args.round_id)
 
 
+def command_run_matching_adjudication(args: argparse.Namespace) -> dict[str, Any]:
+    return run_matching_adjudication(run_dir=Path(args.run_dir), round_id=args.round_id)
+
+
 def command_advance_round(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     current_round_id = resolve_round_id(run_dir, args.round_id)
@@ -2603,10 +3453,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_pretty_flag(collect_openaq)
 
-    data_plane = sub.add_parser("run-data-plane", help="Run normalization, reporting, prompt rendering, and bundle validation.")
+    data_plane = sub.add_parser("run-data-plane", help="Run normalization plus data-readiness packet generation.")
     data_plane.add_argument("--run-dir", required=True, help="Run directory.")
     data_plane.add_argument("--round-id", default="", help="Round identifier. Defaults to latest round.")
     add_pretty_flag(data_plane)
+
+    matching = sub.add_parser("run-matching-adjudication", help="Run authorized matching/adjudication plus post-match report packet generation.")
+    matching.add_argument("--run-dir", required=True, help="Run directory.")
+    matching.add_argument("--round-id", default="", help="Round identifier. Defaults to latest round.")
+    add_pretty_flag(matching)
 
     advance = sub.add_parser("advance-round", help="Scaffold the next round from an approved council decision.")
     advance.add_argument("--run-dir", required=True, help="Run directory.")
@@ -2627,6 +3482,7 @@ def main(argv: list[str] | None = None) -> int:
         "execute-fetch-plan": command_execute_fetch_plan,
         "collect-openaq": command_collect_openaq,
         "run-data-plane": command_run_data_plane,
+        "run-matching-adjudication": command_run_matching_adjudication,
         "advance-round": command_advance_round,
     }
     try:

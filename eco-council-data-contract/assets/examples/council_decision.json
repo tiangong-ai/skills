@@ -27,12 +27,21 @@
         "expert-report"
       ],
       "inputs": {
-        "preferred_sources": [
-          "openaq-data-fetch"
+        "focus_claim_ids": [],
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-environmentalist-round-002-station-air-quality",
+            "requirement_type": "station-air-quality",
+            "summary": "Add station-grade air-quality corroboration in the same mission window and geometry.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Keep the same mission geometry and UTC window."
     }
   ],
+  "override_requests": [],
   "final_brief": ""
 }

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS cases (
     max_rounds INTEGER,
     max_claims_per_round INTEGER,
     max_tasks_per_round INTEGER,
-    source_policy_json TEXT NOT NULL,
+    source_governance_json TEXT NOT NULL,
     current_round_id TEXT NOT NULL,
     current_stage TEXT NOT NULL,
     round_count INTEGER NOT NULL,

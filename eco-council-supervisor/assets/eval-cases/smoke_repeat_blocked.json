@@ -1,12 +1,13 @@
 {
   "case_id": "smoke_repeat_blocked",
-  "description": "Smoke claim remains unresolved, and every suggested next-step source has already been exhausted in the current run.",
+  "description": "Smoke claim remains unresolved, so the moderator should continue with evidence requirements only and leave any source-path viability judgment to the next source-selection stage.",
   "round_id": "round-003",
   "mission": {
     "schema_version": "1.0.0",
     "run_id": "eval-smoke-repeat-blocked",
     "topic": "Smoke repeat-source stop rule",
-    "objective": "Check that the moderator blocks another round when only repeated sources remain.",
+    "objective": "Check that the moderator continues with evidence requirements instead of prescribing sources or blocking on source repetition alone.",
+    "policy_profile": "standard",
     "window": {
       "start_utc": "2026-03-18T00:00:00Z",
       "end_utc": "2026-03-19T23:59:59Z"
@@ -27,20 +28,164 @@
       "max_claims_per_round": 3,
       "max_tasks_per_round": 4
     },
-    "source_policy": {
-      "sociologist": [
-        "gdelt-doc-search",
-        "bluesky-cascade-fetch",
-        "youtube-video-search",
-        "youtube-comments-fetch"
+    "source_governance": {
+      "approval_authority": "policy",
+      "allow_cross_round_anchors": true,
+      "max_selected_sources_per_role": 4,
+      "max_active_families_per_role": 4,
+      "max_non_entry_layers_per_role": 1,
+      "approved_layers": [
+        {
+          "family_id": "youtube",
+          "layer_id": "comments",
+          "approved_by": "policy",
+          "reason": "Replay fixture authorizes anchored YouTube comment expansion after video recon."
+        }
       ],
-      "environmentalist": [
-        "openaq-data-fetch",
-        "nasa-firms-fire-fetch",
-        "open-meteo-air-quality-fetch",
-        "open-meteo-historical-fetch"
-      ],
-      "historian": []
+      "families": [
+        {
+          "family_id": "gdelt",
+          "role": "sociologist",
+          "label": "GDELT public coverage",
+          "layers": [
+            {
+              "layer_id": "recon",
+              "tier": "l1",
+              "skills": [
+                "gdelt-doc-search"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "bluesky",
+          "role": "sociologist",
+          "label": "Bluesky discussion",
+          "layers": [
+            {
+              "layer_id": "posts",
+              "tier": "l1",
+              "skills": [
+                "bluesky-cascade-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "youtube",
+          "role": "sociologist",
+          "label": "YouTube public discussion",
+          "layers": [
+            {
+              "layer_id": "videos",
+              "tier": "l1",
+              "skills": [
+                "youtube-video-search"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            },
+            {
+              "layer_id": "comments",
+              "tier": "l2",
+              "skills": [
+                "youtube-comments-fetch"
+              ],
+              "requires_anchor": true,
+              "auto_selectable": false,
+              "allowed_anchor_modes": [
+                "same_round_l1",
+                "prior_round_l1",
+                "evidence_gap",
+                "upstream_approval"
+              ],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "openaq",
+          "role": "environmentalist",
+          "label": "OpenAQ stations",
+          "layers": [
+            {
+              "layer_id": "stations",
+              "tier": "l1",
+              "skills": [
+                "openaq-data-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "firms",
+          "role": "environmentalist",
+          "label": "NASA FIRMS fire detections",
+          "layers": [
+            {
+              "layer_id": "fire-detections",
+              "tier": "l1",
+              "skills": [
+                "nasa-firms-fire-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "openmeteo-air-quality",
+          "role": "environmentalist",
+          "label": "Open-Meteo air quality",
+          "layers": [
+            {
+              "layer_id": "modeled-air",
+              "tier": "l1",
+              "skills": [
+                "open-meteo-air-quality-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        },
+        {
+          "family_id": "openmeteo-historical",
+          "role": "environmentalist",
+          "label": "Open-Meteo historical weather",
+          "layers": [
+            {
+              "layer_id": "meteorology",
+              "tier": "l1",
+              "skills": [
+                "open-meteo-historical-fetch"
+              ],
+              "requires_anchor": false,
+              "auto_selectable": true,
+              "allowed_anchor_modes": [],
+              "max_selected_skills": 1
+            }
+          ]
+        }
+      ]
     }
   },
   "tasks": [
@@ -54,6 +199,7 @@
       "status": "planned",
       "depends_on": [],
       "expected_output_kinds": [
+        "source-selection",
         "claim",
         "expert-report"
       ],
@@ -67,11 +213,15 @@
           "start_utc": "2026-03-18T00:00:00Z",
           "end_utc": "2026-03-19T23:59:59Z"
         },
-        "preferred_sources": [
-          "gdelt-doc-search",
-          "bluesky-cascade-fetch",
-          "youtube-video-search",
-          "youtube-comments-fetch"
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-sociologist-round-003-smoke-public",
+            "requirement_type": "public-claim-discovery",
+            "summary": "Collect attributable public smoke claims in Chiang Mai during the mission window.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Replay fixture."
@@ -86,6 +236,7 @@
       "status": "planned",
       "depends_on": [],
       "expected_output_kinds": [
+        "source-selection",
         "observation",
         "expert-report"
       ],
@@ -99,11 +250,15 @@
           "start_utc": "2026-03-18T00:00:00Z",
           "end_utc": "2026-03-19T23:59:59Z"
         },
-        "preferred_sources": [
-          "openaq-data-fetch",
-          "nasa-firms-fire-fetch",
-          "open-meteo-air-quality-fetch",
-          "open-meteo-historical-fetch"
+        "evidence_requirements": [
+          {
+            "requirement_id": "req-environmentalist-round-003-smoke-physical",
+            "requirement_type": "physical-corroboration",
+            "summary": "Collect physical air-quality and fire evidence for Chiang Mai in the mission window.",
+            "priority": "high",
+            "focus_claim_ids": [],
+            "anchor_refs": []
+          }
         ]
       },
       "notes": "Replay fixture."
@@ -339,16 +494,44 @@
   ],
   "expect": {
     "decision": {
-      "moderator_status": "blocked",
-      "next_round_required": false,
-      "evidence_sufficiency": "insufficient",
-      "missing_evidence_types": [
-        "public-discussion-coverage",
-        "station-air-quality"
-      ]
+      "moderator_status": "continue",
+      "next_round_required": true,
+      "evidence_sufficiency": "sufficient",
+      "missing_evidence_types": []
     },
+    "next_round_tasks": [
+      {
+        "assigned_role": "sociologist",
+        "objective": "Collect more independent public-discussion evidence for the same mission window.",
+        "expected_output_kinds": [
+          "source-selection",
+          "claim-submission",
+          "data-readiness-report",
+          "expert-report"
+        ],
+        "inputs": {
+          "evidence_requirements": [
+            {
+              "requirement_type": "public-discussion-coverage"
+            }
+          ]
+        }
+      }
+    ],
+    "next_round_tasks_forbidden_fields": [
+      {
+        "match": {
+          "assigned_role": "sociologist",
+          "objective": "Collect more independent public-discussion evidence for the same mission window."
+        },
+        "fields": [
+          "inputs.preferred_sources",
+          "inputs.required_sources"
+        ]
+      }
+    ],
     "context": {
-      "context_layer": "compact-v1",
+      "context_layer": "evidence-library-v1",
       "max_observations": 8,
       "max_claims": 4
     }
