@@ -5,13 +5,11 @@
   "round_id": "round-001",
   "agent_role": "environmentalist",
   "source_skill": "open-meteo-air-quality-fetch",
-  "metric": "pm2_5",
-  "aggregation": "window-summary",
-  "value": 42.7,
-  "unit": "ug/m3",
+  "metric": "smoke-signal",
+  "aggregation": "composite",
+  "value": 0.76,
+  "unit": "index",
   "statistics": {
-    "min": 18.2,
-    "max": 78.3,
     "mean": 42.7,
     "p95": 74.9
   },
@@ -34,5 +32,50 @@
     "source_skill": "open-meteo-air-quality-fetch",
     "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
     "record_locator": "$.records[0]"
-  }
+  },
+  "observation_mode": "composite",
+  "evidence_role": "mixed",
+  "source_skills": [
+    "open-meteo-air-quality-fetch",
+    "nasa-firms-fire-fetch"
+  ],
+  "metric_bundle": [
+    "pm2_5",
+    "fire_detection_count"
+  ],
+  "candidate_observation_ids": [
+    "obs-candidate-001",
+    "obs-candidate-002"
+  ],
+  "provenance_refs": [
+    {
+      "source_skill": "open-meteo-air-quality-fetch",
+      "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
+      "record_locator": "$.records[0]"
+    },
+    {
+      "source_skill": "nasa-firms-fire-fetch",
+      "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/nasa-firms-fire.json",
+      "record_locator": "$.features[0]"
+    }
+  ],
+  "selection_reason": "Collapsed correlated PM and hotspot candidates into one retained smoke indicator.",
+  "component_roles": [
+    {
+      "candidate_observation_id": "obs-candidate-001",
+      "role": "primary",
+      "metric": "pm2_5",
+      "value": 42.7,
+      "unit": "ug/m3",
+      "rationale": "Elevated PM is the main smoke indicator."
+    },
+    {
+      "candidate_observation_id": "obs-candidate-002",
+      "role": "contextual",
+      "metric": "fire_detection_count",
+      "value": 19,
+      "unit": "count",
+      "rationale": "Hotspots add source context for the same window."
+    }
+  ]
 }

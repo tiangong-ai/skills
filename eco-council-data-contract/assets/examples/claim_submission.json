@@ -33,6 +33,11 @@
       "external_id": "gdelt-article-001"
     }
   ],
+  "candidate_claim_ids": [
+    "claim-candidate-017",
+    "claim-candidate-022"
+  ],
+  "selection_reason": "Merged duplicate public posts into one retained smoke-attribution claim.",
   "compact_audit": {
     "representative": true,
     "retained_count": 3,

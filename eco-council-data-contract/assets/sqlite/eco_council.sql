@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS override_requests (
     run_id TEXT NOT NULL,
     round_id TEXT NOT NULL,
     agent_role TEXT NOT NULL CHECK (agent_role IN ('moderator', 'sociologist', 'environmentalist', 'historian')),
-    request_origin_kind TEXT NOT NULL CHECK (request_origin_kind IN ('source-selection', 'data-readiness-report', 'expert-report', 'council-decision')),
+    request_origin_kind TEXT NOT NULL CHECK (request_origin_kind IN ('source-selection', 'claim-curation', 'observation-curation', 'data-readiness-report', 'expert-report', 'council-decision')),
     target_path TEXT NOT NULL,
     request_json TEXT NOT NULL CHECK (json_valid(request_json)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS claim_submissions (
     FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS claim_curations (
+    curation_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    agent_role TEXT NOT NULL CHECK (agent_role = 'sociologist'),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'complete', 'blocked')),
+    curation_json TEXT NOT NULL CHECK (json_valid(curation_json)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS observations (
     observation_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -86,7 +98,9 @@ CREATE TABLE IF NOT EXISTS observations (
     agent_role TEXT NOT NULL CHECK (agent_role IN ('moderator', 'sociologist', 'environmentalist', 'historian')),
     source_skill TEXT NOT NULL,
     metric TEXT NOT NULL,
-    aggregation TEXT NOT NULL CHECK (aggregation IN ('point', 'window-summary', 'series-summary', 'event-count')),
+    aggregation TEXT NOT NULL CHECK (aggregation IN ('point', 'window-summary', 'series-summary', 'event-count', 'composite')),
+    observation_mode TEXT CHECK (observation_mode IN ('atomic', 'composite')),
+    evidence_role TEXT CHECK (evidence_role IN ('primary', 'contextual', 'contradictory', 'mixed')),
     unit TEXT NOT NULL,
     observation_json TEXT NOT NULL CHECK (json_valid(observation_json)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -102,8 +116,23 @@ CREATE TABLE IF NOT EXISTS observation_submissions (
     observation_id TEXT NOT NULL,
     source_skill TEXT NOT NULL,
     metric TEXT NOT NULL,
+    aggregation TEXT NOT NULL CHECK (aggregation IN ('point', 'window-summary', 'series-summary', 'event-count', 'composite')),
+    observation_mode TEXT CHECK (observation_mode IN ('atomic', 'composite')),
+    evidence_role TEXT CHECK (evidence_role IN ('primary', 'contextual', 'contradictory', 'mixed')),
     worth_storing INTEGER NOT NULL CHECK (worth_storing IN (0, 1)),
     submission_json TEXT NOT NULL CHECK (json_valid(submission_json)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS observation_curations (
+    curation_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    agent_role TEXT NOT NULL CHECK (agent_role = 'environmentalist'),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'complete', 'blocked')),
+    curation_json TEXT NOT NULL CHECK (json_valid(curation_json)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE
@@ -147,6 +176,19 @@ CREATE TABLE IF NOT EXISTS matching_authorizations (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS matching_adjudications (
+    adjudication_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    authorization_id TEXT NOT NULL,
+    candidate_set_id TEXT NOT NULL,
+    adjudication_json TEXT NOT NULL CHECK (json_valid(adjudication_json)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (run_id, round_id) REFERENCES rounds(run_id, round_id) ON DELETE CASCADE,
+    FOREIGN KEY (authorization_id) REFERENCES matching_authorizations(authorization_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS matching_results (

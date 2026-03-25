@@ -157,6 +157,7 @@ ENVIRONMENT_SOURCES = (
     "openaq-data-fetch",
 )
 ROUND_ID_PATTERN = re.compile(r"^round-\d{3}$")
+ROUND_ID_INPUT_PATTERN = re.compile(r"^round[-_](\d{3})$")
 ROUND_DIR_PATTERN = re.compile(r"^round_(\d{3})$")
 ENV_ASSIGNMENT_PATTERN = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
@@ -321,6 +322,13 @@ def contract_call(name: str, *args: Any, **kwargs: Any) -> Any | None:
     return helper(*args, **kwargs)
 
 
+def effective_matching_authorization(*, mission: dict[str, Any], round_id: str, authorization: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("apply_matching_authorization_policy", mission, round_id, authorization)
+    if isinstance(value, dict):
+        return value
+    return dict(authorization)
+
+
 def ensure_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object.")
@@ -381,10 +389,15 @@ def firms_source_for_window(window: dict[str, Any], requested_source: str) -> st
 
 
 def round_dir_name(round_id: str) -> str:
+    return normalize_round_id(round_id).replace("-", "_")
+
+
+def normalize_round_id(round_id: str) -> str:
     text = round_id.strip()
-    if not ROUND_ID_PATTERN.match(text):
-        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 style.")
-    return text.replace("-", "_")
+    match = ROUND_ID_INPUT_PATTERN.match(text)
+    if match is None:
+        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 or round_001 style.")
+    return f"round-{match.group(1)}"
 
 
 def round_id_from_dirname(dirname: str) -> str | None:
@@ -395,9 +408,7 @@ def round_id_from_dirname(dirname: str) -> str | None:
 
 
 def round_number(round_id: str) -> int:
-    if not ROUND_ID_PATTERN.match(round_id):
-        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 style.")
-    return int(round_id.split("-")[-1])
+    return int(normalize_round_id(round_id).split("-")[-1])
 
 
 def next_round_id(round_id: str) -> str:
@@ -453,6 +464,10 @@ def matching_execution_path(run_dir: Path, round_id: str) -> Path:
 
 def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
+
+
+def matching_adjudication_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_adjudication.json"
 
 
 def round_manifest_path(run_dir: Path, round_id: str) -> Path:
@@ -523,7 +538,7 @@ def discover_round_ids(run_dir: Path) -> list[str]:
 
 def resolve_round_id(run_dir: Path, round_id: str) -> str:
     if round_id:
-        return round_id
+        return normalize_round_id(round_id)
     round_ids = discover_round_ids(run_dir)
     if not round_ids:
         raise ValueError(f"No round_* directories found in {run_dir}.")
@@ -2635,6 +2650,30 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
     def existing_path(path: Path) -> str:
         return str(path) if path.exists() else ""
 
+    materialize_curations_command = shell_join(
+        [
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "materialize-curations",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    build_data_readiness_packets_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-data-readiness-packets",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
     promote_all_command = shell_join(
         [
             "python3",
@@ -2670,6 +2709,78 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
             "--pretty",
         ]
     )
+    build_matching_authorization_packet_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-matching-authorization-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    prepare_matching_adjudication_command = shell_join(
+        [
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "prepare-matching-adjudication",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    build_matching_adjudication_packet_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-matching-adjudication-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    render_openclaw_prompts_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    promote_matching_authorization_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "promote-matching-authorization-draft",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
+    promote_matching_adjudication_command = shell_join(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "promote-matching-adjudication-draft",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ]
+    )
     run_matching_adjudication_command = shell_join(
         [
             "python3",
@@ -2700,25 +2811,48 @@ def build_reporting_handoff(*, run_dir: Path, round_id: str) -> Path:
         "generated_at_utc": utc_now_iso(),
         "run_dir": str(run_dir),
         "round_id": round_id,
+        "curation_prompt_paths": {
+            "sociologist": existing_path(base_round_dir / "sociologist" / "derived" / "openclaw_claim_curation_prompt.txt"),
+            "environmentalist": existing_path(base_round_dir / "environmentalist" / "derived" / "openclaw_observation_curation_prompt.txt"),
+        },
         "data_readiness_prompt_paths": {
             "sociologist": existing_path(base_round_dir / "sociologist" / "derived" / "openclaw_data_readiness_prompt.txt"),
             "environmentalist": existing_path(base_round_dir / "environmentalist" / "derived" / "openclaw_data_readiness_prompt.txt"),
         },
         "matching_authorization_prompt_path": existing_path(base_round_dir / "moderator" / "derived" / "openclaw_matching_authorization_prompt.txt"),
+        "matching_adjudication_prompt_path": existing_path(base_round_dir / "moderator" / "derived" / "openclaw_matching_adjudication_prompt.txt"),
         "expert_report_prompt_paths": {
             "sociologist": existing_path(base_round_dir / "sociologist" / "derived" / "openclaw_report_prompt.txt"),
             "environmentalist": existing_path(base_round_dir / "environmentalist" / "derived" / "openclaw_report_prompt.txt"),
         },
         "decision_prompt_path": existing_path(base_round_dir / "moderator" / "derived" / "openclaw_decision_prompt.txt"),
+        "canonical_paths": {
+            "matching_authorization": existing_path(base_round_dir / "moderator" / "matching_authorization.json"),
+            "matching_adjudication": existing_path(base_round_dir / "moderator" / "matching_adjudication.json"),
+            "matching_result": existing_path(base_round_dir / "shared" / "matching_result.json"),
+            "evidence_adjudication": existing_path(base_round_dir / "shared" / "evidence_adjudication.json"),
+        },
         "draft_paths": {
+            "sociologist_claim_curation": existing_path(base_round_dir / "sociologist" / "derived" / "claim_curation_draft.json"),
+            "environmentalist_observation_curation": existing_path(base_round_dir / "environmentalist" / "derived" / "observation_curation_draft.json"),
             "sociologist_data_readiness": existing_path(base_round_dir / "sociologist" / "derived" / "sociologist_data_readiness_draft.json"),
             "environmentalist_data_readiness": existing_path(base_round_dir / "environmentalist" / "derived" / "environmentalist_data_readiness_draft.json"),
             "matching_authorization": existing_path(base_round_dir / "moderator" / "derived" / "matching_authorization_draft.json"),
+            "matching_adjudication": existing_path(base_round_dir / "moderator" / "derived" / "matching_adjudication_draft.json"),
             "sociologist_report": existing_path(base_round_dir / "sociologist" / "derived" / "sociologist_report_draft.json"),
             "environmentalist_report": existing_path(base_round_dir / "environmentalist" / "derived" / "environmentalist_report_draft.json"),
             "moderator_decision": existing_path(base_round_dir / "moderator" / "derived" / "council_decision_draft.json"),
         },
+        "matching_candidate_set_path": existing_path(base_round_dir / "moderator" / "derived" / "matching_candidate_set.json"),
         "promotion_commands": {
+            "materialize_curations": materialize_curations_command,
+            "build_data_readiness_packets": build_data_readiness_packets_command,
+            "build_matching_authorization_packet": build_matching_authorization_packet_command,
+            "prepare_matching_adjudication": prepare_matching_adjudication_command,
+            "build_matching_adjudication_packet": build_matching_adjudication_packet_command,
+            "render_openclaw_prompts": render_openclaw_prompts_command,
+            "promote_matching_authorization": promote_matching_authorization_command,
+            "promote_matching_adjudication": promote_matching_adjudication_command,
             "promote_all": promote_all_command,
             "build_decision_packet": build_decision_packet_command,
             "run_matching_adjudication": run_matching_adjudication_command,
@@ -2878,20 +3012,20 @@ def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
     )
     context_payload = append_status_or_raise(context_status, context_payload)
 
-    reporting_status, reporting_payload = run_data_plane_json_step(
-        step_id="reporting-build-data-readiness-packets",
-        label="reporting build data readiness packets",
+    curation_status, curation_payload = run_data_plane_json_step(
+        step_id="reporting-build-curation-packets",
+        label="reporting build curation packets",
         argv=[
             "python3",
             str(REPORTING_SCRIPT),
-            "build-data-readiness-packets",
+            "build-curation-packets",
             "--run-dir",
             str(run_path),
             "--round-id",
             current_round_id,
         ],
     )
-    reporting_payload = append_status_or_raise(reporting_status, reporting_payload)
+    curation_payload = append_status_or_raise(curation_status, curation_payload)
 
     prompt_status, prompt_payload = run_data_plane_json_step(
         step_id="render-openclaw-prompts",
@@ -2933,7 +3067,7 @@ def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
         "normalize_public": public_payload,
         "normalize_environment": environment_payload,
         "build_context": context_payload,
-        "reporting": reporting_payload,
+        "curation": curation_payload,
         "prompt_render": prompt_payload,
         "bundle_validation": bundle_payload,
         "reporting_handoff_path": str(reporting_handoff),
@@ -2944,16 +3078,28 @@ def run_data_plane(*, run_dir: Path, round_id: str) -> dict[str, Any]:
 def run_matching_adjudication(*, run_dir: Path, round_id: str) -> dict[str, Any]:
     run_path = run_dir.expanduser().resolve()
     current_round_id = resolve_round_id(run_path, round_id)
+    mission = load_mission(run_path)
     authorization = load_json_if_exists(matching_authorization_path(run_path, current_round_id))
     if not isinstance(authorization, dict):
         raise ValueError(
             f"Matching/adjudication requires canonical moderator matching_authorization.json: "
             f"{matching_authorization_path(run_path, current_round_id)}"
         )
+    authorization = effective_matching_authorization(
+        mission=mission,
+        round_id=current_round_id,
+        authorization=authorization,
+    )
     if maybe_text(authorization.get("authorization_status")) != "authorized":
         raise ValueError(
             "Matching/adjudication is only allowed after moderator authorization_status=authorized. "
             f"Current status={authorization.get('authorization_status')!r}."
+        )
+    adjudication_input = matching_adjudication_path(run_path, current_round_id)
+    if not adjudication_input.exists():
+        raise ValueError(
+            "Matching/adjudication materialization requires canonical moderator matching_adjudication.json: "
+            f"{adjudication_input}"
         )
     execution_path = matching_execution_path(run_path, current_round_id)
     reporting_handoff: Path | None = None
@@ -2985,9 +3131,17 @@ def run_matching_adjudication(*, run_dir: Path, round_id: str) -> dict[str, Any]
         return result
 
     evidence_status, evidence_payload = run_data_plane_json_step(
-        step_id="link-evidence",
-        label="link evidence",
-        argv=["python3", str(NORMALIZE_SCRIPT), "link-evidence", "--run-dir", str(run_path), "--round-id", current_round_id],
+        step_id="apply-matching-adjudication",
+        label="apply matching adjudication",
+        argv=[
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "apply-matching-adjudication",
+            "--run-dir",
+            str(run_path),
+            "--round-id",
+            current_round_id,
+        ],
     )
     evidence_payload = append_status_or_raise(evidence_status, evidence_payload)
 
@@ -3047,7 +3201,7 @@ def run_matching_adjudication(*, run_dir: Path, round_id: str) -> dict[str, Any]
     return {
         "run_dir": str(run_path),
         "round_id": current_round_id,
-        "link_evidence": evidence_payload,
+        "apply_matching_adjudication": evidence_payload,
         "build_context": context_payload,
         "reporting": reporting_payload,
         "prompt_render": prompt_payload,
@@ -3453,7 +3607,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_pretty_flag(collect_openaq)
 
-    data_plane = sub.add_parser("run-data-plane", help="Run normalization plus data-readiness packet generation.")
+    data_plane = sub.add_parser("run-data-plane", help="Run normalization plus evidence-curation packet generation.")
     data_plane.add_argument("--run-dir", required=True, help="Run directory.")
     data_plane.add_argument("--round-id", default="", help="Round identifier. Defaults to latest round.")
     add_pretty_flag(data_plane)

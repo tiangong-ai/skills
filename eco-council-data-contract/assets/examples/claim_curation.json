@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "curation_id": "claim-curation-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "sociologist",
+  "status": "complete",
+  "summary": "Retain one representative smoke-attribution claim and defer broader channel expansion.",
+  "curated_claims": [
+    {
+      "claim_id": "claim-001",
+      "candidate_claim_ids": [
+        "claim-candidate-017",
+        "claim-candidate-022"
+      ],
+      "claim_type": "smoke",
+      "summary": "Public posts claim Chiang Mai smoke worsened on 2026-03-19 due to nearby burning.",
+      "statement": "Public discussion asserts that smoke in Chiang Mai worsened on 2026-03-19 and attributes the episode to nearby or upwind burning.",
+      "meaning": "This is the dominant public attribution narrative worth testing against physical evidence.",
+      "priority": 1,
+      "needs_physical_validation": true,
+      "worth_storing": true,
+      "selection_reason": "Merged duplicate public posts into one retained smoke-attribution claim.",
+      "time_window": {
+        "start_utc": "2026-03-18T00:00:00Z",
+        "end_utc": "2026-03-19T23:59:59Z"
+      },
+      "place_scope": {
+        "label": "Chiang Mai, Thailand",
+        "geometry": {
+          "type": "Point",
+          "latitude": 18.7883,
+          "longitude": 98.9853
+        }
+      }
+    }
+  ],
+  "rejected_candidate_ids": [
+    "claim-candidate-031"
+  ],
+  "open_questions": [
+    "Should the next round add more local-language discussion sources?"
+  ],
+  "recommended_next_actions": [
+    {
+      "assigned_role": "environmentalist",
+      "objective": "Check whether PM2.5 and hotspot observations corroborate the March 19 smoke attribution window.",
+      "reason": "Physical corroboration is still required before matching."
+    }
+  ],
+  "override_requests": []
+}

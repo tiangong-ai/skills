@@ -1,16 +1,16 @@
 {
   "schema_version": "1.0.0",
-  "submission_id": "obssub-001",
+  "submission_id": "obssub-obs-001",
   "run_id": "eco-20260320-chiangmai-smoke",
   "round_id": "round-001",
   "agent_role": "environmentalist",
   "observation_id": "obs-001",
   "source_skill": "open-meteo-air-quality-fetch",
-  "metric": "pm2_5",
-  "aggregation": "window-summary",
-  "value": 42.7,
-  "unit": "ug/m3",
-  "meaning": "The mission window contains elevated particulate concentrations consistent with a smoke episode.",
+  "metric": "smoke-signal",
+  "aggregation": "composite",
+  "value": 0.76,
+  "unit": "index",
+  "meaning": "Combined PM and hotspot signals indicate a smoke episode in the mission window.",
   "worth_storing": true,
   "time_window": {
     "start_utc": "2026-03-18T00:00:00Z",
@@ -32,14 +32,63 @@
     "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
     "record_locator": "$.records[0]"
   },
+  "statistics": {
+    "mean": 42.7,
+    "p95": 74.9
+  },
+  "observation_mode": "composite",
+  "evidence_role": "mixed",
+  "source_skills": [
+    "open-meteo-air-quality-fetch",
+    "nasa-firms-fire-fetch"
+  ],
+  "metric_bundle": [
+    "pm2_5",
+    "fire_detection_count"
+  ],
+  "candidate_observation_ids": [
+    "obs-candidate-001",
+    "obs-candidate-002"
+  ],
+  "provenance_refs": [
+    {
+      "source_skill": "open-meteo-air-quality-fetch",
+      "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
+      "record_locator": "$.records[0]"
+    },
+    {
+      "source_skill": "nasa-firms-fire-fetch",
+      "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/nasa-firms-fire.json",
+      "record_locator": "$.features[0]"
+    }
+  ],
+  "selection_reason": "Collapsed correlated PM and hotspot candidates into one retained smoke indicator.",
+  "component_roles": [
+    {
+      "candidate_observation_id": "obs-candidate-001",
+      "role": "primary",
+      "metric": "pm2_5",
+      "value": 42.7,
+      "unit": "ug/m3",
+      "rationale": "Elevated PM is the main smoke indicator."
+    },
+    {
+      "candidate_observation_id": "obs-candidate-002",
+      "role": "contextual",
+      "metric": "fire_detection_count",
+      "value": 19,
+      "unit": "count",
+      "rationale": "Hotspots add source context for the same window."
+    }
+  ],
   "compact_audit": {
     "representative": true,
     "retained_count": 4,
     "total_candidate_count": 24,
-    "coverage_summary": "The compact summary preserves the peak PM signal and the dominant modeled background context.",
+    "coverage_summary": "The compact summary preserves the retained composite smoke signal and its main component evidence.",
     "concentration_flags": [],
     "sampling_notes": [
-      "Window summaries were preferred over raw hourly rows for compact storage."
+      "Composite retention favored one PM-plus-hotspot summary over multiple overlapping rows."
     ]
   }
 }

@@ -26,15 +26,18 @@ REPO_DIR = SKILL_DIR.parent
 ORCHESTRATE_SCRIPT = REPO_DIR / "eco-council-orchestrate" / "scripts" / "eco_council_orchestrate.py"
 REPORTING_SCRIPT = REPO_DIR / "eco-council-reporting" / "scripts" / "eco_council_reporting.py"
 CONTRACT_SCRIPT = REPO_DIR / "eco-council-data-contract" / "scripts" / "eco_council_contract.py"
+NORMALIZE_SCRIPT = REPO_DIR / "eco-council-normalize" / "scripts" / "eco_council_normalize.py"
 CASE_LIBRARY_SCRIPT = SKILL_DIR / "scripts" / "eco_council_case_library.py"
 SIGNAL_CORPUS_SCRIPT = SKILL_DIR / "scripts" / "eco_council_signal_corpus.py"
 
 SCHEMA_VERSION = "1.0.0"
 ROUND_ID_PATTERN = re.compile(r"^round-\d{3}$")
+ROUND_ID_INPUT_PATTERN = re.compile(r"^round[-_](\d{3})$")
 ROUND_DIR_PATTERN = re.compile(r"^round_(\d{3})$")
 AGENT_ID_SAFE = re.compile(r"[^a-z0-9-]+")
 ROLES = ("moderator", "sociologist", "environmentalist")
 SOURCE_SELECTION_ROLES = ("sociologist", "environmentalist")
+CURATION_ROLES = ("sociologist", "environmentalist")
 READINESS_ROLES = ("sociologist", "environmentalist")
 REPORT_ROLES = ("sociologist", "environmentalist")
 OPENCLAW_AGENT_GUIDE_FILENAME = "OPENCLAW_AGENT_GUIDE.md"
@@ -44,8 +47,10 @@ STAGE_AWAITING_SOURCE_SELECTION = "awaiting-source-selection"
 STAGE_READY_PREPARE = "ready-to-prepare-round"
 STAGE_READY_FETCH = "ready-to-execute-fetch-plan"
 STAGE_READY_DATA_PLANE = "ready-to-run-data-plane"
+STAGE_AWAITING_EVIDENCE_CURATION = "awaiting-evidence-curation"
 STAGE_AWAITING_DATA_READINESS = "awaiting-data-readiness"
 STAGE_AWAITING_MATCHING_AUTHORIZATION = "awaiting-matching-authorization"
+STAGE_AWAITING_MATCHING_ADJUDICATION = "awaiting-matching-adjudication"
 STAGE_READY_MATCHING_ADJUDICATION = "ready-to-run-matching-adjudication"
 STAGE_AWAITING_REPORTS = "awaiting-expert-reports"
 STAGE_AWAITING_DECISION = "awaiting-moderator-decision"
@@ -60,13 +65,13 @@ DATA_PLANE_STEP_IDS = (
     "normalize-public",
     "normalize-environment",
     "build-round-context",
-    "reporting-build-data-readiness-packets",
+    "reporting-build-curation-packets",
     "render-openclaw-prompts",
     "validate-bundle",
     "build-reporting-handoff",
 )
 MATCHING_ADJUDICATION_STEP_IDS = (
-    "link-evidence",
+    "apply-matching-adjudication",
     "build-round-context",
     "reporting-build-report-packets",
     "render-openclaw-prompts",
@@ -166,14 +171,16 @@ def truncate_text(value: str, limit: int) -> str:
 
 
 def require_round_id(value: str) -> str:
-    if not ROUND_ID_PATTERN.fullmatch(value):
-        raise ValueError(f"Invalid round id: {value!r}")
-    return value
+    text = maybe_text(value)
+    match = ROUND_ID_INPUT_PATTERN.fullmatch(text)
+    if match is None:
+        raise ValueError(f"Invalid round id: {value!r}. Expected round-001 or round_001 style.")
+    return f"round-{match.group(1)}"
 
 
 def round_dir_name(round_id: str) -> str:
-    require_round_id(round_id)
-    return f"round_{round_id.split('-')[1]}"
+    normalized = require_round_id(round_id)
+    return f"round_{normalized.split('-')[1]}"
 
 
 def round_dir(run_dir: Path, round_id: str) -> Path:
@@ -203,8 +210,8 @@ def latest_round_id(run_dir: Path) -> str:
 
 
 def next_round_id(round_id: str) -> str:
-    require_round_id(round_id)
-    number = int(round_id.split("-")[1])
+    normalized = require_round_id(round_id)
+    number = int(normalized.split("-")[1])
     return f"round-{number + 1:03d}"
 
 
@@ -214,6 +221,17 @@ def tasks_path(run_dir: Path, round_id: str) -> Path:
 
 def mission_path(run_dir: Path) -> Path:
     return run_dir / "mission.json"
+
+
+def load_mission(run_dir: Path) -> dict[str, Any]:
+    mission_payload = load_json_if_exists(mission_path(run_dir))
+    if not isinstance(mission_payload, dict):
+        raise ValueError(f"Mission payload is not a JSON object: {mission_path(run_dir)}")
+    return mission_payload
+
+
+def current_run_id(run_dir: Path) -> str:
+    return maybe_text(load_mission(run_dir).get("run_id"))
 
 
 def task_review_prompt_path(run_dir: Path, round_id: str) -> Path:
@@ -252,6 +270,30 @@ def source_selection_packet_path(run_dir: Path, round_id: str, role: str) -> Pat
     return round_dir(run_dir, round_id) / role / "derived" / "source_selection_packet.json"
 
 
+def claim_curation_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "claim_curation.json"
+
+
+def observation_curation_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "observation_curation.json"
+
+
+def claim_curation_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "derived" / "claim_curation_packet.json"
+
+
+def observation_curation_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "derived" / "observation_curation_packet.json"
+
+
+def claim_curation_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "derived" / "openclaw_claim_curation_prompt.txt"
+
+
+def observation_curation_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "derived" / "openclaw_observation_curation_prompt.txt"
+
+
 def override_requests_path(run_dir: Path, round_id: str, role: str) -> Path:
     return round_dir(run_dir, round_id) / role / "override_requests.json"
 
@@ -269,6 +311,13 @@ def effective_constraints(mission: dict[str, Any]) -> dict[str, Any]:
         return value
     constraints = mission.get("constraints")
     return constraints if isinstance(constraints, dict) else {}
+
+
+def effective_matching_authorization_payload(*, mission: dict[str, Any], round_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    value = contract_call("apply_matching_authorization_policy", mission, round_id, payload)
+    if isinstance(value, dict):
+        return value
+    return dict(payload)
 
 
 def policy_profile_summary(mission: dict[str, Any]) -> dict[str, Any]:
@@ -488,6 +537,26 @@ def matching_authorization_packet_path(run_dir: Path, round_id: str) -> Path:
 
 def matching_authorization_prompt_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_matching_authorization_prompt.txt"
+
+
+def matching_candidate_set_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_candidate_set.json"
+
+
+def matching_adjudication_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_adjudication.json"
+
+
+def matching_adjudication_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_adjudication_draft.json"
+
+
+def matching_adjudication_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_adjudication_packet.json"
+
+
+def matching_adjudication_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_matching_adjudication_prompt.txt"
 
 
 def matching_result_path(run_dir: Path, round_id: str) -> Path:
@@ -1003,7 +1072,7 @@ def openclaw_agent_guide_text(*, run_dir: Path, state: dict[str, Any], role: str
             "  Purpose: advance one supervisor-owned shell stage such as prepare-round, execute-fetch-plan, run-data-plane, run-matching-adjudication, promote-all, or advance-round. Human/supervisor only.",
             f"- `{run_agent_command}`",
             "  Purpose: supervisor wrapper that sends the current turn to an OpenClaw agent and imports the validated JSON reply. Do not call this from inside the agent already handling the turn.",
-            "- `python3 ... import-task-review ...` / `import-source-selection ...` / `import-data-readiness ...` / `import-matching-authorization ...` / `import-report ...` / `import-decision ...` / `import-fetch-execution ...`",
+            "- `python3 ... import-task-review ...` / `import-source-selection ...` / `import-data-readiness ...` / `import-matching-authorization ...` / `import-matching-adjudication ...` / `import-report ...` / `import-decision ...` / `import-fetch-execution ...`",
             "  Purpose: import canonical JSON after manual edits or external fetch execution. Human/supervisor only.",
             f"- `{provision_command}`",
             "  Purpose: create or repair the three fixed OpenClaw agents and workspace support files. Human/supervisor only.",
@@ -1020,7 +1089,7 @@ def openclaw_agent_guide_text(*, run_dir: Path, state: dict[str, Any], role: str
             "",
             "Never do the following unless the human explicitly changes your role to supervisor operator:",
             "- Do not call `continue-run`, `run-agent-step`, or any `import-*` command from inside a normal role turn.",
-            "- Do not run raw fetch shell commands during task-review, source-selection, data-readiness, matching-authorization, report, or decision turns.",
+            "- Do not run raw fetch shell commands during task-review, source-selection, data-readiness, matching-authorization, matching-adjudication, report, or decision turns.",
             "- Do not mutate files other than the target JSON artifact named by the current turn prompt.",
             "- Do not invent fetch results, readiness reports, matching outputs, evidence cards, or reports outside the current stage contract.",
         ]
@@ -1047,12 +1116,13 @@ def session_prompt_text(*, run_dir: Path, state: dict[str, Any], role: str, agen
             "2. Only work on the JSON file/object explicitly requested by the supervisor.",
             "3. For task review turns, return only a JSON list of round-task objects.",
             "4. For matching-authorization turns, return only one JSON object shaped like matching-authorization.",
-            "5. For decision turns, return only one JSON object shaped like council-decision.",
-            "6. Never add markdown, prose, or code fences.",
-            "7. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
-            "8. If compact historical-case context is provided, use it only to prioritize work and avoid redundant fetch requests; never treat it as current-round evidence.",
-            "9. Describe evidence needs, claim focus, and priorities in tasks or decisions; do not prescribe exact source skills or source-family layer upgrades.",
-            "10. If policy caps block necessary next steps, use the decision override_requests field to ask an upstream human/bot for envelope changes instead of applying them yourself.",
+            "5. For matching-adjudication turns, return only one JSON object shaped like matching-adjudication.",
+            "6. For decision turns, return only one JSON object shaped like council-decision.",
+            "7. Never add markdown, prose, or code fences.",
+            "8. If a referenced local skill is unavailable in this OpenClaw instance, follow the referenced file as the source of truth anyway.",
+            "9. If compact historical-case context is provided, use it only to prioritize work and avoid redundant fetch requests; never treat it as current-round evidence.",
+            "10. Describe evidence needs, claim focus, and priorities in tasks or decisions; do not prescribe exact source skills or source-family layer upgrades.",
+            "11. If policy caps block necessary next steps, use the decision override_requests field to ask an upstream human/bot for envelope changes instead of applying them yourself.",
         ]
     else:
         rules = [
@@ -1164,11 +1234,14 @@ def render_source_selection_prompt(run_dir: Path, round_id: str, role: str) -> P
         "5. status must be exactly one of: complete, pending, blocked. For a finished selection, use complete (not completed).",
         "6. If no raw fetch is needed, keep selected_sources as [] and explain why in summary.",
         "7. Fill family_plans explicitly. Include one family_plans entry for every governed family in packet.governance.families and one layer_plans entry for every governed layer.",
-        "8. For each selected L2 layer, provide a non-empty anchor_refs list and a valid anchor_mode.",
-        "9. Use authorization_basis=entry-layer for L1 entry layers, policy-auto for auto-selectable non-entry layers, and upstream-approval for packet.governance.approved_layers decisions.",
-        "10. Do not invent moderator overrides or self-apply envelope changes. If governance or caps are insufficient, keep selection inside the current envelope and use override_requests with one or more explicit policy requests.",
-        "11. Each override_requests item must stay aligned with the current run_id, round_id, agent_role, and request_origin_kind=source-selection. Use target_path only for the profile-governed fields listed in packet.policy_profile.overrideable_paths.",
-        "12. If no override is needed, keep override_requests as [].",
+        "7a. Each family_plans entry must include selected and reason. Use the exact key name reason, not justification.",
+        "7b. Each layer_plans entry must include selected and reason. Use the exact key name reason, not justification.",
+        "8. Every layer_plans entry must include anchor_mode and anchor_refs. Use anchor_mode=none and anchor_refs=[] for L1 layers and any unanchored or unselected layer.",
+        "9. For each selected L2 layer, provide a non-empty anchor_refs list and a non-none anchor_mode.",
+        "10. Use authorization_basis=entry-layer for L1 entry layers, policy-auto for auto-selectable non-entry layers, and upstream-approval for packet.governance.approved_layers decisions.",
+        "11. Do not invent moderator overrides or self-apply envelope changes. If governance or caps are insufficient, keep selection inside the current envelope and use override_requests with one or more explicit policy requests.",
+        "12. Each override_requests item must stay aligned with the current run_id, round_id, agent_role, and request_origin_kind=source-selection. Use target_path only for the profile-governed fields listed in packet.policy_profile.overrideable_paths.",
+        "13. If no override is needed, keep override_requests as [].",
         "",
         "After editing, validate with:",
         validate_command,
@@ -1342,12 +1415,51 @@ def build_current_step_text(run_dir: Path, state: dict[str, Any]) -> str:
     elif stage == STAGE_READY_DATA_PLANE:
         lines.extend(
             [
-                "Run normalization and data-readiness draft generation:",
+                "Run normalization and evidence-curation packet generation:",
                 "python3 "
                 + str(SCRIPT_DIR / "eco_council_supervisor.py")
                 + " continue-run --run-dir "
                 + str(run_dir)
                 + " --pretty",
+            ]
+        )
+    elif stage == STAGE_AWAITING_EVIDENCE_CURATION:
+        lines.extend(
+            [
+                "Preferred: run the two expert curation turns automatically, one by one:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role sociologist --pretty",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role environmentalist --pretty",
+                "",
+                "Manual fallback:",
+                "1. Open the sociologist session prompt:",
+                str(session_prompt_path(run_dir, "sociologist")),
+                "",
+                "2. Send this claim-curation prompt to the sociologist agent:",
+                str(outbox_message_path(run_dir, "sociologist_claim_curation")),
+                "",
+                "3. Import the returned JSON:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-claim-curation --run-dir "
+                + str(run_dir)
+                + " --input /path/to/claim_curation.json --pretty",
+                "",
+                "4. Repeat the same pattern for the environmentalist:",
+                str(session_prompt_path(run_dir, "environmentalist")),
+                str(outbox_message_path(run_dir, "environmentalist_observation_curation")),
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-observation-curation --run-dir "
+                + str(run_dir)
+                + " --input /path/to/observation_curation.json --pretty",
             ]
         )
     elif stage == STAGE_AWAITING_DATA_READINESS:
@@ -1414,10 +1526,36 @@ def build_current_step_text(run_dir: Path, state: dict[str, Any]) -> str:
                 + " --input /path/to/matching_authorization.json --pretty",
             ]
         )
+    elif stage == STAGE_AWAITING_MATCHING_ADJUDICATION:
+        lines.extend(
+            [
+                "Preferred: run the moderator matching-adjudication turn automatically:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " run-agent-step --run-dir "
+                + str(run_dir)
+                + " --role moderator --pretty",
+                "",
+                "Manual fallback:",
+                "1. Open the moderator session prompt:",
+                str(session_prompt_path(run_dir, "moderator")),
+                "",
+                "2. Send this matching-adjudication prompt to the moderator agent:",
+                str(outbox_message_path(run_dir, "moderator_matching_adjudication")),
+                "",
+                "3. Import the returned JSON:",
+                "python3 "
+                + str(SCRIPT_DIR / "eco_council_supervisor.py")
+                + " import-matching-adjudication --run-dir "
+                + str(run_dir)
+                + " --input /path/to/matching_adjudication.json --pretty",
+            ]
+        )
     elif stage == STAGE_READY_MATCHING_ADJUDICATION:
         lines.extend(
             [
-                "Run the authorized matching and adjudication stage:",
+                "Run the matching-adjudication materialization and report-packet stage:",
+                "If matching_adjudication_execution.json is already complete and still matches the current canonical inputs, continue-run will reuse it.",
                 "python3 "
                 + str(SCRIPT_DIR / "eco_council_supervisor.py")
                 + " continue-run --run-dir "
@@ -1544,9 +1682,12 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
         "moderator_task_review",
         "sociologist_source_selection",
         "environmentalist_source_selection",
+        "sociologist_claim_curation",
+        "environmentalist_observation_curation",
         "sociologist_data_readiness",
         "environmentalist_data_readiness",
         "moderator_matching_authorization",
+        "moderator_matching_adjudication",
         "sociologist_report",
         "environmentalist_report",
         "moderator_decision",
@@ -1577,6 +1718,23 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
                     prompt_path=prompt_path,
                 ),
             )
+    if stage == STAGE_AWAITING_EVIDENCE_CURATION:
+        write_text(
+            outbox_message_path(run_dir, "sociologist_claim_curation"),
+            role_prompt_outbox_text(
+                role="sociologist",
+                round_id=current_round_id,
+                prompt_path=claim_curation_prompt_path(run_dir, current_round_id),
+            ),
+        )
+        write_text(
+            outbox_message_path(run_dir, "environmentalist_observation_curation"),
+            role_prompt_outbox_text(
+                role="environmentalist",
+                round_id=current_round_id,
+                prompt_path=observation_curation_prompt_path(run_dir, current_round_id),
+            ),
+        )
     if stage == STAGE_AWAITING_DATA_READINESS:
         for role in READINESS_ROLES:
             write_text(
@@ -1594,6 +1752,16 @@ def refresh_supervisor_files(run_dir: Path, state: dict[str, Any]) -> None:
                 role="moderator",
                 round_id=current_round_id,
                 prompt_path=matching_authorization_prompt_path(run_dir, current_round_id),
+                history_path=history_path,
+            ),
+        )
+    if stage == STAGE_AWAITING_MATCHING_ADJUDICATION:
+        write_text(
+            outbox_message_path(run_dir, "moderator_matching_adjudication"),
+            role_prompt_outbox_text(
+                role="moderator",
+                round_id=current_round_id,
+                prompt_path=matching_adjudication_prompt_path(run_dir, current_round_id),
                 history_path=history_path,
             ),
         )
@@ -1632,8 +1800,10 @@ def build_state_payload(*, run_dir: Path, round_id: str, agent_prefix: str) -> d
         "imports": {
             "task_review_received": False,
             "source_selection_roles_received": [],
+            "curation_roles_received": [],
             "data_readiness_roles_received": [],
             "matching_authorization_received": False,
+            "matching_adjudication_received": False,
             "report_roles_received": [],
             "decision_received": False,
         },
@@ -1677,8 +1847,10 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
     stage_outboxes = {
         STAGE_AWAITING_TASK_REVIEW: ("moderator_task_review",),
         STAGE_AWAITING_SOURCE_SELECTION: ("sociologist_source_selection", "environmentalist_source_selection"),
+        STAGE_AWAITING_EVIDENCE_CURATION: ("sociologist_claim_curation", "environmentalist_observation_curation"),
         STAGE_AWAITING_DATA_READINESS: ("sociologist_data_readiness", "environmentalist_data_readiness"),
         STAGE_AWAITING_MATCHING_AUTHORIZATION: ("moderator_matching_authorization",),
+        STAGE_AWAITING_MATCHING_ADJUDICATION: ("moderator_matching_adjudication",),
         STAGE_AWAITING_REPORTS: ("sociologist_report", "environmentalist_report"),
         STAGE_AWAITING_DECISION: ("moderator_decision",),
     }.get(stage, ())
@@ -1710,6 +1882,13 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
                     if maybe_text(role)
                 }
             ),
+            "curation_roles_received": sorted(
+                {
+                    maybe_text(role)
+                    for role in imports.get("curation_roles_received", [])
+                    if maybe_text(role)
+                }
+            ),
             "data_readiness_roles_received": sorted(
                 {
                     maybe_text(role)
@@ -1718,6 +1897,7 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
                 }
             ),
             "matching_authorization_received": bool(imports.get("matching_authorization_received")),
+            "matching_adjudication_received": bool(imports.get("matching_adjudication_received")),
             "report_roles_received": sorted(
                 {maybe_text(role) for role in imports.get("report_roles_received", []) if maybe_text(role)}
             ),
@@ -1732,6 +1912,14 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
             role: str(source_selection_prompt_path(run_dir, round_id, role))
             for role in SOURCE_SELECTION_ROLES
         },
+        "curation_paths": {
+            "sociologist": str(claim_curation_path(run_dir, round_id)),
+            "environmentalist": str(observation_curation_path(run_dir, round_id)),
+        },
+        "curation_prompt_paths": {
+            "sociologist": str(claim_curation_prompt_path(run_dir, round_id)),
+            "environmentalist": str(observation_curation_prompt_path(run_dir, round_id)),
+        },
         "data_readiness_paths": {
             role: str(data_readiness_report_path(run_dir, round_id, role))
             for role in READINESS_ROLES
@@ -1742,6 +1930,9 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
         },
         "matching_authorization_path": str(matching_authorization_path(run_dir, round_id)),
         "matching_authorization_prompt_path": str(matching_authorization_prompt_path(run_dir, round_id)),
+        "matching_candidate_set_path": str(matching_candidate_set_path(run_dir, round_id)),
+        "matching_adjudication_path": str(matching_adjudication_path(run_dir, round_id)),
+        "matching_adjudication_prompt_path": str(matching_adjudication_prompt_path(run_dir, round_id)),
         "report_prompt_paths": {
             role: str(report_prompt_path(run_dir, round_id, role))
             for role in REPORT_ROLES
@@ -1879,9 +2070,8 @@ def stage_failure_related_paths(run_dir: Path, state: dict[str, Any], action_nam
             [
                 str(fetch_execution_path(run_dir, round_id)),
                 str(data_plane_execution_path(run_dir, round_id)),
-                str(data_readiness_prompt_path(run_dir, round_id, "sociologist")),
-                str(data_readiness_prompt_path(run_dir, round_id, "environmentalist")),
-                str(matching_authorization_prompt_path(run_dir, round_id)),
+                str(claim_curation_prompt_path(run_dir, round_id)),
+                str(observation_curation_prompt_path(run_dir, round_id)),
                 str(reporting_handoff_path(run_dir, round_id)),
             ]
         )
@@ -1889,6 +2079,7 @@ def stage_failure_related_paths(run_dir: Path, state: dict[str, Any], action_nam
         paths.extend(
             [
                 str(matching_authorization_path(run_dir, round_id)),
+                str(matching_adjudication_path(run_dir, round_id)),
                 str(matching_execution_path(run_dir, round_id)),
                 str(report_prompt_path(run_dir, round_id, "sociologist")),
                 str(report_prompt_path(run_dir, round_id, "environmentalist")),
@@ -1926,7 +2117,8 @@ def stage_failure_notes(stage: str) -> list[str]:
         ]
     if stage == STAGE_READY_MATCHING_ADJUDICATION:
         return [
-            "Supervisor keeps the run at ready-to-run-matching-adjudication until authorized matching and report-packet generation complete.",
+            "Supervisor keeps the run at ready-to-run-matching-adjudication until the imported moderator adjudication is materialized and report-packet generation completes.",
+            "continue-run will reuse an existing valid matching_adjudication_execution.json; otherwise it regenerates the stage.",
             "Inspect matching_adjudication_execution.json to find the failed substep, fix the local issue, then rerun continue-run.",
         ]
     if stage == STAGE_READY_PREPARE:
@@ -2023,10 +2215,12 @@ def stage_label_zh(stage: str) -> str:
         STAGE_AWAITING_SOURCE_SELECTION: "等待专家选择数据源",
         STAGE_READY_PREPARE: "等待生成本轮抓取计划",
         STAGE_READY_FETCH: "等待执行抓取计划",
-        STAGE_READY_DATA_PLANE: "等待归一化与数据准备审计生成",
+        STAGE_READY_DATA_PLANE: "等待归一化与证据筛选包生成",
+        STAGE_AWAITING_EVIDENCE_CURATION: "等待专家提交证据筛选结果",
         STAGE_AWAITING_DATA_READINESS: "等待专家提交数据准备审计",
         STAGE_AWAITING_MATCHING_AUTHORIZATION: "等待议长授权匹配",
-        STAGE_READY_MATCHING_ADJUDICATION: "等待执行匹配与证据裁定",
+        STAGE_AWAITING_MATCHING_ADJUDICATION: "等待议长提交匹配裁定",
+        STAGE_READY_MATCHING_ADJUDICATION: "等待物化匹配裁定并生成报告包",
         STAGE_AWAITING_REPORTS: "等待专家报告",
         STAGE_AWAITING_DECISION: "等待议长作出决议",
         STAGE_READY_PROMOTE: "等待正式写入本轮产物",
@@ -2076,8 +2270,8 @@ def format_list_zh(values: list[Any]) -> str:
 
 
 def round_number(round_id: str) -> int:
-    require_round_id(round_id)
-    return int(round_id.split("-")[1])
+    normalized = require_round_id(round_id)
+    return int(normalized.split("-")[1])
 
 
 def infer_fetch_role(status: dict[str, Any]) -> str:
@@ -2118,6 +2312,11 @@ def recommended_commands_for_stage(run_dir: Path, state: dict[str, Any]) -> list
             f"{script} run-agent-step --run-dir {current_run} --role sociologist --yes --pretty",
             f"{script} run-agent-step --run-dir {current_run} --role environmentalist --yes --pretty",
         ]
+    if stage == STAGE_AWAITING_EVIDENCE_CURATION:
+        return [
+            f"{script} run-agent-step --run-dir {current_run} --role sociologist --yes --pretty",
+            f"{script} run-agent-step --run-dir {current_run} --role environmentalist --yes --pretty",
+        ]
     if stage in {STAGE_READY_PREPARE, STAGE_READY_FETCH, STAGE_READY_DATA_PLANE, STAGE_READY_MATCHING_ADJUDICATION, STAGE_READY_PROMOTE, STAGE_READY_ADVANCE}:
         return [f"{script} continue-run --run-dir {current_run} --yes --pretty"]
     if stage == STAGE_AWAITING_DATA_READINESS:
@@ -2126,6 +2325,8 @@ def recommended_commands_for_stage(run_dir: Path, state: dict[str, Any]) -> list
             f"{script} run-agent-step --run-dir {current_run} --role environmentalist --yes --pretty",
         ]
     if stage == STAGE_AWAITING_MATCHING_AUTHORIZATION:
+        return [f"{script} run-agent-step --run-dir {current_run} --role moderator --yes --pretty"]
+    if stage == STAGE_AWAITING_MATCHING_ADJUDICATION:
         return [f"{script} run-agent-step --run-dir {current_run} --role moderator --yes --pretty"]
     if stage == STAGE_AWAITING_REPORTS:
         return [
@@ -2275,8 +2476,10 @@ def build_current_issues_zh(round_summaries: list[dict[str, Any]], state: dict[s
     current_stage_allows_fetch = current_stage in {
         STAGE_READY_FETCH,
         STAGE_READY_DATA_PLANE,
+        STAGE_AWAITING_EVIDENCE_CURATION,
         STAGE_AWAITING_DATA_READINESS,
         STAGE_AWAITING_MATCHING_AUTHORIZATION,
+        STAGE_AWAITING_MATCHING_ADJUDICATION,
         STAGE_READY_MATCHING_ADJUDICATION,
         STAGE_AWAITING_REPORTS,
         STAGE_AWAITING_DECISION,
@@ -2335,10 +2538,12 @@ def render_run_summary_markdown(
                 STAGE_AWAITING_SOURCE_SELECTION: "Waiting for expert source selection",
                 STAGE_READY_PREPARE: "Waiting to prepare the round fetch plan",
                 STAGE_READY_FETCH: "Waiting to execute the fetch plan",
-                STAGE_READY_DATA_PLANE: "Waiting to run normalization and data-readiness draft generation",
+                STAGE_READY_DATA_PLANE: "Waiting to run normalization and evidence-curation packet generation",
+                STAGE_AWAITING_EVIDENCE_CURATION: "Waiting for expert evidence curation",
                 STAGE_AWAITING_DATA_READINESS: "Waiting for expert data-readiness reports",
                 STAGE_AWAITING_MATCHING_AUTHORIZATION: "Waiting for moderator matching authorization",
-                STAGE_READY_MATCHING_ADJUDICATION: "Waiting to run matching and adjudication",
+                STAGE_AWAITING_MATCHING_ADJUDICATION: "Waiting for moderator matching adjudication",
+                STAGE_READY_MATCHING_ADJUDICATION: "Waiting to materialize the adjudication and generate report packets",
                 STAGE_AWAITING_REPORTS: "Waiting for expert reports",
                 STAGE_AWAITING_DECISION: "Waiting for moderator decision",
                 STAGE_READY_PROMOTE: "Waiting to promote canonical outputs",
@@ -2439,8 +2644,10 @@ def render_run_summary_markdown(
         current_stage_allows_fetch = current_stage in {
             STAGE_READY_FETCH,
             STAGE_READY_DATA_PLANE,
+            STAGE_AWAITING_EVIDENCE_CURATION,
             STAGE_AWAITING_DATA_READINESS,
             STAGE_AWAITING_MATCHING_AUTHORIZATION,
+            STAGE_AWAITING_MATCHING_ADJUDICATION,
             STAGE_READY_MATCHING_ADJUDICATION,
             STAGE_AWAITING_REPORTS,
             STAGE_AWAITING_DECISION,
@@ -2813,6 +3020,9 @@ def normalize_source_selection_payload(payload: Any) -> Any:
                 fixed_families.append(family)
                 continue
             family_plan = dict(family)
+            if "reason" not in family_plan and "justification" in family_plan:
+                family_plan["reason"] = family_plan.pop("justification")
+            family_id = maybe_text(family_plan.get("family_id"))
             layer_plans = family_plan.get("layer_plans")
             if isinstance(layer_plans, list):
                 fixed_layers: list[Any] = []
@@ -2823,8 +3033,26 @@ def normalize_source_selection_payload(payload: Any) -> Any:
                     layer_plan = dict(layer)
                     if "source_skills" not in layer_plan and "selected_skills" in layer_plan:
                         layer_plan["source_skills"] = layer_plan.pop("selected_skills")
+                    if "reason" not in layer_plan and "justification" in layer_plan:
+                        layer_plan["reason"] = layer_plan.pop("justification")
+                    layer_id = maybe_text(layer_plan.get("layer_id"))
+                    if not maybe_text(layer_plan.get("reason")):
+                        selected = layer_plan.get("selected") is True
+                        if family_id and layer_id:
+                            layer_plan["reason"] = (
+                                f"Selected {family_id}.{layer_id} for the current round."
+                                if selected
+                                else f"Did not select {family_id}.{layer_id} for the current round."
+                            )
+                        elif layer_id:
+                            layer_plan["reason"] = (
+                                f"Selected {layer_id} for the current round."
+                                if selected
+                                else f"Did not select {layer_id} for the current round."
+                            )
                     anchor_mode = maybe_text(layer_plan.get("anchor_mode")).casefold()
                     anchor_mode_aliases = {
+                        "": "none",
                         "not-required": "none",
                         "not_required": "none",
                         "no-anchor": "none",
@@ -2834,8 +3062,75 @@ def normalize_source_selection_payload(payload: Any) -> Any:
                         layer_plan["anchor_mode"] = anchor_mode_aliases[anchor_mode]
                     fixed_layers.append(layer_plan)
                 family_plan["layer_plans"] = fixed_layers
+            if not maybe_text(family_plan.get("reason")):
+                selected = family_plan.get("selected") is True
+                if family_id:
+                    family_plan["reason"] = (
+                        f"Selected the {family_id} family for the current round."
+                        if selected
+                        else f"Did not select the {family_id} family for the current round."
+                    )
             fixed_families.append(family_plan)
         normalized["family_plans"] = fixed_families
+
+    return normalized
+
+
+def normalize_matching_authorization_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized = json.loads(json.dumps(payload))
+
+    status_aliases = {
+        "approved": "authorized",
+        "authorize": "authorized",
+        "authorized": "authorized",
+        "defer": "deferred",
+        "deferred": "deferred",
+        "not_authorized": "not-authorized",
+        "not-authorized": "not-authorized",
+        "denied": "not-authorized",
+        "rejected": "not-authorized",
+    }
+
+    status = maybe_text(normalized.get("authorization_status")).casefold()
+    if status in status_aliases:
+        normalized["authorization_status"] = status_aliases[status]
+
+    requested_status = maybe_text(normalized.get("moderator_requested_status")).casefold()
+    if requested_status in status_aliases:
+        normalized["moderator_requested_status"] = status_aliases[requested_status]
+
+    basis_aliases = {
+        "readiness_ready": "readiness-ready",
+        "readiness-blocked": "readiness-blocked",
+        "readiness_blocked": "readiness-blocked",
+        "readiness-deferred": "readiness-deferred",
+        "readiness_deferred": "readiness-deferred",
+        "final_round_forced": "final-round-forced",
+        "final-round-forced": "final-round-forced",
+    }
+    basis = maybe_text(normalized.get("authorization_basis")).casefold()
+    if basis in basis_aliases:
+        normalized["authorization_basis"] = basis_aliases[basis]
+
+    if "rationale" not in normalized and "reason" in normalized:
+        normalized["rationale"] = normalized.pop("reason")
+
+    for field_name in ("referenced_readiness_ids", "claim_ids", "observation_ids", "open_questions"):
+        values = normalized.get(field_name)
+        if isinstance(values, list):
+            normalized[field_name] = unique_strings([maybe_text(item) for item in values if maybe_text(item)])
+
+    for field_name in ("allow_isolated_evidence", "moderator_override"):
+        value = normalized.get(field_name)
+        if isinstance(value, str):
+            text = maybe_text(value).casefold()
+            if text in {"true", "yes", "y", "1"}:
+                normalized[field_name] = True
+            elif text in {"false", "no", "n", "0"}:
+                normalized[field_name] = False
 
     return normalized
 
@@ -3079,35 +3374,84 @@ def ensure_source_selection_respects_packet(*, run_dir: Path, round_id: str, rol
         )
 
 
+def ensure_claim_curation_matches(payload: Any, *, round_id: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Claim-curation payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    payload_role = maybe_text(payload.get("agent_role"))
+    payload_status = maybe_text(payload.get("status"))
+    if payload_round_id and payload_round_id != round_id:
+        raise ValueError(f"Claim-curation round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_role and payload_role != "sociologist":
+        raise ValueError(f"Claim-curation agent_role mismatch: expected sociologist, got {payload_role}")
+    if payload_status == "pending":
+        raise ValueError("Claim-curation payload must not remain pending when imported into the supervisor.")
+
+
+def ensure_observation_curation_matches(payload: Any, *, round_id: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Observation-curation payload must be a JSON object.")
+    payload_round_id = maybe_text(payload.get("round_id"))
+    payload_role = maybe_text(payload.get("agent_role"))
+    payload_status = maybe_text(payload.get("status"))
+    if payload_round_id and payload_round_id != round_id:
+        raise ValueError(f"Observation-curation round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_role and payload_role != "environmentalist":
+        raise ValueError(f"Observation-curation agent_role mismatch: expected environmentalist, got {payload_role}")
+    if payload_status == "pending":
+        raise ValueError("Observation-curation payload must not remain pending when imported into the supervisor.")
+
+
 def ensure_data_readiness_matches(payload: Any, *, round_id: str, role: str) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Data-readiness payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
     payload_role = maybe_text(payload.get("agent_role"))
-    if payload_round_id and payload_round_id != round_id:
-        raise ValueError(f"Data-readiness round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_round_id and require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Data-readiness round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     if payload_role and payload_role != role:
         raise ValueError(f"Data-readiness agent_role mismatch: expected {role}, got {payload_role}")
 
 
-def ensure_matching_authorization_matches(payload: Any, *, round_id: str) -> None:
+def ensure_matching_authorization_matches(payload: Any, *, round_id: str, expected_run_id: str) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Matching-authorization payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
+    payload_run_id = maybe_text(payload.get("run_id"))
     payload_round_id = maybe_text(payload.get("round_id"))
     payload_role = maybe_text(payload.get("agent_role"))
-    if payload_round_id and payload_round_id != round_id:
-        raise ValueError(f"Matching-authorization round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_run_id and payload_run_id != expected_run_id:
+        raise ValueError(f"Matching-authorization run_id mismatch: expected {expected_run_id}, got {payload_run_id}")
+    if payload_round_id and require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Matching-authorization round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     if payload_role and payload_role != "moderator":
         raise ValueError(f"Matching-authorization agent_role mismatch: expected moderator, got {payload_role}")
+
+
+def ensure_matching_adjudication_matches(payload: Any, *, round_id: str, expected_run_id: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Matching-adjudication payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
+    payload_run_id = maybe_text(payload.get("run_id"))
+    payload_round_id = maybe_text(payload.get("round_id"))
+    payload_role = maybe_text(payload.get("agent_role"))
+    if payload_run_id and payload_run_id != expected_run_id:
+        raise ValueError(f"Matching-adjudication run_id mismatch: expected {expected_run_id}, got {payload_run_id}")
+    if payload_round_id and require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Matching-adjudication round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
+    if payload_role and payload_role != "moderator":
+        raise ValueError(f"Matching-adjudication agent_role mismatch: expected moderator, got {payload_role}")
 
 
 def ensure_report_matches(payload: Any, *, round_id: str, role: str) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Report payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
     payload_role = maybe_text(payload.get("agent_role"))
-    if payload_round_id and payload_round_id != round_id:
-        raise ValueError(f"Report round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_round_id and require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Report round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     if payload_role and payload_role != role:
         raise ValueError(f"Report agent_role mismatch: expected {role}, got {payload_role}")
 
@@ -3115,9 +3459,10 @@ def ensure_report_matches(payload: Any, *, round_id: str, role: str) -> None:
 def ensure_decision_matches(payload: Any, *, round_id: str) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Decision payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
-    if payload_round_id and payload_round_id != round_id:
-        raise ValueError(f"Decision round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if payload_round_id and require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Decision round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
 
 
 def fetch_status_has_usable_artifact(status: dict[str, Any]) -> bool:
@@ -3165,11 +3510,12 @@ def validate_json_artifact_if_applicable(path: Path) -> None:
 def ensure_fetch_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Fetch execution payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
     if not payload_round_id:
         raise ValueError("Fetch execution payload must include round_id.")
-    if payload_round_id != round_id:
-        raise ValueError(f"Fetch execution round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Fetch execution round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     payload_run_dir = maybe_text(payload.get("run_dir"))
     expected_run_dir = run_dir.expanduser().resolve()
     if payload_run_dir:
@@ -3295,11 +3641,12 @@ def ensure_fetch_execution_matches(payload: Any, *, run_dir: Path, round_id: str
 def ensure_data_plane_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Data-plane execution payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
     if not payload_round_id:
         raise ValueError("Data-plane execution payload must include round_id.")
-    if payload_round_id != round_id:
-        raise ValueError(f"Data-plane execution round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Data-plane execution round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     payload_run_dir = maybe_text(payload.get("run_dir"))
     expected_run_dir = run_dir.expanduser().resolve()
     if payload_run_dir:
@@ -3347,8 +3694,10 @@ def ensure_data_plane_execution_matches(payload: Any, *, run_dir: Path, round_id
     handoff = resolved_required_path(payload.get("reporting_handoff_path"), label="data-plane execution reporting_handoff_path")
     required_paths = [
         handoff,
-        data_readiness_prompt_path(run_dir, round_id, "sociologist"),
-        data_readiness_prompt_path(run_dir, round_id, "environmentalist"),
+        claim_curation_packet_path(run_dir, round_id),
+        observation_curation_packet_path(run_dir, round_id),
+        claim_curation_prompt_path(run_dir, round_id),
+        observation_curation_prompt_path(run_dir, round_id),
     ]
     for path in required_paths:
         if not path.exists():
@@ -3366,11 +3715,12 @@ def ensure_data_plane_execution_matches(payload: Any, *, run_dir: Path, round_id
 def ensure_matching_execution_matches(payload: Any, *, run_dir: Path, round_id: str, source_path: Path) -> None:
     if not isinstance(payload, dict):
         raise ValueError("Matching/adjudication execution payload must be a JSON object.")
+    expected_round_id = require_round_id(round_id)
     payload_round_id = maybe_text(payload.get("round_id"))
     if not payload_round_id:
         raise ValueError("Matching/adjudication execution payload must include round_id.")
-    if payload_round_id != round_id:
-        raise ValueError(f"Matching/adjudication execution round_id mismatch: expected {round_id}, got {payload_round_id}")
+    if require_round_id(payload_round_id) != expected_round_id:
+        raise ValueError(f"Matching/adjudication execution round_id mismatch: expected {expected_round_id}, got {payload_round_id}")
     payload_run_dir = maybe_text(payload.get("run_dir"))
     expected_run_dir = run_dir.expanduser().resolve()
     if payload_run_dir:
@@ -3418,6 +3768,9 @@ def ensure_matching_execution_matches(payload: Any, *, run_dir: Path, round_id: 
     handoff = resolved_required_path(payload.get("reporting_handoff_path"), label="matching execution reporting_handoff_path")
     required_paths = [
         handoff,
+        matching_adjudication_path(run_dir, round_id),
+        report_packet_path(run_dir, round_id, "sociologist"),
+        report_packet_path(run_dir, round_id, "environmentalist"),
         report_prompt_path(run_dir, round_id, "sociologist"),
         report_prompt_path(run_dir, round_id, "environmentalist"),
         matching_result_path(run_dir, round_id),
@@ -3427,6 +3780,13 @@ def ensure_matching_execution_matches(payload: Any, *, run_dir: Path, round_id: 
         if not path.exists():
             raise ValueError(f"Matching/adjudication execution required output does not exist: {path}")
     authorization_payload = load_json_if_exists(matching_authorization_path(run_dir, round_id))
+    mission_payload = load_mission(run_dir)
+    if isinstance(authorization_payload, dict):
+        authorization_payload = effective_matching_authorization_payload(
+            mission=mission_payload,
+            round_id=round_id,
+            payload=authorization_payload,
+        )
     if not isinstance(authorization_payload, dict) or maybe_text(authorization_payload.get("authorization_status")) != "authorized":
         raise ValueError("Matching/adjudication execution requires canonical matching_authorization.json with authorization_status=authorized.")
     canonical_authorization = matching_authorization_path(run_dir, round_id)
@@ -3436,6 +3796,82 @@ def ensure_matching_execution_matches(payload: Any, *, run_dir: Path, round_id: 
         and source_path.stat().st_mtime_ns < canonical_authorization.stat().st_mtime_ns
     ):
         raise ValueError("Matching/adjudication execution appears older than the current matching_authorization.json. Regenerate it.")
+    canonical_adjudication = matching_adjudication_path(run_dir, round_id)
+    if (
+        source_path.exists()
+        and canonical_adjudication.exists()
+        and source_path.stat().st_mtime_ns < canonical_adjudication.stat().st_mtime_ns
+    ):
+        raise ValueError("Matching/adjudication execution appears older than the current matching_adjudication.json. Regenerate it.")
+
+
+def materialize_curations_for_supervisor(run_dir: Path, round_id: str) -> None:
+    run_json_command(
+        [
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "materialize-curations",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "build-round-context",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+
+
+def build_data_readiness_artifacts_for_supervisor(run_dir: Path, round_id: str) -> None:
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-data-readiness-packets",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(CONTRACT_SCRIPT),
+            "validate-bundle",
+            "--run-dir",
+            str(run_dir),
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
 
 
 def build_matching_authorization_artifacts_for_supervisor(run_dir: Path, round_id: str) -> None:
@@ -3444,6 +3880,48 @@ def build_matching_authorization_artifacts_for_supervisor(run_dir: Path, round_i
             "python3",
             str(REPORTING_SCRIPT),
             "build-matching-authorization-packet",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "render-openclaw-prompts",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+
+
+def build_matching_adjudication_artifacts_for_supervisor(run_dir: Path, round_id: str) -> None:
+    run_json_command(
+        [
+            "python3",
+            str(NORMALIZE_SCRIPT),
+            "prepare-matching-adjudication",
+            "--run-dir",
+            str(run_dir),
+            "--round-id",
+            round_id,
+            "--pretty",
+        ],
+        cwd=REPO_DIR,
+    )
+    run_json_command(
+        [
+            "python3",
+            str(REPORTING_SCRIPT),
+            "build-matching-adjudication-packet",
             "--run-dir",
             str(run_dir),
             "--round-id",
@@ -3506,8 +3984,10 @@ def import_task_review_payload(*, run_dir: Path, state: dict[str, Any], payload:
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": [],
+        "curation_roles_received": [],
         "data_readiness_roles_received": [],
         "matching_authorization_received": False,
+        "matching_adjudication_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -3584,6 +4064,70 @@ def import_source_selection_payload(
     }
 
 
+def import_claim_curation_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_claim_curation_matches(payload, round_id=round_id)
+    target = claim_curation_path(run_dir, round_id)
+    write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role="sociologist", origin_kind="claim-curation", payload=payload)
+
+    imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
+    received = {maybe_text(item) for item in imports.get("curation_roles_received", []) if maybe_text(item)}
+    received.add("sociologist")
+    imports["curation_roles_received"] = sorted(received)
+    state["imports"] = imports
+    if received == set(CURATION_ROLES):
+        imports["data_readiness_roles_received"] = []
+        imports["matching_authorization_received"] = False
+        imports["matching_adjudication_received"] = False
+        imports["report_roles_received"] = []
+        imports["decision_received"] = False
+        materialize_curations_for_supervisor(run_dir, round_id)
+        build_data_readiness_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_DATA_READINESS
+    else:
+        state["stage"] = STAGE_AWAITING_EVIDENCE_CURATION
+    save_state(run_dir, state)
+    return {
+        "imported_kind": "claim-curation",
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+
+
+def import_observation_curation_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_observation_curation_matches(payload, round_id=round_id)
+    target = observation_curation_path(run_dir, round_id)
+    write_json(target, payload, pretty=True)
+    persist_override_requests_for_role(run_dir=run_dir, round_id=round_id, role="environmentalist", origin_kind="observation-curation", payload=payload)
+
+    imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
+    received = {maybe_text(item) for item in imports.get("curation_roles_received", []) if maybe_text(item)}
+    received.add("environmentalist")
+    imports["curation_roles_received"] = sorted(received)
+    state["imports"] = imports
+    if received == set(CURATION_ROLES):
+        imports["data_readiness_roles_received"] = []
+        imports["matching_authorization_received"] = False
+        imports["matching_adjudication_received"] = False
+        imports["report_roles_received"] = []
+        imports["decision_received"] = False
+        materialize_curations_for_supervisor(run_dir, round_id)
+        build_data_readiness_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_DATA_READINESS
+    else:
+        state["stage"] = STAGE_AWAITING_EVIDENCE_CURATION
+    save_state(run_dir, state)
+    return {
+        "imported_kind": "observation-curation",
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+
+
 def import_report_payload(*, run_dir: Path, state: dict[str, Any], role: str, payload: Any, source_path: Path) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
     ensure_report_matches(payload, round_id=round_id, role=role)
@@ -3642,6 +4186,8 @@ def import_data_readiness_payload(*, run_dir: Path, state: dict[str, Any], role:
     received = {maybe_text(item) for item in imports.get("data_readiness_roles_received", []) if maybe_text(item)}
     received.add(role)
     imports["data_readiness_roles_received"] = sorted(received)
+    imports["matching_authorization_received"] = False
+    imports["matching_adjudication_received"] = False
     state["imports"] = imports
     if received == set(READINESS_ROLES):
         build_matching_authorization_artifacts_for_supervisor(run_dir, round_id)
@@ -3660,21 +4206,59 @@ def import_data_readiness_payload(*, run_dir: Path, state: dict[str, Any], role:
 
 def import_matching_authorization_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
-    ensure_matching_authorization_matches(payload, round_id=round_id)
+    payload = normalize_matching_authorization_payload(payload)
+    ensure_matching_authorization_matches(payload, round_id=round_id, expected_run_id=current_run_id(run_dir))
+    payload = effective_matching_authorization_payload(
+        mission=load_mission(run_dir),
+        round_id=round_id,
+        payload=payload,
+    )
     target = matching_authorization_path(run_dir, round_id)
     write_json(target, payload, pretty=True)
 
     imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
     imports["matching_authorization_received"] = True
+    imports["matching_adjudication_received"] = False
     state["imports"] = imports
     if maybe_text(payload.get("authorization_status")) == "authorized":
-        state["stage"] = STAGE_READY_MATCHING_ADJUDICATION
+        build_matching_adjudication_artifacts_for_supervisor(run_dir, round_id)
+        state["stage"] = STAGE_AWAITING_MATCHING_ADJUDICATION
     else:
         build_decision_artifacts_for_supervisor(run_dir, round_id)
         state["stage"] = STAGE_AWAITING_DECISION
     save_state(run_dir, state)
     return {
         "imported_kind": "matching-authorization",
+        "input_path": str(source_path),
+        "target_path": str(target),
+        "state": build_status_payload(run_dir, state),
+    }
+
+
+def import_matching_adjudication_payload(*, run_dir: Path, state: dict[str, Any], payload: Any, source_path: Path) -> dict[str, Any]:
+    round_id = maybe_text(state.get("current_round_id"))
+    ensure_matching_adjudication_matches(payload, round_id=round_id, expected_run_id=current_run_id(run_dir))
+    authorization_payload = load_json_if_exists(matching_authorization_path(run_dir, round_id))
+    authorization_payload = effective_matching_authorization_payload(
+        mission=load_mission(run_dir),
+        round_id=round_id,
+        payload=authorization_payload if isinstance(authorization_payload, dict) else {},
+    )
+    if maybe_text(authorization_payload.get("authorization_status")) != "authorized":
+        raise ValueError("Matching-adjudication import requires canonical matching_authorization.json with authorization_status=authorized.")
+    if maybe_text(payload.get("authorization_id")) != maybe_text(authorization_payload.get("authorization_id")):
+        raise ValueError("Matching-adjudication authorization_id does not match matching_authorization.json.")
+    target = matching_adjudication_path(run_dir, round_id)
+    write_json(target, payload, pretty=True)
+
+    imports = state.get("imports", {}) if isinstance(state.get("imports"), dict) else {}
+    imports["matching_authorization_received"] = True
+    imports["matching_adjudication_received"] = True
+    state["imports"] = imports
+    state["stage"] = STAGE_READY_MATCHING_ADJUDICATION
+    save_state(run_dir, state)
+    return {
+        "imported_kind": "matching-adjudication",
         "input_path": str(source_path),
         "target_path": str(target),
         "state": build_status_payload(run_dir, state),
@@ -3703,12 +4287,14 @@ def import_data_plane_execution_payload(*, run_dir: Path, state: dict[str, Any],
     target = data_plane_execution_path(run_dir, round_id)
     write_json(target, payload, pretty=True)
     signal_corpus_import = maybe_auto_import_signal_corpus(run_dir, state, round_id)
-    state["stage"] = STAGE_AWAITING_DATA_READINESS
+    state["stage"] = STAGE_AWAITING_EVIDENCE_CURATION
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "curation_roles_received": [],
         "data_readiness_roles_received": [],
         "matching_authorization_received": False,
+        "matching_adjudication_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -3750,6 +4336,21 @@ def current_agent_turn(*, state: dict[str, Any], requested_role: str) -> tuple[s
             return (missing[0], "source-selection", "source-selection")
         raise ValueError("Current stage needs --role sociologist or --role environmentalist.")
 
+    if stage == STAGE_AWAITING_EVIDENCE_CURATION:
+        received = {maybe_text(item) for item in imports.get("curation_roles_received", []) if maybe_text(item)}
+        missing = [role for role in CURATION_ROLES if role not in received]
+        if requested:
+            if requested not in CURATION_ROLES:
+                raise ValueError("Evidence-curation stage requires role=sociologist or role=environmentalist.")
+            if requested not in missing:
+                raise ValueError(f"Role {requested} has already been imported for this round.")
+        elif len(missing) != 1:
+            raise ValueError("Current stage needs --role sociologist or --role environmentalist.")
+        selected_role = requested or missing[0]
+        if selected_role == "sociologist":
+            return ("sociologist", "claim-curation", "claim-curation")
+        return ("environmentalist", "observation-curation", "observation-curation")
+
     if stage == STAGE_AWAITING_DATA_READINESS:
         missing = [
             role
@@ -3770,6 +4371,11 @@ def current_agent_turn(*, state: dict[str, Any], requested_role: str) -> tuple[s
         if requested and requested != "moderator":
             raise ValueError("Current stage only accepts role=moderator.")
         return ("moderator", "matching-authorization", "matching-authorization")
+
+    if stage == STAGE_AWAITING_MATCHING_ADJUDICATION:
+        if requested and requested != "moderator":
+            raise ValueError("Current stage only accepts role=moderator.")
+        return ("moderator", "matching-adjudication", "matching-adjudication")
 
     if stage == STAGE_AWAITING_DECISION:
         if requested and requested != "moderator":
@@ -3835,6 +4441,38 @@ def build_agent_message(*, run_dir: Path, state: dict[str, Any], role: str, turn
             ]
         )
 
+    if turn_kind == "claim-curation":
+        prompt_text = load_text(claim_curation_prompt_path(run_dir, round_id))
+        packet_text = load_text(claim_curation_packet_path(run_dir, round_id))
+        return "\n\n".join(
+            [
+                session_text,
+                (
+                    f"Current automated turn: sociologist claim curation for {round_id}.\n"
+                    "The required packet content is embedded below. Do not ask for filesystem access. "
+                    "Return only the final JSON object."
+                ),
+                "=== CLAIM CURATION PROMPT ===\n" + prompt_text,
+                "=== CLAIM CURATION PACKET.JSON ===\n" + packet_text,
+            ]
+        )
+
+    if turn_kind == "observation-curation":
+        prompt_text = load_text(observation_curation_prompt_path(run_dir, round_id))
+        packet_text = load_text(observation_curation_packet_path(run_dir, round_id))
+        return "\n\n".join(
+            [
+                session_text,
+                (
+                    f"Current automated turn: environmentalist observation curation for {round_id}.\n"
+                    "The required packet content is embedded below. Do not ask for filesystem access. "
+                    "Return only the final JSON object."
+                ),
+                "=== OBSERVATION CURATION PROMPT ===\n" + prompt_text,
+                "=== OBSERVATION CURATION PACKET.JSON ===\n" + packet_text,
+            ]
+        )
+
     if turn_kind == "data-readiness":
         prompt_text = load_text(data_readiness_prompt_path(run_dir, round_id, role))
         packet_text = load_text(data_readiness_packet_path(run_dir, round_id, role))
@@ -3879,6 +4517,23 @@ def build_agent_message(*, run_dir: Path, state: dict[str, Any], role: str, turn
             ),
             "=== MATCHING AUTHORIZATION PROMPT ===\n" + prompt_text,
             "=== MATCHING AUTHORIZATION PACKET.JSON ===\n" + packet_text,
+        ]
+        if history_text:
+            sections.append("=== HISTORICAL CASE CONTEXT ===\n" + history_text)
+        return "\n\n".join(sections)
+
+    if turn_kind == "matching-adjudication":
+        prompt_text = load_text(matching_adjudication_prompt_path(run_dir, round_id))
+        packet_text = load_text(matching_adjudication_packet_path(run_dir, round_id))
+        sections = [
+            session_text,
+            (
+                f"Current automated turn: moderator matching adjudication for {round_id}.\n"
+                "The required packet content is embedded below. Do not ask for filesystem access. "
+                "Return only the final JSON object."
+            ),
+            "=== MATCHING ADJUDICATION PROMPT ===\n" + prompt_text,
+            "=== MATCHING ADJUDICATION PACKET.JSON ===\n" + packet_text,
         ]
         if history_text:
             sections.append("=== HISTORICAL CASE CONTEXT ===\n" + history_text)
@@ -3960,6 +4615,8 @@ def run_openclaw_agent_turn(
     if schema_kind == "source-selection":
         payload = normalize_source_selection_payload(payload)
         payload = hydrate_source_selection_layer_skills(run_dir=run_dir, round_id=round_id, role=role, payload=payload)
+    elif schema_kind == "matching-authorization":
+        payload = normalize_matching_authorization_payload(payload)
     write_json(json_path, payload, pretty=True)
     validate_input_file(schema_kind, json_path)
     return {
@@ -4047,11 +4704,11 @@ def command_summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"Mission payload is not a JSON object: {mission_path(run_dir)}")
 
     if args.round_id:
-        require_round_id(args.round_id)
-        target_round_dir = round_dir(run_dir, args.round_id)
+        normalized_round_id = require_round_id(args.round_id)
+        target_round_dir = round_dir(run_dir, normalized_round_id)
         if not target_round_dir.exists():
             raise ValueError(f"Round directory does not exist: {target_round_dir}")
-        round_ids = [args.round_id]
+        round_ids = [normalized_round_id]
     else:
         round_ids = discover_round_ids(run_dir)
     if not round_ids:
@@ -4069,7 +4726,7 @@ def command_summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     if args.output:
         output_path = Path(args.output).expanduser().resolve()
     else:
-        output_path = default_summary_output_path(run_dir, args.round_id, args.lang)
+        output_path = default_summary_output_path(run_dir, round_ids[-1] if len(round_ids) == 1 else "", args.lang)
     write_text(output_path, report_text)
 
     latest_decision_round = first_nonempty(
@@ -4244,12 +4901,14 @@ def continue_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, A
     signal_corpus_import = maybe_auto_import_signal_corpus(run_dir, state, round_id)
     if signal_corpus_import is not None and isinstance(payload, dict):
         payload["signal_corpus_import"] = signal_corpus_import
-    state["stage"] = STAGE_AWAITING_DATA_READINESS
+    state["stage"] = STAGE_AWAITING_EVIDENCE_CURATION
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "curation_roles_received": [],
         "data_readiness_roles_received": [],
         "matching_authorization_received": False,
+        "matching_adjudication_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -4299,8 +4958,10 @@ def continue_run_matching_adjudication(run_dir: Path, state: dict[str, Any]) -> 
     state["imports"] = {
         "task_review_received": True,
         "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+        "curation_roles_received": list(CURATION_ROLES),
         "data_readiness_roles_received": list(READINESS_ROLES),
         "matching_authorization_received": True,
+        "matching_adjudication_received": True,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -4319,8 +4980,10 @@ def continue_recover_or_run_matching_adjudication(run_dir: Path, state: dict[str
             state["imports"] = {
                 "task_review_received": True,
                 "source_selection_roles_received": list(SOURCE_SELECTION_ROLES),
+                "curation_roles_received": list(CURATION_ROLES),
                 "data_readiness_roles_received": list(READINESS_ROLES),
                 "matching_authorization_received": True,
+                "matching_adjudication_received": True,
                 "report_roles_received": [],
                 "decision_received": False,
             }
@@ -4387,8 +5050,10 @@ def continue_advance_round(run_dir: Path, state: dict[str, Any]) -> dict[str, An
     state["imports"] = {
         "task_review_received": False,
         "source_selection_roles_received": [],
+        "curation_roles_received": [],
         "data_readiness_roles_received": [],
         "matching_authorization_received": False,
+        "matching_adjudication_received": False,
         "report_roles_received": [],
         "decision_received": False,
     }
@@ -4473,6 +5138,30 @@ def command_import_source_selection(args: argparse.Namespace) -> dict[str, Any]:
         return import_source_selection_payload(run_dir=run_dir, state=state, role=role, payload=payload, source_path=input_path)
 
 
+def command_import_claim_curation(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    input_path = Path(args.input).expanduser().resolve()
+    validate_input_file("claim-curation", input_path)
+    payload = read_json(input_path)
+    with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
+        state = load_state(run_dir)
+        if maybe_text(state.get("stage")) != STAGE_AWAITING_EVIDENCE_CURATION:
+            raise ValueError("import-claim-curation is only allowed while waiting for expert evidence curation.")
+        return import_claim_curation_payload(run_dir=run_dir, state=state, payload=payload, source_path=input_path)
+
+
+def command_import_observation_curation(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    input_path = Path(args.input).expanduser().resolve()
+    validate_input_file("observation-curation", input_path)
+    payload = read_json(input_path)
+    with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
+        state = load_state(run_dir)
+        if maybe_text(state.get("stage")) != STAGE_AWAITING_EVIDENCE_CURATION:
+            raise ValueError("import-observation-curation is only allowed while waiting for expert evidence curation.")
+        return import_observation_curation_payload(run_dir=run_dir, state=state, payload=payload, source_path=input_path)
+
+
 def command_import_data_readiness(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     input_path = Path(args.input).expanduser().resolve()
@@ -4489,13 +5178,28 @@ def command_import_data_readiness(args: argparse.Namespace) -> dict[str, Any]:
 def command_import_matching_authorization(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     input_path = Path(args.input).expanduser().resolve()
+    original_payload = read_json(input_path)
+    payload = normalize_matching_authorization_payload(original_payload)
+    if payload != original_payload:
+        write_json(input_path, payload, pretty=True)
     validate_input_file("matching-authorization", input_path)
-    payload = read_json(input_path)
     with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
         state = load_state(run_dir)
         if maybe_text(state.get("stage")) != STAGE_AWAITING_MATCHING_AUTHORIZATION:
             raise ValueError("import-matching-authorization is only allowed while waiting for moderator matching authorization.")
         return import_matching_authorization_payload(run_dir=run_dir, state=state, payload=payload, source_path=input_path)
+
+
+def command_import_matching_adjudication(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    input_path = Path(args.input).expanduser().resolve()
+    validate_input_file("matching-adjudication", input_path)
+    payload = read_json(input_path)
+    with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
+        state = load_state(run_dir)
+        if maybe_text(state.get("stage")) != STAGE_AWAITING_MATCHING_ADJUDICATION:
+            raise ValueError("import-matching-adjudication is only allowed while waiting for moderator matching adjudication.")
+        return import_matching_adjudication_payload(run_dir=run_dir, state=state, payload=payload, source_path=input_path)
 
 
 def command_import_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -4597,6 +5301,20 @@ def command_run_agent_step(args: argparse.Namespace) -> dict[str, Any]:
                 payload=payload,
                 source_path=response_path,
             )
+        elif schema_kind == "claim-curation":
+            imported = import_claim_curation_payload(
+                run_dir=run_dir,
+                state=locked_state,
+                payload=payload,
+                source_path=response_path,
+            )
+        elif schema_kind == "observation-curation":
+            imported = import_observation_curation_payload(
+                run_dir=run_dir,
+                state=locked_state,
+                payload=payload,
+                source_path=response_path,
+            )
         elif schema_kind == "data-readiness-report":
             imported = import_data_readiness_payload(
                 run_dir=run_dir,
@@ -4607,6 +5325,13 @@ def command_run_agent_step(args: argparse.Namespace) -> dict[str, Any]:
             )
         elif schema_kind == "matching-authorization":
             imported = import_matching_authorization_payload(
+                run_dir=run_dir,
+                state=locked_state,
+                payload=payload,
+                source_path=response_path,
+            )
+        elif schema_kind == "matching-adjudication":
+            imported = import_matching_adjudication_payload(
                 run_dir=run_dir,
                 state=locked_state,
                 payload=payload,
@@ -4839,7 +5564,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_agent = sub.add_parser("run-agent-step", help="Send the current turn to OpenClaw, receive JSON, and import it.")
     run_agent.add_argument("--run-dir", required=True, help="Eco-council run directory.")
-    run_agent.add_argument("--role", default="", choices=("", "moderator", "sociologist", "environmentalist"), help="Optional role override for source-selection, data-readiness, report, or moderator-gated stages.")
+    run_agent.add_argument("--role", default="", choices=("", "moderator", "sociologist", "environmentalist"), help="Optional role override for source-selection, curation, data-readiness, report, or moderator-gated stages.")
     run_agent.add_argument("--timeout-seconds", type=int, default=600, help="OpenClaw agent timeout.")
     run_agent.add_argument("--thinking", default="low", choices=("off", "minimal", "low", "medium", "high"), help="OpenClaw thinking level.")
     run_agent.add_argument("--yes", action="store_true", help="Skip interactive approval.")
@@ -4856,6 +5581,16 @@ def build_parser() -> argparse.ArgumentParser:
     import_source_selection.add_argument("--input", required=True, help="JSON file returned by the expert agent.")
     import_source_selection.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
+    import_claim_curation = sub.add_parser("import-claim-curation", help="Import one claim-curation JSON into the canonical sociologist path.")
+    import_claim_curation.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    import_claim_curation.add_argument("--input", required=True, help="JSON file returned by the sociologist agent.")
+    import_claim_curation.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    import_observation_curation = sub.add_parser("import-observation-curation", help="Import one observation-curation JSON into the canonical environmentalist path.")
+    import_observation_curation.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    import_observation_curation.add_argument("--input", required=True, help="JSON file returned by the environmentalist agent.")
+    import_observation_curation.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
     import_data_readiness = sub.add_parser("import-data-readiness", help="Import one data-readiness-report JSON into the canonical role path.")
     import_data_readiness.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     import_data_readiness.add_argument("--role", required=True, choices=READINESS_ROLES, help="Expert role.")
@@ -4866,6 +5601,11 @@ def build_parser() -> argparse.ArgumentParser:
     import_matching_authorization.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     import_matching_authorization.add_argument("--input", required=True, help="JSON file returned by the moderator.")
     import_matching_authorization.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    import_matching_adjudication = sub.add_parser("import-matching-adjudication", help="Import moderator matching-adjudication JSON into the canonical path.")
+    import_matching_adjudication.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    import_matching_adjudication.add_argument("--input", required=True, help="JSON file returned by the moderator.")
+    import_matching_adjudication.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     import_report = sub.add_parser("import-report", help="Import one expert-report JSON into the draft path.")
     import_report.add_argument("--run-dir", required=True, help="Eco-council run directory.")
@@ -4905,8 +5645,11 @@ def main(argv: list[str] | None = None) -> int:
         "run-agent-step": command_run_agent_step,
         "import-task-review": command_import_task_review,
         "import-source-selection": command_import_source_selection,
+        "import-claim-curation": command_import_claim_curation,
+        "import-observation-curation": command_import_observation_curation,
         "import-data-readiness": command_import_data_readiness,
         "import-matching-authorization": command_import_matching_authorization,
+        "import-matching-adjudication": command_import_matching_adjudication,
         "import-report": command_import_report,
         "import-decision": command_import_decision,
         "import-fetch-execution": command_import_fetch_execution,

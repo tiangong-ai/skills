@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0.0",
+  "adjudication_id": "adjudication-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "moderator",
+  "authorization_id": "matchauth-round-001",
+  "candidate_set_id": "matchcand-round-001",
+  "summary": "The moderator accepted one match cluster, preserved no isolated evidence, and closed the round without remand.",
+  "rationale": "The nominated PM and fire-signal cluster was representative enough to support the current public claim without expanding the evidence boundary.",
+  "matching_result": {
+    "schema_version": "1.0.0",
+    "result_id": "matchres-round-001",
+    "run_id": "eco-20260320-chiangmai-smoke",
+    "round_id": "round-001",
+    "authorization_id": "matchauth-round-001",
+    "result_status": "matched",
+    "summary": "One public claim aligned with one physical-observation cluster in the mission window.",
+    "matched_pairs": [
+      {
+        "claim_id": "claim-001",
+        "observation_ids": [
+          "obs-001"
+        ],
+        "support_score": 2.0,
+        "contradict_score": 0.0,
+        "notes": [
+          "pm2_5=42.7"
+        ]
+      }
+    ],
+    "matched_claim_ids": [
+      "claim-001"
+    ],
+    "matched_observation_ids": [
+      "obs-001"
+    ],
+    "unmatched_claim_ids": [],
+    "unmatched_observation_ids": []
+  },
+  "evidence_cards": [
+    {
+      "schema_version": "1.0.0",
+      "evidence_id": "evidence-001",
+      "run_id": "eco-20260320-chiangmai-smoke",
+      "round_id": "round-001",
+      "claim_id": "claim-001",
+      "verdict": "supports",
+      "confidence": "medium",
+      "summary": "Modeled PM background and fire detections are consistent with the public smoke claim, but local station coverage remains limited.",
+      "public_refs": [
+        {
+          "source_skill": "gdelt-doc-search",
+          "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/sociologist/raw/gdelt-doc-search.json",
+          "record_locator": "$.articles[0]"
+        }
+      ],
+      "observation_ids": [
+        "obs-001",
+        "obs-002"
+      ],
+      "gaps": [
+        "Local station corroboration is limited."
+      ]
+    }
+  ],
+  "isolated_entries": [],
+  "remand_entries": [],
+  "evidence_adjudication": {
+    "schema_version": "1.0.0",
+    "adjudication_id": "adjudication-round-001",
+    "run_id": "eco-20260320-chiangmai-smoke",
+    "round_id": "round-001",
+    "authorization_id": "matchauth-round-001",
+    "matching_result_id": "matchres-round-001",
+    "adjudication_status": "complete",
+    "summary": "The first matching pass produced one active evidence card and no unresolved remands.",
+    "matching_reasonable": true,
+    "needs_additional_data": false,
+    "card_ids": [
+      "evidence-001"
+    ],
+    "isolated_entry_ids": [],
+    "remand_ids": [],
+    "open_questions": [],
+    "recommended_next_actions": []
+  },
+  "open_questions": [],
+  "recommended_next_actions": []
+}

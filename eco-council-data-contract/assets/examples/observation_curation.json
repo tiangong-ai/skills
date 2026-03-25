@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0.0",
+  "curation_id": "observation-curation-round-001",
+  "run_id": "eco-20260320-chiangmai-smoke",
+  "round_id": "round-001",
+  "agent_role": "environmentalist",
+  "status": "complete",
+  "summary": "Retain one composite smoke observation and request one station-backed corroboration layer.",
+  "curated_observations": [
+    {
+      "observation_id": "obs-001",
+      "observation_mode": "composite",
+      "candidate_observation_ids": [
+        "obs-candidate-001",
+        "obs-candidate-002"
+      ],
+      "metric": "smoke-signal",
+      "aggregation": "composite",
+      "value": 0.76,
+      "unit": "index",
+      "meaning": "Combined PM and hotspot signals indicate a smoke episode in the mission window.",
+      "worth_storing": true,
+      "evidence_role": "mixed",
+      "selection_reason": "Collapsed correlated air-quality and hotspot candidates into one retained observation.",
+      "source_skills": [
+        "open-meteo-air-quality-fetch",
+        "nasa-firms-fire-fetch"
+      ],
+      "metric_bundle": [
+        "pm2_5",
+        "fire_detection_count"
+      ],
+      "time_window": {
+        "start_utc": "2026-03-18T00:00:00Z",
+        "end_utc": "2026-03-19T23:59:59Z"
+      },
+      "place_scope": {
+        "label": "Chiang Mai, Thailand",
+        "geometry": {
+          "type": "Point",
+          "latitude": 18.7883,
+          "longitude": 98.9853
+        }
+      },
+      "statistics": {
+        "mean": 42.7,
+        "p95": 74.9
+      },
+      "quality_flags": [
+        "modeled-background"
+      ],
+      "provenance_refs": [
+        {
+          "source_skill": "open-meteo-air-quality-fetch",
+          "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/open-meteo-air-quality.json",
+          "record_locator": "$.records[0]"
+        },
+        {
+          "source_skill": "nasa-firms-fire-fetch",
+          "artifact_path": "runs/eco-20260320-chiangmai-smoke/round_001/environmentalist/raw/nasa-firms-fire.json",
+          "record_locator": "$.features[0]"
+        }
+      ],
+      "component_roles": [
+        {
+          "candidate_observation_id": "obs-candidate-001",
+          "role": "primary",
+          "metric": "pm2_5",
+          "value": 42.7,
+          "unit": "ug/m3",
+          "rationale": "Elevated PM is the main smoke indicator."
+        },
+        {
+          "candidate_observation_id": "obs-candidate-002",
+          "role": "contextual",
+          "metric": "fire_detection_count",
+          "value": 19,
+          "unit": "count",
+          "rationale": "Hotspots add source context for the same window."
+        }
+      ]
+    }
+  ],
+  "rejected_candidate_ids": [
+    "obs-candidate-004"
+  ],
+  "open_questions": [
+    "Should a local ground station be added in the next round?"
+  ],
+  "recommended_next_actions": [
+    {
+      "assigned_role": "environmentalist",
+      "objective": "Add one local station source if available for the same window.",
+      "reason": "Ground data would strengthen the composite signal."
+    }
+  ],
+  "override_requests": [
+    {
+      "schema_version": "1.0.0",
+      "request_id": "override-environmentalist-round-001-openaq-stations",
+      "run_id": "eco-20260320-chiangmai-smoke",
+      "round_id": "round-001",
+      "agent_role": "environmentalist",
+      "request_origin_kind": "observation-curation",
+      "target_path": "source_governance.approved_layers",
+      "requested_value": {
+        "family_id": "openaq",
+        "layer_id": "stations",
+        "reason": "Need one station-backed layer to corroborate the retained composite smoke signal."
+      },
+      "summary": "Request one station-backed layer for stronger physical corroboration.",
+      "reason": "The retained observation is directionally useful but still depends on modeled PM plus hotspot context.",
+      "evidence_refs": [
+        "req-environmentalist-round-001-physical-corroboration"
+      ],
+      "anchor_refs": [
+        "round-001:family:open-meteo:air-quality"
+      ]
+    }
+  ]
+}

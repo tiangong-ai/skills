@@ -27,6 +27,7 @@ SCHEMA_VERSION = "1.0.0"
 ISO_UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 ROUND_ID_PATTERN = re.compile(r"^round-\d{3}$")
+ROUND_ID_INPUT_PATTERN = re.compile(r"^round[-_](\d{3})$")
 ROUND_DIR_PATTERN = re.compile(r"^round_(\d{3})$")
 
 OBJECT_KINDS = (
@@ -35,12 +36,15 @@ OBJECT_KINDS = (
     "source-selection",
     "override-request",
     "claim",
+    "claim-curation",
     "claim-submission",
     "observation",
+    "observation-curation",
     "observation-submission",
     "evidence-card",
     "data-readiness-report",
     "matching-authorization",
+    "matching-adjudication",
     "matching-result",
     "evidence-adjudication",
     "isolated-entry",
@@ -63,7 +67,10 @@ CLAIM_TYPES = {
     "other",
 }
 CLAIM_STATUSES = {"candidate", "selected", "dismissed", "validated"}
-OBSERVATION_AGGREGATIONS = {"point", "window-summary", "series-summary", "event-count"}
+CURATION_STATUSES = {"pending", "complete", "blocked"}
+OBSERVATION_MODES = {"atomic", "composite"}
+OBSERVATION_AGGREGATIONS = {"point", "window-summary", "series-summary", "event-count", "composite"}
+EVIDENCE_ROLES = {"primary", "contextual", "contradictory", "mixed"}
 EVIDENCE_VERDICTS = {"supports", "contradicts", "mixed", "insufficient"}
 CONFIDENCE_VALUES = {"low", "medium", "high"}
 REPORT_STATUSES = {"complete", "needs-more-evidence", "blocked"}
@@ -71,6 +78,7 @@ MODERATOR_STATUSES = {"continue", "complete", "blocked"}
 EVIDENCE_SUFFICIENCY = {"sufficient", "partial", "insufficient"}
 READINESS_STATUSES = {"ready", "needs-more-data", "blocked"}
 AUTHORIZATION_STATUSES = {"authorized", "deferred", "not-authorized"}
+MATCHING_AUTHORIZATION_BASES = {"readiness-ready", "readiness-blocked", "readiness-deferred", "final-round-forced"}
 MATCHING_RESULT_STATUSES = {"matched", "partial", "unmatched"}
 ADJUDICATION_STATUSES = {"complete", "partial", "remand-required"}
 LIBRARY_ENTITY_KINDS = {"claim", "observation"}
@@ -81,7 +89,14 @@ EVIDENCE_PRIORITIES = {"low", "medium", "high"}
 ANCHOR_MODES = {"none", "same_round_l1", "prior_round_l1", "evidence_gap", "upstream_approval"}
 AUTHORIZATION_BASES = {"entry-layer", "policy-auto", "upstream-approval", "not-authorized"}
 APPROVAL_AUTHORITIES = {"human", "bot", "policy"}
-OVERRIDE_REQUEST_ORIGINS = {"source-selection", "data-readiness-report", "expert-report", "council-decision"}
+OVERRIDE_REQUEST_ORIGINS = {
+    "source-selection",
+    "claim-curation",
+    "observation-curation",
+    "data-readiness-report",
+    "expert-report",
+    "council-decision",
+}
 OVERRIDE_INT_TARGET_PATHS = {
     "constraints.max_rounds",
     "constraints.max_claims_per_round",
@@ -751,6 +766,67 @@ def effective_constraints(mission: dict[str, Any]) -> dict[str, int]:
     return {key: int(value) for key, value in constraints.items() if is_int_not_bool(value) and int(value) > 0}
 
 
+def parse_round_components(round_id: str) -> tuple[str, int, int] | None:
+    text = maybe_text(round_id)
+    match = re.match(r"^(.*?)(\d+)$", text)
+    if match is None:
+        return None
+    prefix, digits = match.groups()
+    return prefix, int(digits), len(digits)
+
+
+def current_round_number(round_id: str) -> int | None:
+    components = parse_round_components(round_id)
+    if components is None:
+        return None
+    return components[1]
+
+
+def is_final_allowed_round(mission: dict[str, Any], round_id: str) -> bool:
+    max_rounds = effective_constraints(mission).get("max_rounds")
+    round_number = current_round_number(round_id)
+    if max_rounds is None or round_number is None:
+        return False
+    return round_number >= max_rounds
+
+
+def matching_authorization_basis(status: str) -> str:
+    normalized = maybe_text(status)
+    if normalized == "authorized":
+        return "readiness-ready"
+    if normalized == "not-authorized":
+        return "readiness-blocked"
+    return "readiness-deferred"
+
+
+def apply_matching_authorization_policy(mission: dict[str, Any], round_id: str, authorization: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(authorization, dict):
+        raise ValueError("authorization must be an object.")
+    payload = copy.deepcopy(authorization)
+    status = maybe_text(payload.get("authorization_status"))
+    requested_status = maybe_text(payload.get("moderator_requested_status")) or status
+    if requested_status:
+        payload["moderator_requested_status"] = requested_status
+    if not maybe_text(payload.get("authorization_basis")) and status:
+        payload["authorization_basis"] = matching_authorization_basis(status)
+    if not is_final_allowed_round(mission, round_id) or status == "authorized":
+        return payload
+
+    max_rounds = effective_constraints(mission).get("max_rounds")
+    payload["authorization_status"] = "authorized"
+    payload["authorization_basis"] = "final-round-forced"
+    payload["allow_isolated_evidence"] = True
+    payload["moderator_override"] = bool(payload.get("moderator_override"))
+    summary = f"Round {round_id} is the final allowed round under max_rounds={max_rounds}, so one matching/adjudication pass must run before closure."
+    if requested_status:
+        summary += f" Moderator requested {requested_status}."
+    payload["summary"] = summary
+    payload["rationale"] = (
+        "Final-round policy requires a terminal matching/adjudication pass so the council ends with matched, isolated, or remand evidence instead of stopping at authorization."
+    )
+    return payload
+
+
 def normalize_governed_families(raw_families: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_families, list):
         return []
@@ -924,6 +1000,17 @@ def validate_artifact_ref(value: Any, path: str, issues: IssueCollector) -> None
     if sha256 is not None:
         if not isinstance(sha256, str) or not SHA256_PATTERN.match(sha256):
             issues.add(f"{path}.sha256", "Expected a 64-character hexadecimal SHA256 string.", actual=sha256)
+
+
+def validate_artifact_ref_list(value: Any, path: str, issues: IssueCollector, *, allow_empty: bool) -> None:
+    refs = value
+    if not isinstance(refs, list):
+        issues.add(path, "Expected a list.", actual=refs)
+        return
+    if not allow_empty and not refs:
+        issues.add(path, "Expected a non-empty list.", actual=refs)
+    for index, ref in enumerate(refs):
+        validate_artifact_ref(ref, f"{path}[{index}]", issues)
 
 
 def validate_recommendation(value: Any, path: str, issues: IssueCollector) -> None:
@@ -1538,6 +1625,72 @@ def validate_claim_object(obj: Any, path: str, issues: IssueCollector) -> None:
     else:
         for index, ref in enumerate(public_refs):
             validate_artifact_ref(ref, f"{path}.public_refs[{index}]", issues)
+    if "candidate_claim_ids" in record:
+        candidate_claim_ids = validate_string_list(record.get("candidate_claim_ids"), f"{path}.candidate_claim_ids", issues, allow_empty=False)
+        validate_unique_strings(candidate_claim_ids, f"{path}.candidate_claim_ids", issues)
+    if "selection_reason" in record and record["selection_reason"] is not None and not isinstance(record["selection_reason"], str):
+        issues.add(f"{path}.selection_reason", "Expected a string when provided.", actual=record["selection_reason"])
+
+
+def validate_curated_claim_entry(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "claim_id", path, issues)
+    candidate_claim_ids = validate_string_list(obj.get("candidate_claim_ids"), f"{path}.candidate_claim_ids", issues, allow_empty=False)
+    validate_unique_strings(candidate_claim_ids, f"{path}.candidate_claim_ids", issues)
+    require_enum(obj, "claim_type", path, issues, allowed=CLAIM_TYPES)
+    require_string(obj, "summary", path, issues)
+    require_string(obj, "statement", path, issues)
+    require_string(obj, "meaning", path, issues)
+    require_int(obj, "priority", path, issues, minimum=1, maximum=5)
+    require_bool(obj, "needs_physical_validation", path, issues)
+    require_bool(obj, "worth_storing", path, issues)
+    require_string(obj, "selection_reason", path, issues)
+    if "time_window" in obj and obj["time_window"] is not None:
+        validate_time_window(obj.get("time_window"), f"{path}.time_window", issues)
+    if "place_scope" in obj and obj["place_scope"] is not None:
+        validate_region_scope(obj.get("place_scope"), f"{path}.place_scope", issues)
+
+
+def validate_claim_curation_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "curation_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    if maybe_text(record.get("agent_role")) != "sociologist":
+        issues.add(f"{path}.agent_role", "claim-curation must be sociologist-owned.", actual=record.get("agent_role"))
+    require_enum(record, "status", path, issues, allowed=CURATION_STATUSES)
+    require_string(record, "summary", path, issues)
+    curated_claims = record.get("curated_claims")
+    if not isinstance(curated_claims, list):
+        issues.add(f"{path}.curated_claims", "Expected a list.", actual=curated_claims)
+    else:
+        for index, item in enumerate(curated_claims):
+            validate_curated_claim_entry(item, f"{path}.curated_claims[{index}]", issues)
+    rejected_candidate_ids = validate_string_list(record.get("rejected_candidate_ids", []), f"{path}.rejected_candidate_ids", issues)
+    validate_unique_strings(rejected_candidate_ids, f"{path}.rejected_candidate_ids", issues)
+    open_questions = validate_string_list(record.get("open_questions", []), f"{path}.open_questions", issues)
+    validate_unique_strings(open_questions, f"{path}.open_questions", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+    validate_override_request_list(
+        record.get("override_requests", []),
+        f"{path}.override_requests",
+        issues,
+        run_id=maybe_text(record.get("run_id")),
+        round_id=maybe_text(record.get("round_id")),
+        agent_role=maybe_text(record.get("agent_role")),
+        origin_kind="claim-curation",
+    )
 
 
 def validate_claim_submission_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -1566,6 +1719,11 @@ def validate_claim_submission_object(obj: Any, path: str, issues: IssueCollector
     else:
         for index, ref in enumerate(public_refs):
             validate_artifact_ref(ref, f"{path}.public_refs[{index}]", issues)
+    if "candidate_claim_ids" in record:
+        candidate_claim_ids = validate_string_list(record.get("candidate_claim_ids"), f"{path}.candidate_claim_ids", issues, allow_empty=False)
+        validate_unique_strings(candidate_claim_ids, f"{path}.candidate_claim_ids", issues)
+    if "selection_reason" in record and record["selection_reason"] is not None and not isinstance(record["selection_reason"], str):
+        issues.add(f"{path}.selection_reason", "Expected a string when provided.", actual=record["selection_reason"])
     if "compact_audit" in record and record["compact_audit"] is not None:
         validate_compact_audit(record["compact_audit"], f"{path}.compact_audit", issues)
 
@@ -1592,6 +1750,12 @@ def validate_compact_audit(value: Any, path: str, issues: IssueCollector) -> Non
     require_string(obj, "coverage_summary", path, issues)
     concentration_flags = validate_string_list(obj.get("concentration_flags", []), f"{path}.concentration_flags", issues)
     validate_unique_strings(concentration_flags, f"{path}.concentration_flags", issues)
+    if "coverage_dimensions" in obj:
+        coverage_dimensions = validate_string_list(obj.get("coverage_dimensions", []), f"{path}.coverage_dimensions", issues)
+        validate_unique_strings(coverage_dimensions, f"{path}.coverage_dimensions", issues)
+    if "missing_dimensions" in obj:
+        missing_dimensions = validate_string_list(obj.get("missing_dimensions", []), f"{path}.missing_dimensions", issues)
+        validate_unique_strings(missing_dimensions, f"{path}.missing_dimensions", issues)
     if "sampling_notes" in obj:
         sampling_notes = validate_string_list(obj.get("sampling_notes", []), f"{path}.sampling_notes", issues)
         validate_unique_strings(sampling_notes, f"{path}.sampling_notes", issues)
@@ -1619,6 +1783,136 @@ def validate_observation_object(obj: Any, path: str, issues: IssueCollector) -> 
     validate_region_scope(record.get("place_scope"), f"{path}.place_scope", issues)
     validate_string_list(record.get("quality_flags"), f"{path}.quality_flags", issues)
     validate_artifact_ref(record.get("provenance"), f"{path}.provenance", issues)
+    if "observation_mode" in record:
+        require_enum(record, "observation_mode", path, issues, allowed=OBSERVATION_MODES)
+    if "evidence_role" in record:
+        require_enum(record, "evidence_role", path, issues, allowed=EVIDENCE_ROLES)
+    if "source_skills" in record:
+        source_skills = validate_string_list(record.get("source_skills"), f"{path}.source_skills", issues, allow_empty=False)
+        validate_unique_strings(source_skills, f"{path}.source_skills", issues)
+    if "metric_bundle" in record:
+        metric_bundle = validate_string_list(record.get("metric_bundle"), f"{path}.metric_bundle", issues, allow_empty=False)
+        validate_unique_strings(metric_bundle, f"{path}.metric_bundle", issues)
+    if "candidate_observation_ids" in record:
+        candidate_observation_ids = validate_string_list(record.get("candidate_observation_ids"), f"{path}.candidate_observation_ids", issues, allow_empty=False)
+        validate_unique_strings(candidate_observation_ids, f"{path}.candidate_observation_ids", issues)
+    if "provenance_refs" in record:
+        validate_artifact_ref_list(record.get("provenance_refs"), f"{path}.provenance_refs", issues, allow_empty=False)
+    if "selection_reason" in record and record["selection_reason"] is not None and not isinstance(record["selection_reason"], str):
+        issues.add(f"{path}.selection_reason", "Expected a string when provided.", actual=record["selection_reason"])
+    if "component_roles" in record:
+        component_roles = record.get("component_roles")
+        if not isinstance(component_roles, list):
+            issues.add(f"{path}.component_roles", "Expected a list.", actual=component_roles)
+        else:
+            for index, item in enumerate(component_roles):
+                component = require_object(item, f"{path}.component_roles[{index}]", issues)
+                if component is None:
+                    continue
+                require_string(component, "candidate_observation_id", f"{path}.component_roles[{index}]", issues)
+                require_enum(component, "role", f"{path}.component_roles[{index}]", issues, allowed=EVIDENCE_ROLES)
+                if "metric" in component and component["metric"] is not None and not isinstance(component["metric"], str):
+                    issues.add(f"{path}.component_roles[{index}].metric", "Expected a string when provided.", actual=component["metric"])
+                if "value" in component and component["value"] is not None and not is_number(component["value"]):
+                    issues.add(f"{path}.component_roles[{index}].value", "Expected a number or null when provided.", actual=component["value"])
+                if "unit" in component and component["unit"] is not None and not isinstance(component["unit"], str):
+                    issues.add(f"{path}.component_roles[{index}].unit", "Expected a string when provided.", actual=component["unit"])
+                if "rationale" in component and component["rationale"] is not None and not isinstance(component["rationale"], str):
+                    issues.add(f"{path}.component_roles[{index}].rationale", "Expected a string when provided.", actual=component["rationale"])
+
+
+def validate_curated_observation_entry(value: Any, path: str, issues: IssueCollector) -> None:
+    obj = require_object(value, path, issues)
+    if obj is None:
+        return
+    require_string(obj, "observation_id", path, issues)
+    require_enum(obj, "observation_mode", path, issues, allowed=OBSERVATION_MODES)
+    candidate_observation_ids = validate_string_list(obj.get("candidate_observation_ids"), f"{path}.candidate_observation_ids", issues, allow_empty=False)
+    validate_unique_strings(candidate_observation_ids, f"{path}.candidate_observation_ids", issues)
+    require_string(obj, "metric", path, issues)
+    require_enum(obj, "aggregation", path, issues, allowed=OBSERVATION_AGGREGATIONS)
+    if "value" in obj and obj["value"] is not None and not is_number(obj["value"]):
+        issues.add(f"{path}.value", "Expected a number or null when provided.", actual=obj["value"])
+    require_string(obj, "unit", path, issues)
+    require_string(obj, "meaning", path, issues)
+    require_bool(obj, "worth_storing", path, issues)
+    require_enum(obj, "evidence_role", path, issues, allowed=EVIDENCE_ROLES)
+    require_string(obj, "selection_reason", path, issues)
+    if "source_skills" in obj:
+        source_skills = validate_string_list(obj.get("source_skills"), f"{path}.source_skills", issues, allow_empty=False)
+        validate_unique_strings(source_skills, f"{path}.source_skills", issues)
+    if "metric_bundle" in obj:
+        metric_bundle = validate_string_list(obj.get("metric_bundle"), f"{path}.metric_bundle", issues, allow_empty=False)
+        validate_unique_strings(metric_bundle, f"{path}.metric_bundle", issues)
+    if "time_window" in obj and obj["time_window"] is not None:
+        validate_time_window(obj.get("time_window"), f"{path}.time_window", issues)
+    if "place_scope" in obj and obj["place_scope"] is not None:
+        validate_region_scope(obj.get("place_scope"), f"{path}.place_scope", issues)
+    if "statistics" in obj and obj["statistics"] is not None:
+        validate_statistics(obj["statistics"], f"{path}.statistics", issues)
+    if "quality_flags" in obj:
+        validate_string_list(obj.get("quality_flags"), f"{path}.quality_flags", issues)
+    if "provenance_refs" in obj:
+        validate_artifact_ref_list(obj.get("provenance_refs"), f"{path}.provenance_refs", issues, allow_empty=False)
+    if "component_roles" in obj:
+        component_roles = obj.get("component_roles")
+        if not isinstance(component_roles, list):
+            issues.add(f"{path}.component_roles", "Expected a list.", actual=component_roles)
+        else:
+            for index, item in enumerate(component_roles):
+                component = require_object(item, f"{path}.component_roles[{index}]", issues)
+                if component is None:
+                    continue
+                require_string(component, "candidate_observation_id", f"{path}.component_roles[{index}]", issues)
+                require_enum(component, "role", f"{path}.component_roles[{index}]", issues, allowed=EVIDENCE_ROLES)
+                if "metric" in component and component["metric"] is not None and not isinstance(component["metric"], str):
+                    issues.add(f"{path}.component_roles[{index}].metric", "Expected a string when provided.", actual=component["metric"])
+                if "value" in component and component["value"] is not None and not is_number(component["value"]):
+                    issues.add(f"{path}.component_roles[{index}].value", "Expected a number or null when provided.", actual=component["value"])
+                if "unit" in component and component["unit"] is not None and not isinstance(component["unit"], str):
+                    issues.add(f"{path}.component_roles[{index}].unit", "Expected a string when provided.", actual=component["unit"])
+                if "rationale" in component and component["rationale"] is not None and not isinstance(component["rationale"], str):
+                    issues.add(f"{path}.component_roles[{index}].rationale", "Expected a string when provided.", actual=component["rationale"])
+
+
+def validate_observation_curation_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "curation_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    if maybe_text(record.get("agent_role")) != "environmentalist":
+        issues.add(f"{path}.agent_role", "observation-curation must be environmentalist-owned.", actual=record.get("agent_role"))
+    require_enum(record, "status", path, issues, allowed=CURATION_STATUSES)
+    require_string(record, "summary", path, issues)
+    curated_observations = record.get("curated_observations")
+    if not isinstance(curated_observations, list):
+        issues.add(f"{path}.curated_observations", "Expected a list.", actual=curated_observations)
+    else:
+        for index, item in enumerate(curated_observations):
+            validate_curated_observation_entry(item, f"{path}.curated_observations[{index}]", issues)
+    rejected_candidate_ids = validate_string_list(record.get("rejected_candidate_ids", []), f"{path}.rejected_candidate_ids", issues)
+    validate_unique_strings(rejected_candidate_ids, f"{path}.rejected_candidate_ids", issues)
+    open_questions = validate_string_list(record.get("open_questions", []), f"{path}.open_questions", issues)
+    validate_unique_strings(open_questions, f"{path}.open_questions", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+    validate_override_request_list(
+        record.get("override_requests", []),
+        f"{path}.override_requests",
+        issues,
+        run_id=maybe_text(record.get("run_id")),
+        round_id=maybe_text(record.get("round_id")),
+        agent_role=maybe_text(record.get("agent_role")),
+        origin_kind="observation-curation",
+    )
 
 
 def validate_observation_submission_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -1644,8 +1938,46 @@ def validate_observation_submission_object(obj: Any, path: str, issues: IssueCol
     validate_region_scope(record.get("place_scope"), f"{path}.place_scope", issues)
     validate_string_list(record.get("quality_flags"), f"{path}.quality_flags", issues)
     validate_artifact_ref(record.get("provenance"), f"{path}.provenance", issues)
+    if "statistics" in record and record["statistics"] is not None:
+        validate_statistics(record["statistics"], f"{path}.statistics", issues)
     if "compact_audit" in record and record["compact_audit"] is not None:
         validate_compact_audit(record["compact_audit"], f"{path}.compact_audit", issues)
+    if "observation_mode" in record:
+        require_enum(record, "observation_mode", path, issues, allowed=OBSERVATION_MODES)
+    if "evidence_role" in record:
+        require_enum(record, "evidence_role", path, issues, allowed=EVIDENCE_ROLES)
+    if "source_skills" in record:
+        source_skills = validate_string_list(record.get("source_skills"), f"{path}.source_skills", issues, allow_empty=False)
+        validate_unique_strings(source_skills, f"{path}.source_skills", issues)
+    if "metric_bundle" in record:
+        metric_bundle = validate_string_list(record.get("metric_bundle"), f"{path}.metric_bundle", issues, allow_empty=False)
+        validate_unique_strings(metric_bundle, f"{path}.metric_bundle", issues)
+    if "candidate_observation_ids" in record:
+        candidate_observation_ids = validate_string_list(record.get("candidate_observation_ids"), f"{path}.candidate_observation_ids", issues, allow_empty=False)
+        validate_unique_strings(candidate_observation_ids, f"{path}.candidate_observation_ids", issues)
+    if "provenance_refs" in record:
+        validate_artifact_ref_list(record.get("provenance_refs"), f"{path}.provenance_refs", issues, allow_empty=False)
+    if "selection_reason" in record and record["selection_reason"] is not None and not isinstance(record["selection_reason"], str):
+        issues.add(f"{path}.selection_reason", "Expected a string when provided.", actual=record["selection_reason"])
+    if "component_roles" in record:
+        component_roles = record.get("component_roles")
+        if not isinstance(component_roles, list):
+            issues.add(f"{path}.component_roles", "Expected a list.", actual=component_roles)
+        else:
+            for index, item in enumerate(component_roles):
+                component = require_object(item, f"{path}.component_roles[{index}]", issues)
+                if component is None:
+                    continue
+                require_string(component, "candidate_observation_id", f"{path}.component_roles[{index}]", issues)
+                require_enum(component, "role", f"{path}.component_roles[{index}]", issues, allowed=EVIDENCE_ROLES)
+                if "metric" in component and component["metric"] is not None and not isinstance(component["metric"], str):
+                    issues.add(f"{path}.component_roles[{index}].metric", "Expected a string when provided.", actual=component["metric"])
+                if "value" in component and component["value"] is not None and not is_number(component["value"]):
+                    issues.add(f"{path}.component_roles[{index}].value", "Expected a number or null when provided.", actual=component["value"])
+                if "unit" in component and component["unit"] is not None and not isinstance(component["unit"], str):
+                    issues.add(f"{path}.component_roles[{index}].unit", "Expected a string when provided.", actual=component["unit"])
+                if "rationale" in component and component["rationale"] is not None and not isinstance(component["rationale"], str):
+                    issues.add(f"{path}.component_roles[{index}].rationale", "Expected a string when provided.", actual=component["rationale"])
 
 
 def validate_evidence_card_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -1742,6 +2074,10 @@ def validate_matching_authorization_object(obj: Any, path: str, issues: IssueCol
     if role is not None and role != "moderator":
         issues.add(f"{path}.agent_role", "matching-authorization must be moderator-owned.", actual=role)
     require_enum(record, "authorization_status", path, issues, allowed=AUTHORIZATION_STATUSES)
+    if "moderator_requested_status" in record and record["moderator_requested_status"] is not None:
+        require_enum(record, "moderator_requested_status", path, issues, allowed=AUTHORIZATION_STATUSES)
+    if "authorization_basis" in record and record["authorization_basis"] is not None:
+        require_enum(record, "authorization_basis", path, issues, allowed=MATCHING_AUTHORIZATION_BASES)
     require_string(record, "summary", path, issues)
     require_string(record, "rationale", path, issues)
     require_bool(record, "moderator_override", path, issues)
@@ -1798,6 +2134,130 @@ def validate_matching_result_object(obj: Any, path: str, issues: IssueCollector)
     ):
         values = validate_string_list(record.get(field_name), f"{path}.{field_name}", issues)
         validate_unique_strings(values, f"{path}.{field_name}", issues)
+
+
+def validate_matching_adjudication_object(obj: Any, path: str, issues: IssueCollector) -> None:
+    record = require_object(obj, path, issues)
+    if record is None:
+        return
+    validate_schema_version(record, path, issues)
+    require_string(record, "adjudication_id", path, issues)
+    require_string(record, "run_id", path, issues)
+    require_string(record, "round_id", path, issues)
+    role = require_enum(record, "agent_role", path, issues, allowed=AGENT_ROLES)
+    if role is not None and role != "moderator":
+        issues.add(f"{path}.agent_role", "matching-adjudication must be moderator-owned.", actual=role)
+    require_string(record, "authorization_id", path, issues)
+    require_string(record, "candidate_set_id", path, issues)
+    require_string(record, "summary", path, issues)
+    require_string(record, "rationale", path, issues)
+    validate_matching_result_object(record.get("matching_result"), f"{path}.matching_result", issues)
+    evidence_cards = record.get("evidence_cards")
+    if not isinstance(evidence_cards, list):
+        issues.add(f"{path}.evidence_cards", "Expected a list.", actual=evidence_cards)
+    else:
+        for index, item in enumerate(evidence_cards):
+            validate_evidence_card_object(item, f"{path}.evidence_cards[{index}]", issues)
+    isolated_entries = record.get("isolated_entries")
+    if not isinstance(isolated_entries, list):
+        issues.add(f"{path}.isolated_entries", "Expected a list.", actual=isolated_entries)
+    else:
+        for index, item in enumerate(isolated_entries):
+            validate_isolated_entry_object(item, f"{path}.isolated_entries[{index}]", issues)
+    remand_entries = record.get("remand_entries")
+    if not isinstance(remand_entries, list):
+        issues.add(f"{path}.remand_entries", "Expected a list.", actual=remand_entries)
+    else:
+        for index, item in enumerate(remand_entries):
+            validate_remand_entry_object(item, f"{path}.remand_entries[{index}]", issues)
+    validate_evidence_adjudication_object(record.get("evidence_adjudication"), f"{path}.evidence_adjudication", issues)
+    validate_string_list(record.get("open_questions"), f"{path}.open_questions", issues)
+    recommendations = record.get("recommended_next_actions")
+    if not isinstance(recommendations, list):
+        issues.add(f"{path}.recommended_next_actions", "Expected a list.", actual=recommendations)
+    else:
+        for index, recommendation in enumerate(recommendations):
+            validate_recommendation(recommendation, f"{path}.recommended_next_actions[{index}]", issues)
+
+    matching_result = record.get("matching_result")
+    if isinstance(matching_result, dict):
+        if maybe_text(matching_result.get("run_id")) and maybe_text(matching_result.get("run_id")) != maybe_text(record.get("run_id")):
+            issues.add(f"{path}.matching_result.run_id", "Expected matching_result.run_id to match the top-level run_id.", actual=matching_result.get("run_id"))
+        if maybe_text(matching_result.get("round_id")) and maybe_text(matching_result.get("round_id")) != maybe_text(record.get("round_id")):
+            issues.add(f"{path}.matching_result.round_id", "Expected matching_result.round_id to match the top-level round_id.", actual=matching_result.get("round_id"))
+        if maybe_text(matching_result.get("authorization_id")) and maybe_text(matching_result.get("authorization_id")) != maybe_text(record.get("authorization_id")):
+            issues.add(
+                f"{path}.matching_result.authorization_id",
+                "Expected matching_result.authorization_id to match the top-level authorization_id.",
+                actual=matching_result.get("authorization_id"),
+            )
+
+    evidence_card_ids = {
+        maybe_text(item.get("evidence_id"))
+        for item in evidence_cards
+        if isinstance(item, dict) and maybe_text(item.get("evidence_id"))
+    } if isinstance(evidence_cards, list) else set()
+    isolated_ids = {
+        maybe_text(item.get("isolated_id"))
+        for item in isolated_entries
+        if isinstance(item, dict) and maybe_text(item.get("isolated_id"))
+    } if isinstance(isolated_entries, list) else set()
+    remand_ids = {
+        maybe_text(item.get("remand_id"))
+        for item in remand_entries
+        if isinstance(item, dict) and maybe_text(item.get("remand_id"))
+    } if isinstance(remand_entries, list) else set()
+    evidence_adjudication = record.get("evidence_adjudication")
+    if isinstance(evidence_adjudication, dict):
+        if maybe_text(evidence_adjudication.get("adjudication_id")) and maybe_text(evidence_adjudication.get("adjudication_id")) != maybe_text(record.get("adjudication_id")):
+            issues.add(
+                f"{path}.evidence_adjudication.adjudication_id",
+                "Expected evidence_adjudication.adjudication_id to match the top-level adjudication_id.",
+                actual=evidence_adjudication.get("adjudication_id"),
+            )
+        if maybe_text(evidence_adjudication.get("run_id")) and maybe_text(evidence_adjudication.get("run_id")) != maybe_text(record.get("run_id")):
+            issues.add(
+                f"{path}.evidence_adjudication.run_id",
+                "Expected evidence_adjudication.run_id to match the top-level run_id.",
+                actual=evidence_adjudication.get("run_id"),
+            )
+        if maybe_text(evidence_adjudication.get("round_id")) and maybe_text(evidence_adjudication.get("round_id")) != maybe_text(record.get("round_id")):
+            issues.add(
+                f"{path}.evidence_adjudication.round_id",
+                "Expected evidence_adjudication.round_id to match the top-level round_id.",
+                actual=evidence_adjudication.get("round_id"),
+            )
+        if maybe_text(evidence_adjudication.get("authorization_id")) and maybe_text(evidence_adjudication.get("authorization_id")) != maybe_text(record.get("authorization_id")):
+            issues.add(
+                f"{path}.evidence_adjudication.authorization_id",
+                "Expected evidence_adjudication.authorization_id to match the top-level authorization_id.",
+                actual=evidence_adjudication.get("authorization_id"),
+            )
+        if isinstance(matching_result, dict):
+            expected_result_id = maybe_text(matching_result.get("result_id"))
+            actual_result_id = maybe_text(evidence_adjudication.get("matching_result_id"))
+            if expected_result_id and actual_result_id and expected_result_id != actual_result_id:
+                issues.add(
+                    f"{path}.evidence_adjudication.matching_result_id",
+                    "Expected evidence_adjudication.matching_result_id to match matching_result.result_id.",
+                    actual=actual_result_id,
+                )
+        for field_name, expected_values in (
+            ("card_ids", evidence_card_ids),
+            ("isolated_entry_ids", isolated_ids),
+            ("remand_ids", remand_ids),
+        ):
+            actual_values = {
+                maybe_text(item)
+                for item in evidence_adjudication.get(field_name, [])
+                if maybe_text(item)
+            }
+            if actual_values != expected_values:
+                issues.add(
+                    f"{path}.evidence_adjudication.{field_name}",
+                    f"Expected {field_name} to match the nested payload ids.",
+                    actual=sorted(actual_values),
+                )
 
 
 def validate_evidence_adjudication_object(obj: Any, path: str, issues: IssueCollector) -> None:
@@ -1944,12 +2404,15 @@ VALIDATORS = {
     "source-selection": validate_source_selection_object,
     "override-request": validate_override_request_object,
     "claim": validate_claim_object,
+    "claim-curation": validate_claim_curation_object,
     "claim-submission": validate_claim_submission_object,
     "observation": validate_observation_object,
+    "observation-curation": validate_observation_curation_object,
     "observation-submission": validate_observation_submission_object,
     "evidence-card": validate_evidence_card_object,
     "data-readiness-report": validate_data_readiness_report_object,
     "matching-authorization": validate_matching_authorization_object,
+    "matching-adjudication": validate_matching_adjudication_object,
     "matching-result": validate_matching_result_object,
     "evidence-adjudication": validate_evidence_adjudication_object,
     "isolated-entry": validate_isolated_entry_object,
@@ -1964,12 +2427,15 @@ EXAMPLES: dict[str, Any] = {
     "source-selection": read_json(EXAMPLES_DIR / "source_selection.json"),
     "override-request": read_json(EXAMPLES_DIR / "override_request.json"),
     "claim": read_json(EXAMPLES_DIR / "claim.json"),
+    "claim-curation": read_json(EXAMPLES_DIR / "claim_curation.json"),
     "claim-submission": read_json(EXAMPLES_DIR / "claim_submission.json"),
     "observation": read_json(EXAMPLES_DIR / "observation.json"),
+    "observation-curation": read_json(EXAMPLES_DIR / "observation_curation.json"),
     "observation-submission": read_json(EXAMPLES_DIR / "observation_submission.json"),
     "evidence-card": read_json(EXAMPLES_DIR / "evidence_card.json"),
     "data-readiness-report": read_json(EXAMPLES_DIR / "data_readiness_report.json"),
     "matching-authorization": read_json(EXAMPLES_DIR / "matching_authorization.json"),
+    "matching-adjudication": read_json(EXAMPLES_DIR / "matching_adjudication.json"),
     "matching-result": read_json(EXAMPLES_DIR / "matching_result.json"),
     "evidence-adjudication": read_json(EXAMPLES_DIR / "evidence_adjudication.json"),
     "isolated-entry": read_json(EXAMPLES_DIR / "isolated_entry.json"),
@@ -2042,10 +2508,15 @@ def parse_bbox(raw: str) -> dict[str, Any]:
 
 
 def round_dir_name(round_id: str) -> str:
+    return normalize_round_id(round_id).replace("-", "_")
+
+
+def normalize_round_id(round_id: str) -> str:
     value = round_id.strip()
-    if not ROUND_ID_PATTERN.match(value):
-        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 style.")
-    return value.replace("-", "_")
+    match = ROUND_ID_INPUT_PATTERN.match(value)
+    if match is None:
+        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 or round_001 style.")
+    return f"round-{match.group(1)}"
 
 
 def round_id_from_dirname(dirname: str) -> str | None:
@@ -2056,9 +2527,7 @@ def round_id_from_dirname(dirname: str) -> str | None:
 
 
 def round_number(round_id: str) -> int:
-    if not ROUND_ID_PATTERN.match(round_id):
-        raise ValueError(f"Unsupported round_id format: {round_id!r}. Expected round-001 style.")
-    return int(round_id.split("-")[-1])
+    return int(normalize_round_id(round_id).split("-")[-1])
 
 
 def round_sort_key(round_id: str) -> tuple[int, str]:
@@ -2081,9 +2550,9 @@ def allowed_sources_for_role(mission: dict[str, Any], role: str) -> list[str]:
 
 def expected_output_kinds_for_role(role: str) -> list[str]:
     if role == "sociologist":
-        return ["source-selection", "claim", "claim-submission", "data-readiness-report", "expert-report"]
+        return ["source-selection", "claim-curation", "claim-submission", "data-readiness-report", "expert-report"]
     if role == "environmentalist":
-        return ["source-selection", "observation", "observation-submission", "data-readiness-report", "expert-report"]
+        return ["source-selection", "observation-curation", "observation-submission", "data-readiness-report", "expert-report"]
     if role == "historian":
         return ["expert-report"]
     return ["expert-report"]
@@ -2170,6 +2639,40 @@ def placeholder_source_selection(
     }
 
 
+def placeholder_claim_curation(*, run_id: str, round_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "curation_id": f"claim-curation-{round_id}",
+        "run_id": run_id,
+        "round_id": round_id,
+        "agent_role": "sociologist",
+        "status": "pending",
+        "summary": "Pending sociologist claim curation.",
+        "curated_claims": [],
+        "rejected_candidate_ids": [],
+        "open_questions": [],
+        "recommended_next_actions": [],
+        "override_requests": [],
+    }
+
+
+def placeholder_observation_curation(*, run_id: str, round_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "curation_id": f"observation-curation-{round_id}",
+        "run_id": run_id,
+        "round_id": round_id,
+        "agent_role": "environmentalist",
+        "status": "pending",
+        "summary": "Pending environmentalist observation curation.",
+        "curated_observations": [],
+        "rejected_candidate_ids": [],
+        "open_questions": [],
+        "recommended_next_actions": [],
+        "override_requests": [],
+    }
+
+
 def placeholder_report(*, run_id: str, round_id: str, role: str) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2219,6 +2722,7 @@ def scaffold_round(
     pretty: bool,
 ) -> dict[str, Any]:
     run_path = run_dir.expanduser().resolve()
+    round_id = normalize_round_id(round_id)
     round_path = run_path / round_dir_name(round_id)
     normalized_tasks = normalize_round_tasks(tasks=tasks, run_id=run_id, round_id=round_id)
     source_selection_roles = ("sociologist", "environmentalist")
@@ -2243,8 +2747,16 @@ def scaffold_round(
         round_path / "shared" / "observations.json": [],
         round_path / "shared" / "evidence_cards.json": [],
         round_path / "moderator" / "override_requests.json": [],
+        round_path / "sociologist" / "claim_curation.json": placeholder_claim_curation(
+            run_id=run_id,
+            round_id=round_id,
+        ),
         round_path / "sociologist" / "claim_submissions.json": [],
         round_path / "sociologist" / "override_requests.json": [],
+        round_path / "environmentalist" / "observation_curation.json": placeholder_observation_curation(
+            run_id=run_id,
+            round_id=round_id,
+        ),
         round_path / "environmentalist" / "observation_submissions.json": [],
         round_path / "environmentalist" / "override_requests.json": [],
         round_path / "historian" / "override_requests.json": [],
@@ -2410,7 +2922,9 @@ def validate_bundle(run_dir: Path) -> dict[str, Any]:
             round_path / "shared" / "claims.json": "claim",
             round_path / "shared" / "observations.json": "observation",
             round_path / "shared" / "evidence_cards.json": "evidence-card",
+            round_path / "sociologist" / "claim_curation.json": "claim-curation",
             round_path / "sociologist" / "claim_submissions.json": "claim-submission",
+            round_path / "environmentalist" / "observation_curation.json": "observation-curation",
             round_path / "environmentalist" / "observation_submissions.json": "observation-submission",
             round_path / "sociologist" / "source_selection.json": "source-selection",
             round_path / "environmentalist" / "source_selection.json": "source-selection",
@@ -2427,6 +2941,7 @@ def validate_bundle(run_dir: Path) -> dict[str, Any]:
         round_path / "sociologist" / "data_readiness_report.json": "data-readiness-report",
         round_path / "environmentalist" / "data_readiness_report.json": "data-readiness-report",
         round_path / "moderator" / "matching_authorization.json": "matching-authorization",
+        round_path / "moderator" / "matching_adjudication.json": "matching-adjudication",
             round_path / "shared" / "matching_result.json": "matching-result",
             round_path / "shared" / "evidence_adjudication.json": "evidence-adjudication",
             round_path / "shared" / "evidence-library" / "claims_active.json": "claim-submission",

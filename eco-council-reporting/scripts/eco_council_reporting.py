@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -139,6 +140,47 @@ PUBLIC_SOURCE_FAMILIES = {
     "regulationsgov-comments-fetch": "rulemaking",
     "regulationsgov-comment-detail-fetch": "rulemaking",
 }
+METRIC_FAMILY_GROUPS = {
+    "air-quality": {
+        "pm2_5",
+        "pm2_5_aqi",
+        "pm10",
+        "pm10_aqi",
+        "us_aqi",
+        "nitrogen_dioxide",
+        "nitrogen_dioxide_aqi",
+        "ozone",
+        "ozone_aqi",
+        "sulfur_dioxide",
+        "sulfur_dioxide_aqi",
+        "carbon_monoxide",
+        "carbon_monoxide_aqi",
+    },
+    "fire-detection": {
+        "fire_detection",
+        "fire_detection_count",
+    },
+    "meteorology": {
+        "temperature_2m",
+        "wind_speed_10m",
+        "relative_humidity_2m",
+        "precipitation",
+        "precipitation_sum",
+    },
+    "hydrology": {
+        "river_discharge",
+        "river_discharge_mean",
+        "river_discharge_max",
+        "river_discharge_min",
+        "river_discharge_p25",
+        "river_discharge_p75",
+        "gage_height",
+    },
+    "soil": {
+        "soil_moisture_0_to_7cm",
+    },
+}
+DEFAULT_ENVIRONMENT_FAMILY_ORDER = ("air-quality", "fire-detection", "meteorology", "hydrology", "soil", "other")
 
 
 def utc_now_iso() -> str:
@@ -332,6 +374,22 @@ def shared_evidence_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "shared" / "evidence_cards.json"
 
 
+def claim_candidates_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "normalized" / "claim_candidates.json"
+
+
+def observation_candidates_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "normalized" / "observation_candidates.json"
+
+
+def claim_curation_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "claim_curation.json"
+
+
+def observation_curation_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "observation_curation.json"
+
+
 def claim_submissions_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "sociologist" / "claim_submissions.json"
 
@@ -356,6 +414,30 @@ def data_readiness_prompt_path(run_dir: Path, round_id: str, role: str) -> Path:
     return round_dir(run_dir, round_id) / role / "derived" / "openclaw_data_readiness_prompt.txt"
 
 
+def claim_curation_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "derived" / "claim_curation_draft.json"
+
+
+def observation_curation_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "derived" / "observation_curation_draft.json"
+
+
+def claim_curation_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "derived" / "claim_curation_packet.json"
+
+
+def observation_curation_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "derived" / "observation_curation_packet.json"
+
+
+def claim_curation_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "sociologist" / "derived" / "openclaw_claim_curation_prompt.txt"
+
+
+def observation_curation_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "environmentalist" / "derived" / "openclaw_observation_curation_prompt.txt"
+
+
 def matching_authorization_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "matching_authorization.json"
 
@@ -370,6 +452,26 @@ def matching_authorization_packet_path(run_dir: Path, round_id: str) -> Path:
 
 def matching_authorization_prompt_path(run_dir: Path, round_id: str) -> Path:
     return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_matching_authorization_prompt.txt"
+
+
+def matching_candidate_set_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_candidate_set.json"
+
+
+def matching_adjudication_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "matching_adjudication.json"
+
+
+def matching_adjudication_draft_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_adjudication_draft.json"
+
+
+def matching_adjudication_packet_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "matching_adjudication_packet.json"
+
+
+def matching_adjudication_prompt_path(run_dir: Path, round_id: str) -> Path:
+    return round_dir(run_dir, round_id) / "moderator" / "derived" / "openclaw_matching_adjudication_prompt.txt"
 
 
 def matching_result_path(run_dir: Path, round_id: str) -> Path:
@@ -470,6 +572,22 @@ if CONTRACT_MODULE is not None and hasattr(CONTRACT_MODULE, "SCHEMA_VERSION"):
     SCHEMA_VERSION = CONTRACT_MODULE.SCHEMA_VERSION
 
 
+def contract_call(name: str, *args: Any) -> Any | None:
+    if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, name):
+        return None
+    helper = getattr(CONTRACT_MODULE, name)
+    return helper(*args)
+
+
+def effective_matching_authorization(*, mission: dict[str, Any], round_id: str, authorization: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(authorization, dict):
+        return {}
+    value = contract_call("apply_matching_authorization_policy", mission, round_id, authorization)
+    if isinstance(value, dict):
+        return value
+    return dict(authorization)
+
+
 def validate_payload(kind: str, payload: Any) -> None:
     if CONTRACT_MODULE is None:
         return
@@ -487,13 +605,6 @@ def validate_bundle(run_dir: Path) -> dict[str, Any] | None:
     if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, "validate_bundle"):
         return None
     return CONTRACT_MODULE.validate_bundle(run_dir)
-
-
-def contract_call(name: str, *args: Any) -> Any | None:
-    if CONTRACT_MODULE is None or not hasattr(CONTRACT_MODULE, name):
-        return None
-    helper = getattr(CONTRACT_MODULE, name)
-    return helper(*args)
 
 
 def parse_round_components(round_id: str) -> tuple[str, int, int] | None:
@@ -562,11 +673,18 @@ def observation_signature_payload(observation: dict[str, Any]) -> dict[str, Any]
         "source_skill": maybe_text(observation.get("source_skill")),
         "metric": maybe_text(observation.get("metric")),
         "aggregation": maybe_text(observation.get("aggregation")),
+        "observation_mode": maybe_text(observation.get("observation_mode")),
+        "evidence_role": maybe_text(observation.get("evidence_role")),
         "value": observation.get("value"),
         "unit": maybe_text(observation.get("unit")),
         "statistics": observation.get("statistics"),
         "time_window": observation.get("time_window"),
         "place_scope": observation.get("place_scope"),
+        "source_skills": sorted(maybe_text(item) for item in observation.get("source_skills", []) if maybe_text(item)),
+        "metric_bundle": sorted(maybe_text(item) for item in observation.get("metric_bundle", []) if maybe_text(item)),
+        "candidate_observation_ids": sorted(
+            maybe_text(item) for item in observation.get("candidate_observation_ids", []) if maybe_text(item)
+        ),
         "quality_flags": sorted(
             maybe_text(item) for item in observation.get("quality_flags", []) if maybe_text(item)
         ),
@@ -590,6 +708,10 @@ def materialize_shared_observation(observation: dict[str, Any]) -> dict[str, Any
     return item
 
 
+def observation_submission_id(observation_id: str) -> str:
+    return f"obssub-{maybe_text(observation_id)}"
+
+
 def effective_shared_observations(run_dir: Path, round_id: str) -> list[dict[str, Any]]:
     merged_by_signature: dict[str, dict[str, Any]] = {}
     ordered_signatures: list[str] = []
@@ -601,6 +723,36 @@ def effective_shared_observations(run_dir: Path, round_id: str) -> list[dict[str
                 ordered_signatures.append(signature)
             merged_by_signature[signature] = materialize_shared_observation(observation)
     return [merged_by_signature[signature] for signature in ordered_signatures]
+
+
+def effective_shared_claims(run_dir: Path, round_id: str) -> list[dict[str, Any]]:
+    merged_by_id: dict[str, dict[str, Any]] = {}
+    ordered_ids: list[str] = []
+    for observed_round_id in round_ids_through(run_dir, round_id):
+        for claim in load_canonical_list(shared_claims_path(run_dir, observed_round_id)):
+            claim_id = maybe_text(claim.get("claim_id"))
+            if not claim_id:
+                continue
+            if claim_id not in merged_by_id:
+                ordered_ids.append(claim_id)
+            merged_by_id[claim_id] = dict(claim)
+    return [merged_by_id[claim_id] for claim_id in ordered_ids]
+
+
+def active_library_list(run_dir: Path, round_id: str, path_fn: Any) -> list[dict[str, Any]]:
+    current_path = path_fn(run_dir, round_id)
+    if current_path.exists():
+        current = load_canonical_list(current_path)
+        if current:
+            return current
+    prior_rounds = round_ids_through(run_dir, round_id)
+    if prior_rounds and prior_rounds[-1] == round_id:
+        prior_rounds = prior_rounds[:-1]
+    for observed_round_id in reversed(prior_rounds):
+        current = load_canonical_list(path_fn(run_dir, observed_round_id))
+        if current:
+            return current
+    return []
 
 
 def build_fallback_context(
@@ -737,9 +889,9 @@ def gap_to_question(gap: str) -> str:
 
 def expected_output_kinds_for_role(role: str) -> list[str]:
     if role == "sociologist":
-        return ["source-selection", "claim-submission", "data-readiness-report", "expert-report"]
+        return ["source-selection", "claim-curation", "claim-submission", "data-readiness-report", "expert-report"]
     if role == "environmentalist":
-        return ["source-selection", "observation-submission", "data-readiness-report", "expert-report"]
+        return ["source-selection", "observation-curation", "observation-submission", "data-readiness-report", "expert-report"]
     if role == "historian":
         return ["expert-report"]
     return ["expert-report"]
@@ -762,6 +914,224 @@ def public_source_channels(claims: list[dict[str, Any]]) -> list[str]:
     return unique_strings(channels)
 
 
+def compact_claim(claim: dict[str, Any]) -> dict[str, Any]:
+    refs = claim.get("public_refs")
+    source_skills = []
+    if isinstance(refs, list):
+        source_skills = unique_strings(
+            [
+                maybe_text(ref.get("source_skill"))
+                for ref in refs
+                if isinstance(ref, dict) and maybe_text(ref.get("source_skill"))
+            ]
+        )
+    return {
+        "claim_id": maybe_text(claim.get("claim_id")),
+        "claim_type": maybe_text(claim.get("claim_type")),
+        "summary": truncate_text(maybe_text(claim.get("summary")), 180),
+        "priority": claim.get("priority"),
+        "needs_physical_validation": bool(claim.get("needs_physical_validation")),
+        "public_source_skills": source_skills,
+        "candidate_claim_ids": [maybe_text(item) for item in claim.get("candidate_claim_ids", []) if maybe_text(item)][:6],
+        "selection_reason": truncate_text(maybe_text(claim.get("selection_reason")), 160),
+    }
+
+
+def compact_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "observation_id": maybe_text(observation.get("observation_id")),
+        "source_skill": maybe_text(observation.get("source_skill")),
+        "metric": maybe_text(observation.get("metric")),
+        "metric_family": observation_metric_family(observation.get("metric")),
+        "aggregation": maybe_text(observation.get("aggregation")),
+        "observation_mode": maybe_text(observation.get("observation_mode")),
+        "evidence_role": maybe_text(observation.get("evidence_role")),
+        "value": observation.get("value"),
+        "unit": maybe_text(observation.get("unit")),
+        "statistics": compact_statistics(observation.get("statistics")),
+        "time_window": observation.get("time_window"),
+        "source_skills": [maybe_text(item) for item in observation.get("source_skills", []) if maybe_text(item)][:4],
+        "metric_bundle": [maybe_text(item) for item in observation.get("metric_bundle", []) if maybe_text(item)][:6],
+        "quality_flags": [maybe_text(item) for item in observation.get("quality_flags", []) if maybe_text(item)][:4],
+    }
+
+
+def compact_evidence_card(card: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "evidence_id": maybe_text(card.get("evidence_id")),
+        "claim_id": maybe_text(card.get("claim_id")),
+        "verdict": maybe_text(card.get("verdict")),
+        "confidence": maybe_text(card.get("confidence")),
+        "summary": truncate_text(maybe_text(card.get("summary")), 220),
+        "observation_ids": [maybe_text(item) for item in card.get("observation_ids", []) if maybe_text(item)][:6],
+        "gaps": [truncate_text(maybe_text(item), 120) for item in card.get("gaps", []) if maybe_text(item)][:3],
+    }
+
+
+def compact_claim_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "submission_id": maybe_text(submission.get("submission_id")),
+        "claim_id": maybe_text(submission.get("claim_id")),
+        "claim_type": maybe_text(submission.get("claim_type")),
+        "summary": truncate_text(maybe_text(submission.get("summary")), 180),
+        "meaning": truncate_text(maybe_text(submission.get("meaning")), 200),
+        "worth_storing": bool(submission.get("worth_storing")),
+        "source_signal_count": submission.get("source_signal_count"),
+        "candidate_claim_ids": [maybe_text(item) for item in submission.get("candidate_claim_ids", []) if maybe_text(item)][:6],
+        "selection_reason": truncate_text(maybe_text(submission.get("selection_reason")), 160),
+    }
+
+
+def compact_observation_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "submission_id": maybe_text(submission.get("submission_id")),
+        "observation_id": maybe_text(submission.get("observation_id")),
+        "metric": maybe_text(submission.get("metric")),
+        "metric_family": observation_metric_family(submission.get("metric")),
+        "source_skill": maybe_text(submission.get("source_skill")),
+        "aggregation": maybe_text(submission.get("aggregation")),
+        "observation_mode": maybe_text(submission.get("observation_mode")),
+        "evidence_role": maybe_text(submission.get("evidence_role")),
+        "value": submission.get("value"),
+        "unit": maybe_text(submission.get("unit")),
+        "statistics": compact_statistics(submission.get("statistics")),
+        "time_window": submission.get("time_window"),
+        "meaning": truncate_text(maybe_text(submission.get("meaning")), 200),
+        "worth_storing": bool(submission.get("worth_storing")),
+        "source_skills": [maybe_text(item) for item in submission.get("source_skills", []) if maybe_text(item)][:4],
+        "metric_bundle": [maybe_text(item) for item in submission.get("metric_bundle", []) if maybe_text(item)][:6],
+        "candidate_observation_ids": [
+            maybe_text(item) for item in submission.get("candidate_observation_ids", []) if maybe_text(item)
+        ][:6],
+        "selection_reason": truncate_text(maybe_text(submission.get("selection_reason")), 160),
+    }
+
+
+def compact_isolated_entry(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "isolated_id": maybe_text(item.get("isolated_id")),
+        "entity_kind": maybe_text(item.get("entity_kind")),
+        "entity_id": maybe_text(item.get("entity_id")),
+        "summary": truncate_text(maybe_text(item.get("summary")), 200),
+        "reason": truncate_text(maybe_text(item.get("reason")), 160),
+    }
+
+
+def compact_remand_entry(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "remand_id": maybe_text(item.get("remand_id")),
+        "entity_kind": maybe_text(item.get("entity_kind")),
+        "entity_id": maybe_text(item.get("entity_id")),
+        "summary": truncate_text(maybe_text(item.get("summary")), 200),
+        "reasons": [truncate_text(maybe_text(reason), 120) for reason in item.get("reasons", []) if maybe_text(reason)][:3],
+    }
+
+
+def compact_claim_candidate_for_curation(candidate: dict[str, Any]) -> dict[str, Any]:
+    payload = compact_claim(candidate)
+    payload["statement"] = truncate_text(maybe_text(candidate.get("statement")), 220)
+    payload["source_signal_count"] = candidate.get("source_signal_count")
+    if isinstance(candidate.get("compact_audit"), dict):
+        payload["compact_audit"] = candidate.get("compact_audit")
+    return payload
+
+
+def compact_observation_candidate_for_curation(candidate: dict[str, Any]) -> dict[str, Any]:
+    payload = compact_observation(candidate)
+    if isinstance(candidate.get("compact_audit"), dict):
+        payload["compact_audit"] = candidate.get("compact_audit")
+    return payload
+
+
+def ranked_claim_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        candidates,
+        key=lambda item: (
+            -to_nonnegative_int(item.get("source_signal_count")),
+            maybe_text(item.get("claim_type")),
+            maybe_text(item.get("claim_id")),
+        ),
+    )
+
+
+def candidate_claim_entry_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "claim_id": maybe_text(candidate.get("claim_id")),
+        "candidate_claim_ids": [maybe_text(candidate.get("claim_id"))],
+        "claim_type": maybe_text(candidate.get("claim_type")),
+        "summary": maybe_text(candidate.get("summary")),
+        "statement": maybe_text(candidate.get("statement")),
+        "meaning": (
+            f"Retain this curated claim because it represents a distinct public narrative about "
+            f"{maybe_text(candidate.get('claim_type')) or 'the mission topic'}."
+        ),
+        "priority": max(1, min(5, int(candidate.get("priority") or 1))),
+        "needs_physical_validation": bool(candidate.get("needs_physical_validation")),
+        "worth_storing": True,
+        "selection_reason": "Carry forward this candidate as a curated claim pending agent review.",
+        "time_window": candidate.get("time_window"),
+        "place_scope": candidate.get("place_scope"),
+    }
+
+
+def guess_observation_candidate_evidence_role(observation: dict[str, Any], claims: list[dict[str, Any]]) -> str:
+    metric = maybe_text(observation.get("metric"))
+    claim_types = {
+        maybe_text(item.get("claim_type"))
+        for item in claims
+        if isinstance(item, dict) and maybe_text(item.get("claim_type"))
+    }
+    if "wildfire" in claim_types:
+        if metric == "fire_detection_count":
+            return "primary"
+        if metric in {"precipitation_sum", "relative_humidity_2m"}:
+            return "contradictory"
+        if observation_metric_family(metric) == "meteorology":
+            return "contextual"
+    if claim_types & {"smoke", "air-pollution"}:
+        if observation_metric_family(metric) == "air-quality":
+            return "primary"
+        if metric == "fire_detection_count":
+            return "contextual"
+    if "flood" in claim_types and (metric in PRECIPITATION_METRICS or metric in HYDROLOGY_METRICS):
+        return "primary"
+    if "heat" in claim_types and metric == "temperature_2m":
+        return "primary"
+    if "drought" in claim_types and metric in {"precipitation_sum", "soil_moisture_0_to_7cm"}:
+        return "primary"
+    return "contextual"
+
+
+def candidate_observation_entry_from_candidate(candidate: dict[str, Any], claims: list[dict[str, Any]]) -> dict[str, Any]:
+    provenance = candidate.get("provenance") if isinstance(candidate.get("provenance"), dict) else None
+    payload: dict[str, Any] = {
+        "observation_id": maybe_text(candidate.get("observation_id")),
+        "observation_mode": "atomic",
+        "candidate_observation_ids": [maybe_text(candidate.get("observation_id"))],
+        "metric": maybe_text(candidate.get("metric")),
+        "aggregation": maybe_text(candidate.get("aggregation")),
+        "value": candidate.get("value"),
+        "unit": maybe_text(candidate.get("unit")),
+        "meaning": (
+            f"Retain this atomic observation as a curation candidate for metric "
+            f"{maybe_text(candidate.get('metric')) or 'unknown'}."
+        ),
+        "worth_storing": True,
+        "evidence_role": guess_observation_candidate_evidence_role(candidate, claims),
+        "selection_reason": "Carry forward this atomic observation pending agent review and possible composition.",
+        "source_skills": [maybe_text(candidate.get("source_skill"))] if maybe_text(candidate.get("source_skill")) else [],
+        "metric_bundle": [maybe_text(candidate.get("metric"))] if maybe_text(candidate.get("metric")) else [],
+        "time_window": candidate.get("time_window"),
+        "place_scope": candidate.get("place_scope"),
+        "statistics": candidate.get("statistics"),
+        "quality_flags": candidate.get("quality_flags", []),
+        "component_roles": [],
+    }
+    if provenance is not None:
+        payload["provenance_refs"] = [provenance]
+    return payload
+
+
 def infer_missing_evidence_types(*, claims: list[dict[str, Any]], observations: list[dict[str, Any]], evidence_cards: list[dict[str, Any]]) -> list[str]:
     observation_metrics = {maybe_text(item.get("metric")) for item in observations}
     has_station_observation = any(maybe_text(item.get("source_skill")) == "openaq-data-fetch" for item in observations)
@@ -776,8 +1146,13 @@ def infer_missing_evidence_types(*, claims: list[dict[str, Any]], observations: 
     missing: set[str] = set()
     if not claims:
         missing.add("normalized-public-claims")
-    if observations and (not claims or (claims and not evidence_cards)):
-        missing.add("evidence-cards-linking-public-claims-to-physical-observations")
+    if claims and observations and evidence_cards:
+        if any(
+            maybe_text(card.get("verdict")) in {"mixed", "insufficient"}
+            for card in evidence_cards
+            if isinstance(card, dict)
+        ):
+            missing.add("evidence-cards-linking-public-claims-to-physical-observations")
 
     for card in evidence_cards:
         gaps = card.get("gaps")
@@ -1365,6 +1740,62 @@ def to_nonnegative_int(value: Any) -> int:
         return 0
 
 
+def maybe_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = maybe_text(value)
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def compact_statistics(value: Any) -> dict[str, float | None] | None:
+    if not isinstance(value, dict):
+        return None
+    compacted: dict[str, float | None] = {}
+    for key in ("min", "max", "mean", "p95"):
+        number = maybe_number(value.get(key))
+        compacted[key] = round(number, 3) if number is not None else None
+    if all(number is None for number in compacted.values()):
+        return None
+    return compacted
+
+
+def observation_metric_family(metric: Any) -> str:
+    normalized = maybe_text(metric)
+    for family, metrics in METRIC_FAMILY_GROUPS.items():
+        if normalized in metrics:
+            return family
+    return "other"
+
+
+def environment_family_priority_order(claims: list[dict[str, Any]]) -> list[str]:
+    ordered: list[str] = []
+    claim_types = {
+        maybe_text(item.get("claim_type"))
+        for item in claims
+        if isinstance(item, dict) and bool(item.get("needs_physical_validation"))
+    }
+    for claim_type in sorted(claim_types):
+        if claim_type in {"smoke", "air-pollution"}:
+            ordered.extend(["air-quality", "fire-detection", "meteorology"])
+        elif claim_type == "wildfire":
+            ordered.extend(["fire-detection", "meteorology", "air-quality"])
+        elif claim_type == "flood":
+            ordered.extend(["hydrology", "meteorology"])
+        elif claim_type == "heat":
+            ordered.extend(["meteorology"])
+        elif claim_type == "drought":
+            ordered.extend(["soil", "meteorology"])
+    ordered.extend(DEFAULT_ENVIRONMENT_FAMILY_ORDER)
+    return unique_strings(ordered)
+
+
 def load_dict_if_exists(path: Path) -> dict[str, Any]:
     payload = load_json_if_exists(path)
     if isinstance(payload, dict):
@@ -1386,12 +1817,142 @@ def load_override_requests(run_dir: Path, round_id: str, role: str | None = None
 
 def matching_executed_for_state(state: dict[str, Any]) -> bool:
     return bool(
-        state.get("matching_result")
+        state.get("matching_adjudication")
+        or state.get("matching_result")
         or state.get("evidence_adjudication")
         or state.get("cards_active")
         or state.get("isolated_active")
         or state.get("remands_open")
     )
+
+
+def compact_recommendation(action: Any) -> dict[str, Any] | None:
+    if not isinstance(action, dict):
+        return None
+    assigned_role = maybe_text(action.get("assigned_role"))
+    objective = maybe_text(action.get("objective"))
+    reason = maybe_text(action.get("reason"))
+    if not assigned_role or not objective or not reason:
+        return None
+    return {
+        "assigned_role": assigned_role,
+        "objective": objective,
+        "reason": reason,
+    }
+
+
+def compact_matching_authorization_summary(authorization: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(authorization, dict):
+        return {}
+    return {
+        "authorization_id": maybe_text(authorization.get("authorization_id")),
+        "authorization_status": maybe_text(authorization.get("authorization_status")),
+        "authorization_basis": maybe_text(authorization.get("authorization_basis")),
+        "summary": maybe_text(authorization.get("summary")),
+        "rationale": maybe_text(authorization.get("rationale")),
+        "allow_isolated_evidence": bool(authorization.get("allow_isolated_evidence")),
+        "claim_count": len(authorization.get("claim_ids", [])) if isinstance(authorization.get("claim_ids"), list) else 0,
+        "observation_count": len(authorization.get("observation_ids", [])) if isinstance(authorization.get("observation_ids"), list) else 0,
+        "open_questions": [maybe_text(item) for item in authorization.get("open_questions", []) if maybe_text(item)][:6],
+    }
+
+
+def compact_matching_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    matched_pairs = result.get("matched_pairs", [])
+    return {
+        "result_id": maybe_text(result.get("result_id")),
+        "result_status": maybe_text(result.get("result_status")),
+        "summary": maybe_text(result.get("summary")),
+        "matched_pair_count": len(matched_pairs) if isinstance(matched_pairs, list) else 0,
+        "matched_claim_count": len(result.get("matched_claim_ids", [])) if isinstance(result.get("matched_claim_ids"), list) else 0,
+        "matched_observation_count": (
+            len(result.get("matched_observation_ids", []))
+            if isinstance(result.get("matched_observation_ids"), list)
+            else 0
+        ),
+        "unmatched_claim_ids": [maybe_text(item) for item in result.get("unmatched_claim_ids", []) if maybe_text(item)][:8],
+        "unmatched_observation_ids": [
+            maybe_text(item)
+            for item in result.get("unmatched_observation_ids", [])
+            if maybe_text(item)
+        ][:8],
+    }
+
+
+def compact_matching_adjudication_summary(adjudication: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(adjudication, dict):
+        return {}
+    recommendations = [
+        compact_recommendation(item)
+        for item in adjudication.get("recommended_next_actions", [])
+        if isinstance(adjudication.get("recommended_next_actions"), list)
+    ]
+    return {
+        "adjudication_id": maybe_text(adjudication.get("adjudication_id")),
+        "candidate_set_id": maybe_text(adjudication.get("candidate_set_id")),
+        "summary": maybe_text(adjudication.get("summary")),
+        "rationale": maybe_text(adjudication.get("rationale")),
+        "open_questions": [maybe_text(item) for item in adjudication.get("open_questions", []) if maybe_text(item)][:6],
+        "recommended_next_actions": [item for item in recommendations if item][:4],
+    }
+
+
+def compact_evidence_adjudication_summary(adjudication: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(adjudication, dict):
+        return {}
+    recommendations = [
+        compact_recommendation(item)
+        for item in adjudication.get("recommended_next_actions", [])
+        if isinstance(adjudication.get("recommended_next_actions"), list)
+    ]
+    return {
+        "adjudication_id": maybe_text(adjudication.get("adjudication_id")),
+        "adjudication_status": maybe_text(adjudication.get("adjudication_status")),
+        "summary": maybe_text(adjudication.get("summary")),
+        "matching_reasonable": bool(adjudication.get("matching_reasonable")),
+        "needs_additional_data": bool(adjudication.get("needs_additional_data")),
+        "open_questions": [maybe_text(item) for item in adjudication.get("open_questions", []) if maybe_text(item)][:6],
+        "recommended_next_actions": [item for item in recommendations if item][:4],
+    }
+
+
+def augment_context_with_matching_state(*, run_dir: Path, state: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(context)
+    round_id = state["round_id"]
+    canonical_paths = merged.get("canonical_paths")
+    if not isinstance(canonical_paths, dict):
+        canonical_paths = {}
+    canonical_paths.update(
+        {
+            "matching_authorization": str(matching_authorization_path(run_dir, round_id)),
+            "matching_adjudication": str(matching_adjudication_path(run_dir, round_id)),
+            "matching_result": str(matching_result_path(run_dir, round_id)),
+            "evidence_adjudication": str(evidence_adjudication_path(run_dir, round_id)),
+        }
+    )
+    merged["canonical_paths"] = canonical_paths
+    phase_state = merged.get("phase_state")
+    if not isinstance(phase_state, dict):
+        phase_state = {}
+    phase_state.update(phase_state_from_round_state(state))
+    merged["phase_state"] = phase_state
+    merged["matching"] = {
+        "authorization": compact_matching_authorization_summary(
+            state.get("matching_authorization", {}) if isinstance(state.get("matching_authorization"), dict) else {}
+        ),
+        "result": compact_matching_result_summary(
+            state.get("matching_result", {}) if isinstance(state.get("matching_result"), dict) else {}
+        ),
+        "adjudication": compact_matching_adjudication_summary(
+            state.get("matching_adjudication", {}) if isinstance(state.get("matching_adjudication"), dict) else {}
+        ),
+        "evidence_adjudication": compact_evidence_adjudication_summary(
+            state.get("evidence_adjudication", {}) if isinstance(state.get("evidence_adjudication"), dict) else {}
+        ),
+    }
+    return merged
 
 
 def phase_state_from_round_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -1401,13 +1962,21 @@ def phase_state_from_round_state(state: dict[str, Any]) -> dict[str, Any]:
         for role, report in readiness_reports.items()
         if isinstance(report, dict) and report
     }
+    claim_curation = state.get("claim_curation") if isinstance(state.get("claim_curation"), dict) else {}
+    observation_curation = state.get("observation_curation") if isinstance(state.get("observation_curation"), dict) else {}
     authorization = state.get("matching_authorization", {}) if isinstance(state.get("matching_authorization"), dict) else {}
+    moderator_adjudication = state.get("matching_adjudication", {}) if isinstance(state.get("matching_adjudication"), dict) else {}
     result = state.get("matching_result", {}) if isinstance(state.get("matching_result"), dict) else {}
     adjudication = state.get("evidence_adjudication", {}) if isinstance(state.get("evidence_adjudication"), dict) else {}
     return {
+        "claim_curation_status": maybe_text(claim_curation.get("status")),
+        "observation_curation_status": maybe_text(observation_curation.get("status")),
         "readiness_statuses": readiness_statuses,
         "readiness_received_roles": sorted(readiness_statuses),
         "matching_authorization_status": maybe_text(authorization.get("authorization_status")),
+        "matching_authorization_basis": maybe_text(authorization.get("authorization_basis")),
+        "matching_adjudication_id": maybe_text(moderator_adjudication.get("adjudication_id")),
+        "matching_candidate_set_id": maybe_text(moderator_adjudication.get("candidate_set_id")),
         "matching_result_status": maybe_text(result.get("result_status")),
         "adjudication_status": maybe_text(adjudication.get("adjudication_status")),
         "matching_executed": matching_executed_for_state(state),
@@ -1416,25 +1985,49 @@ def phase_state_from_round_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def collect_round_state(run_dir: Path, round_id: str) -> dict[str, Any]:
     mission = load_mission(run_dir)
+    observations = effective_shared_observations(run_dir, round_id)
+    claims = effective_shared_claims(run_dir, round_id)
+    claim_submissions_current = load_canonical_list(claim_submissions_path(run_dir, round_id))
+    observation_submissions_current = hydrate_observation_submissions_with_observations(
+        load_canonical_list(observation_submissions_path(run_dir, round_id)),
+        observations,
+    )
+    claims_active = active_library_list(run_dir, round_id, claims_active_path)
+    observations_active = hydrate_observation_submissions_with_observations(
+        active_library_list(run_dir, round_id, observations_active_path),
+        observations,
+    )
+    matching_authorization = effective_matching_authorization(
+        mission=mission,
+        round_id=round_id,
+        authorization=load_dict_if_exists(matching_authorization_path(run_dir, round_id)),
+    )
     state = {
         "mission": mission,
         "round_id": round_id,
         "tasks": load_canonical_list(tasks_path(run_dir, round_id)),
-        "claims": load_canonical_list(shared_claims_path(run_dir, round_id)),
-        "observations": effective_shared_observations(run_dir, round_id),
+        "claims": claims,
+        "observations": observations,
+        "claim_candidates_current": load_canonical_list(claim_candidates_path(run_dir, round_id)),
+        "observation_candidates_current": load_canonical_list(observation_candidates_path(run_dir, round_id)),
+        "claim_curation": load_dict_if_exists(claim_curation_path(run_dir, round_id)),
+        "observation_curation": load_dict_if_exists(observation_curation_path(run_dir, round_id)),
         "evidence_cards": load_canonical_list(shared_evidence_path(run_dir, round_id)),
-        "claim_submissions_current": load_canonical_list(claim_submissions_path(run_dir, round_id)),
-        "observation_submissions_current": load_canonical_list(observation_submissions_path(run_dir, round_id)),
-        "claims_active": load_canonical_list(claims_active_path(run_dir, round_id)),
-        "observations_active": load_canonical_list(observations_active_path(run_dir, round_id)),
-        "cards_active": load_canonical_list(cards_active_path(run_dir, round_id)),
-        "isolated_active": load_canonical_list(isolated_active_path(run_dir, round_id)),
-        "remands_open": load_canonical_list(remands_open_path(run_dir, round_id)),
+        "claim_submissions_current": claim_submissions_current,
+        "observation_submissions_current": observation_submissions_current,
+        "claim_submissions_auditable": claims_active or claim_submissions_current,
+        "observation_submissions_auditable": observations_active or observation_submissions_current,
+        "claims_active": claims_active,
+        "observations_active": observations_active,
+        "cards_active": active_library_list(run_dir, round_id, cards_active_path),
+        "isolated_active": active_library_list(run_dir, round_id, isolated_active_path),
+        "remands_open": active_library_list(run_dir, round_id, remands_open_path),
         "readiness_reports": {
             "sociologist": load_dict_if_exists(data_readiness_report_path(run_dir, round_id, "sociologist")),
             "environmentalist": load_dict_if_exists(data_readiness_report_path(run_dir, round_id, "environmentalist")),
         },
-        "matching_authorization": load_dict_if_exists(matching_authorization_path(run_dir, round_id)),
+        "matching_authorization": matching_authorization,
+        "matching_adjudication": load_dict_if_exists(matching_adjudication_path(run_dir, round_id)),
         "matching_result": load_dict_if_exists(matching_result_path(run_dir, round_id)),
         "evidence_adjudication": load_dict_if_exists(evidence_adjudication_path(run_dir, round_id)),
     }
@@ -1442,70 +2035,622 @@ def collect_round_state(run_dir: Path, round_id: str) -> dict[str, Any]:
     return state
 
 
-def state_submissions(state: dict[str, Any], role: str) -> list[dict[str, Any]]:
+def state_current_submissions(state: dict[str, Any], role: str) -> list[dict[str, Any]]:
     if role == "sociologist":
         current = state.get("claim_submissions_current", [])
-        active = state.get("claims_active", [])
     else:
         current = state.get("observation_submissions_current", [])
-        active = state.get("observations_active", [])
-    if isinstance(current, list) and current:
+    if isinstance(current, list):
         return [item for item in current if isinstance(item, dict)]
+    return []
+
+
+def state_auditable_submissions(state: dict[str, Any], role: str) -> list[dict[str, Any]]:
+    if role == "sociologist":
+        auditable = state.get("claim_submissions_auditable", [])
+        current = state.get("claim_submissions_current", [])
+    else:
+        auditable = state.get("observation_submissions_auditable", [])
+        current = state.get("observation_submissions_current", [])
+    if isinstance(auditable, list) and auditable:
+        return [item for item in auditable if isinstance(item, dict)]
+    if isinstance(current, list):
+        return [item for item in current if isinstance(item, dict)]
+    return []
+
+
+def observation_match_key(item: dict[str, Any]) -> str:
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+    payload = {
+        "source_skill": maybe_text(item.get("source_skill")),
+        "metric": maybe_text(item.get("metric")),
+        "aggregation": maybe_text(item.get("aggregation")),
+        "observation_mode": maybe_text(item.get("observation_mode")),
+        "evidence_role": maybe_text(item.get("evidence_role")),
+        "value": item.get("value"),
+        "unit": maybe_text(item.get("unit")),
+        "time_window": item.get("time_window"),
+        "place_scope": item.get("place_scope"),
+        "source_skills": sorted(maybe_text(value) for value in item.get("source_skills", []) if maybe_text(value)),
+        "metric_bundle": sorted(maybe_text(value) for value in item.get("metric_bundle", []) if maybe_text(value)),
+        "candidate_observation_ids": sorted(
+            maybe_text(value) for value in item.get("candidate_observation_ids", []) if maybe_text(value)
+        ),
+        "quality_flags": sorted(maybe_text(flag) for flag in item.get("quality_flags", []) if maybe_text(flag)),
+        "provenance": {
+            "source_skill": maybe_text(provenance.get("source_skill")),
+            "record_locator": maybe_text(provenance.get("record_locator")),
+            "external_id": maybe_text(provenance.get("external_id")),
+            "sha256": maybe_text(provenance.get("sha256")),
+        },
+    }
+    return stable_hash(stable_json(payload))
+
+
+def hydrate_observation_submissions_with_observations(
+    submissions: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    observations_by_id = {
+        maybe_text(item.get("observation_id")): item
+        for item in observations
+        if isinstance(item, dict) and maybe_text(item.get("observation_id"))
+    }
+    observations_by_key = {
+        observation_match_key(item): item
+        for item in observations
+        if isinstance(item, dict)
+    }
+    hydrated: list[dict[str, Any]] = []
+    for submission in submissions:
+        if not isinstance(submission, dict):
+            continue
+        item = dict(submission)
+        observation = observations_by_id.get(maybe_text(item.get("observation_id")))
+        if observation is None:
+            observation = observations_by_key.get(observation_match_key(item))
+        if observation is not None:
+            canonical_observation_id = maybe_text(observation.get("observation_id"))
+            if canonical_observation_id and maybe_text(item.get("observation_id")) != canonical_observation_id:
+                item["observation_id"] = canonical_observation_id
+                item["submission_id"] = observation_submission_id(canonical_observation_id)
+            if not isinstance(item.get("statistics"), dict) and isinstance(observation.get("statistics"), dict):
+                item["statistics"] = observation.get("statistics")
+            if not isinstance(item.get("time_window"), dict) and isinstance(observation.get("time_window"), dict):
+                item["time_window"] = observation.get("time_window")
+            if not maybe_text(item.get("unit")) and maybe_text(observation.get("unit")):
+                item["unit"] = maybe_text(observation.get("unit"))
+        hydrated.append(item)
+    return hydrated
+
+
+def state_submissions(state: dict[str, Any], role: str) -> list[dict[str, Any]]:
+    submissions = state_auditable_submissions(state, role)
+    if submissions:
+        return submissions
+    if role == "sociologist":
+        active = state.get("claims_active", [])
+    else:
+        active = state.get("observations_active", [])
     if isinstance(active, list):
         return [item for item in active if isinstance(item, dict)]
     return []
 
 
-def aggregate_compact_audit(submissions: list[dict[str, Any]], *, fallback_summary: str) -> dict[str, Any]:
-    audits = [item.get("compact_audit") for item in submissions if isinstance(item.get("compact_audit"), dict)]
-    retained_count = 0
-    total_candidate_count = 0
-    representative_flags: list[bool] = []
-    coverage_summaries: list[str] = []
-    concentration_flags: list[str] = []
-    sampling_notes: list[str] = []
-    for audit in audits:
-        retained_count += to_nonnegative_int(audit.get("retained_count"))
-        total_candidate_count += to_nonnegative_int(audit.get("total_candidate_count"))
-        representative_flags.append(bool(audit.get("representative")))
-        coverage_summaries.append(maybe_text(audit.get("coverage_summary")))
-        concentration_flags.extend(
-            maybe_text(item)
-            for item in audit.get("concentration_flags", [])
-            if maybe_text(item)
-        )
-        sampling_notes.extend(
-            maybe_text(item)
-            for item in audit.get("sampling_notes", [])
-            if maybe_text(item)
-        )
-    if retained_count == 0:
-        retained_count = len(submissions)
-    if total_candidate_count == 0:
-        total_candidate_count = retained_count
-    representative = bool(submissions) and (all(representative_flags) if representative_flags else True)
-    coverage_summary = "; ".join([item for item in unique_strings(coverage_summaries) if item][:3]) or fallback_summary
-    payload = {
-        "representative": representative,
-        "retained_count": retained_count,
-        "total_candidate_count": total_candidate_count,
-        "coverage_summary": coverage_summary,
-        "concentration_flags": unique_strings(concentration_flags),
-        "sampling_notes": unique_strings(sampling_notes),
-    }
-    return payload
+def claim_submission_source_skills(submission: dict[str, Any]) -> list[str]:
+    refs = submission.get("public_refs")
+    if not isinstance(refs, list):
+        return []
+    return unique_strings(
+        [
+            maybe_text(ref.get("source_skill"))
+            for ref in refs
+            if isinstance(ref, dict) and maybe_text(ref.get("source_skill"))
+        ]
+    )
+
+
+def claim_submission_channels_for_submission(submission: dict[str, Any]) -> list[str]:
+    return unique_strings([public_source_channel(source_skill) for source_skill in claim_submission_source_skills(submission)])
 
 
 def claim_submission_channels(submissions: list[dict[str, Any]]) -> list[str]:
     channels: list[str] = []
     for submission in submissions:
-        refs = submission.get("public_refs")
-        if not isinstance(refs, list):
-            continue
-        for ref in refs:
-            if isinstance(ref, dict):
-                channels.append(public_source_channel(maybe_text(ref.get("source_skill"))))
+        channels.extend(claim_submission_channels_for_submission(submission))
     return unique_strings(channels)
+
+
+def select_public_submissions(submissions: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    ordered = sorted(
+        submissions,
+        key=lambda item: (
+            -to_nonnegative_int(item.get("source_signal_count")),
+            maybe_text(item.get("claim_type")),
+            maybe_text(item.get("submission_id")),
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def take_first(predicate: Any) -> None:
+        if len(selected) >= limit:
+            return
+        for candidate in ordered:
+            submission_id = maybe_text(candidate.get("submission_id"))
+            if not submission_id or submission_id in seen_ids or not predicate(candidate):
+                continue
+            selected.append(candidate)
+            seen_ids.add(submission_id)
+            return
+
+    for channel in claim_submission_channels(ordered):
+        take_first(lambda item, channel=channel: channel in claim_submission_channels_for_submission(item))
+    for source_skill in unique_strings([skill for item in ordered for skill in claim_submission_source_skills(item)]):
+        take_first(lambda item, source_skill=source_skill: source_skill in claim_submission_source_skills(item))
+    for claim_type in unique_strings([maybe_text(item.get("claim_type")) for item in ordered]):
+        take_first(lambda item, claim_type=claim_type: maybe_text(item.get("claim_type")) == claim_type)
+    for candidate in ordered:
+        submission_id = maybe_text(candidate.get("submission_id"))
+        if len(selected) >= limit:
+            break
+        if not submission_id or submission_id in seen_ids:
+            continue
+        selected.append(candidate)
+        seen_ids.add(submission_id)
+    return selected
+
+
+def observation_submission_severity(submission: dict[str, Any]) -> float:
+    statistics_obj = compact_statistics(submission.get("statistics"))
+    if isinstance(statistics_obj, dict):
+        for key in ("max", "p95", "mean", "min"):
+            value = maybe_number(statistics_obj.get(key))
+            if value is not None:
+                return value
+    value = maybe_number(submission.get("value"))
+    return value if value is not None else 0.0
+
+
+def representative_observation_order(observations: list[dict[str, Any]], claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    family_order = environment_family_priority_order(claims)
+    ordered = sorted(
+        observations,
+        key=lambda item: (
+            family_order.index(observation_metric_family(item.get("metric")))
+            if observation_metric_family(item.get("metric")) in family_order
+            else len(family_order),
+            -observation_submission_severity(item),
+            maybe_text(item.get("source_skill")),
+            maybe_text(item.get("metric")),
+            maybe_text(item.get("observation_id")),
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def take_first(predicate: Any) -> None:
+        for candidate in ordered:
+            observation_id = maybe_text(candidate.get("observation_id"))
+            if not observation_id or observation_id in seen_ids or not predicate(candidate):
+                continue
+            selected.append(candidate)
+            seen_ids.add(observation_id)
+            return
+
+    for family in family_order:
+        take_first(lambda item, family=family: observation_metric_family(item.get("metric")) == family)
+    for source_skill in unique_strings([maybe_text(item.get("source_skill")) for item in ordered]):
+        take_first(lambda item, source_skill=source_skill: maybe_text(item.get("source_skill")) == source_skill)
+    for metric in unique_strings([maybe_text(item.get("metric")) for item in ordered]):
+        take_first(lambda item, metric=metric: maybe_text(item.get("metric")) == metric)
+    for candidate in ordered:
+        observation_id = maybe_text(candidate.get("observation_id"))
+        if not observation_id or observation_id in seen_ids:
+            continue
+        selected.append(candidate)
+        seen_ids.add(observation_id)
+    return selected
+
+
+def select_environment_submissions(submissions: list[dict[str, Any]], claims: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    family_order = environment_family_priority_order(claims)
+    ordered = sorted(
+        submissions,
+        key=lambda item: (
+            family_order.index(observation_metric_family(item.get("metric")))
+            if observation_metric_family(item.get("metric")) in family_order
+            else len(family_order),
+            -observation_submission_severity(item),
+            maybe_text(item.get("source_skill")),
+            maybe_text(item.get("metric")),
+            maybe_text(item.get("submission_id")),
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def take_first(predicate: Any) -> None:
+        if len(selected) >= limit:
+            return
+        for candidate in ordered:
+            submission_id = maybe_text(candidate.get("submission_id"))
+            if not submission_id or submission_id in seen_ids or not predicate(candidate):
+                continue
+            selected.append(candidate)
+            seen_ids.add(submission_id)
+            return
+
+    for family in family_order:
+        take_first(lambda item, family=family: observation_metric_family(item.get("metric")) == family)
+    for source_skill in unique_strings([maybe_text(item.get("source_skill")) for item in ordered]):
+        take_first(lambda item, source_skill=source_skill: maybe_text(item.get("source_skill")) == source_skill)
+    for metric in unique_strings([maybe_text(item.get("metric")) for item in ordered]):
+        take_first(lambda item, metric=metric: maybe_text(item.get("metric")) == metric)
+    for candidate in ordered:
+        submission_id = maybe_text(candidate.get("submission_id"))
+        if len(selected) >= limit:
+            break
+        if not submission_id or submission_id in seen_ids:
+            continue
+        selected.append(candidate)
+        seen_ids.add(submission_id)
+    return selected
+
+
+def representative_submissions(state: dict[str, Any], role: str, submissions: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    if role == "sociologist":
+        return select_public_submissions(submissions, limit)
+    return select_environment_submissions(submissions, state.get("claims", []), limit)
+
+
+def aggregate_compact_audit(
+    state: dict[str, Any],
+    role: str,
+    submissions: list[dict[str, Any]],
+    *,
+    fallback_summary: str,
+    retained_limit: int,
+) -> dict[str, Any]:
+    selected = representative_submissions(state, role, submissions, retained_limit)
+    coverage_dimensions: list[str] = []
+    missing_dimensions: list[str] = []
+    concentration_flags: list[str] = []
+    sampling_notes: list[str] = []
+
+    if role == "sociologist":
+        full_channels = claim_submission_channels(submissions)
+        full_sources = unique_strings([skill for item in submissions for skill in claim_submission_source_skills(item)])
+        selected_channels = claim_submission_channels(selected)
+        selected_sources = unique_strings([skill for item in selected for skill in claim_submission_source_skills(item)])
+        channel_counts = Counter(channel for item in submissions for channel in claim_submission_channels_for_submission(item))
+        source_counts = Counter(skill for item in submissions for skill in claim_submission_source_skills(item))
+        coverage_dimensions = ["supporting-artifacts", "channel", "source-skill", "claim-type"]
+        if len(full_channels) > 1 and len(selected_channels) < min(len(full_channels), max(1, retained_limit)):
+            missing_dimensions.append("channel-coverage")
+        if len(full_sources) > 1 and len(selected_sources) < min(len(full_sources), max(1, retained_limit)):
+            missing_dimensions.append("source-skill-coverage")
+        if submissions and all(to_nonnegative_int(item.get("source_signal_count")) <= 1 for item in submissions):
+            missing_dimensions.append("multi-signal-corroboration")
+        top_channel = channel_counts.most_common(1)[0] if channel_counts else None
+        top_source = source_counts.most_common(1)[0] if source_counts else None
+        if top_channel is not None and len(submissions) >= 4 and top_channel[1] / len(submissions) >= 0.8:
+            concentration_flags.append(f"Auditable public submissions remain highly concentrated in the {top_channel[0]} channel.")
+        if top_source is not None and len(submissions) >= 4 and top_source[1] / len(submissions) >= 0.8:
+            concentration_flags.append(f"Auditable public submissions remain highly concentrated in {top_source[0]}.")
+        coverage_summary = (
+            f"Selected {len(selected)} auditable claim submissions from {len(submissions)} total while covering "
+            f"{len(selected_channels)}/{len(full_channels) or 1} channels and {len(selected_sources)}/{len(full_sources) or 1} source skills."
+        )
+        sampling_notes.extend(
+            [
+                f"Dominant channels: {', '.join(f'{channel}:{count}' for channel, count in channel_counts.most_common(3))}" if channel_counts else "No channel distribution was available.",
+                f"Dominant source skills: {', '.join(f'{source}:{count}' for source, count in source_counts.most_common(3))}" if source_counts else "No source-skill distribution was available.",
+                f"Selected claim types: {', '.join(unique_strings([maybe_text(item.get('claim_type')) for item in selected]))}" if selected else "No claim submissions were selected.",
+            ]
+        )
+    else:
+        full_families = unique_strings([observation_metric_family(item.get("metric")) for item in submissions])
+        full_sources = unique_strings([maybe_text(item.get("source_skill")) for item in submissions if maybe_text(item.get("source_skill"))])
+        selected_families = unique_strings([observation_metric_family(item.get("metric")) for item in selected])
+        selected_sources = unique_strings([maybe_text(item.get("source_skill")) for item in selected if maybe_text(item.get("source_skill"))])
+        selected_with_stats = sum(1 for item in selected if compact_statistics(item.get("statistics")))
+        available_with_stats = sum(1 for item in submissions if compact_statistics(item.get("statistics")))
+        coverage_dimensions = ["metric-family", "source-skill", "time-window"]
+        if selected_with_stats:
+            coverage_dimensions.append("extrema-summary")
+        if len(full_families) > 1 and len(selected_families) < min(len(full_families), max(1, retained_limit)):
+            missing_dimensions.append("metric-family-coverage")
+        if len(full_sources) > 1 and len(selected_sources) < min(len(full_sources), max(1, retained_limit)):
+            missing_dimensions.append("source-skill-coverage")
+        if available_with_stats and selected_with_stats == 0:
+            missing_dimensions.append("extrema-retention")
+        coverage_summary = (
+            f"Selected {len(selected)} auditable observation submissions from {len(submissions)} total while covering "
+            f"{len(selected_families)}/{len(full_families) or 1} metric families and {len(selected_sources)}/{len(full_sources) or 1} source skills."
+        )
+        sampling_notes.extend(
+            [
+                f"Selected metric families: {', '.join(selected_families)}" if selected_families else "No metric-family coverage was selected.",
+                f"Selected source skills: {', '.join(selected_sources)}" if selected_sources else "No source-skill coverage was selected.",
+                f"Selected submissions with statistics retained: {selected_with_stats} of {available_with_stats}." if available_with_stats else "No observation statistics were available.",
+            ]
+        )
+
+    return {
+        "representative": bool(submissions) and not concentration_flags and not missing_dimensions,
+        "retained_count": len(selected),
+        "total_candidate_count": len(submissions),
+        "coverage_summary": coverage_summary if submissions else fallback_summary,
+        "concentration_flags": unique_strings(concentration_flags),
+        "coverage_dimensions": unique_strings(coverage_dimensions),
+        "missing_dimensions": unique_strings(missing_dimensions),
+        "sampling_notes": unique_strings(sampling_notes),
+    }
+
+
+def build_claim_curation_draft(
+    *,
+    mission: dict[str, Any],
+    round_id: str,
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    candidates = state.get("claim_candidates_current", []) if isinstance(state.get("claim_candidates_current"), list) else []
+    constraints = mission_constraints(mission)
+    limit = max(1, int(constraints.get("claim_target_per_round") or constraints.get("max_claims_per_round") or 3))
+    selected = ranked_claim_candidates(candidates)[:limit]
+    status = "complete" if candidates else "blocked"
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "curation_id": f"claim-curation-{round_id}",
+        "run_id": mission_run_id(mission),
+        "round_id": round_id,
+        "agent_role": "sociologist",
+        "status": status,
+        "summary": (
+            f"Review {len(candidates)} claim candidates and curate an auditable public-claim library for this round."
+            if candidates
+            else "No claim candidates were available for curation."
+        ),
+        "curated_claims": [candidate_claim_entry_from_candidate(item) for item in selected],
+        "rejected_candidate_ids": [],
+        "open_questions": [],
+        "recommended_next_actions": [],
+        "override_requests": [],
+    }
+    validate_payload("claim-curation", payload)
+    return payload
+
+
+def build_observation_curation_draft(
+    *,
+    mission: dict[str, Any],
+    round_id: str,
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    candidates = state.get("observation_candidates_current", []) if isinstance(state.get("observation_candidates_current"), list) else []
+    focus_claims = state.get("claim_candidates_current", []) if isinstance(state.get("claim_candidates_current"), list) else []
+    if not focus_claims:
+        focus_claims = state.get("claims", []) if isinstance(state.get("claims"), list) else []
+    constraints = mission_constraints(mission)
+    limit = max(4, int(constraints.get("claim_target_per_round") or constraints.get("max_claims_per_round") or 3) * 2)
+    ordered = representative_observation_order(candidates, focus_claims)
+    status = "complete" if candidates else "blocked"
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "curation_id": f"observation-curation-{round_id}",
+        "run_id": mission_run_id(mission),
+        "round_id": round_id,
+        "agent_role": "environmentalist",
+        "status": status,
+        "summary": (
+            f"Review {len(candidates)} observation candidates and curate atomic or composite physical evidence for this round."
+            if candidates
+            else "No observation candidates were available for curation."
+        ),
+        "curated_observations": [candidate_observation_entry_from_candidate(item, focus_claims) for item in ordered[:limit]],
+        "rejected_candidate_ids": [],
+        "open_questions": [],
+        "recommended_next_actions": [],
+        "override_requests": [],
+    }
+    validate_payload("observation-curation", payload)
+    return payload
+
+
+def build_claim_curation_instructions() -> list[str]:
+    return [
+        "Return one JSON object only, shaped like claim-curation.",
+        "Review the full candidate public-claim pool before deciding what enters the auditable library.",
+        "You may merge multiple candidate_claim_ids into one curated claim when they express the same public narrative.",
+        "Use only claim_ids and candidate_claim_ids already present in the packet.",
+        "Prefer rejected_candidate_ids for discarded items; reserve worth_storing=false for rare edge cases you still want explicitly recorded.",
+        "Keep summaries, statements, and meaning fields grounded in the packet candidate pool only.",
+        "Do not invent raw-source facts outside the packet.",
+        "If the current envelope blocks the candidate diversity you need, use override_requests instead of silently expanding scope.",
+    ]
+
+
+def build_observation_curation_instructions() -> list[str]:
+    return [
+        "Return one JSON object only, shaped like observation-curation.",
+        "Review the full candidate physical-observation pool before deciding what enters the auditable library.",
+        "You may keep observations atomic or combine multiple candidate_observation_ids into one composite observation.",
+        "Composite observations must explicitly fill candidate_observation_ids, source_skills, metric_bundle, evidence_role, and component_roles.",
+        "Use evidence_role and component_roles to distinguish primary, contextual, contradictory, or mixed parts of the observation.",
+        "Do not let context-only weather background stand in for direct support unless the packet evidence itself justifies it.",
+        "Use only candidate observation ids and candidate claim context already present in the packet.",
+        "If the current envelope blocks necessary corroboration, use override_requests instead of silently expanding scope.",
+    ]
+
+
+def build_claim_curation_packet(
+    *,
+    run_dir: Path,
+    round_id: str,
+    mission: dict[str, Any],
+    tasks: list[dict[str, Any]],
+    context: dict[str, Any],
+    state: dict[str, Any],
+    draft_curation: dict[str, Any],
+) -> dict[str, Any]:
+    relevant_tasks = [task for task in tasks if maybe_text(task.get("assigned_role")) == "sociologist"]
+    existing_curation = load_dict_if_exists(claim_curation_path(run_dir, round_id))
+    candidates = state.get("claim_candidates_current", []) if isinstance(state.get("claim_candidates_current"), list) else []
+    return {
+        "packet_kind": "claim-curation-packet",
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": utc_now_iso(),
+        "policy_profile": mission_policy_profile(mission),
+        "effective_constraints": mission_constraints(mission),
+        "run": {
+            "run_id": mission_run_id(mission),
+            "round_id": round_id,
+            "topic": maybe_text(mission.get("topic")),
+            "objective": maybe_text(mission.get("objective")),
+            "role": "sociologist",
+        },
+        "role": "sociologist",
+        "task_scope": relevant_tasks,
+        "context": context,
+        "candidate_pool": {
+            "candidate_count": len(candidates),
+            "claim_candidates": [compact_claim_candidate_for_curation(item) for item in candidates],
+        },
+        "instructions": build_claim_curation_instructions(),
+        "existing_override_requests": load_override_requests(run_dir, round_id, "sociologist"),
+        "existing_curation": existing_curation,
+        "draft_curation": draft_curation,
+        "validation": {
+            "kind": "claim-curation",
+            "target_curation_path": str(claim_curation_path(run_dir, round_id)),
+            "draft_curation_path": str(claim_curation_draft_path(run_dir, round_id)),
+            "validate_command": (
+                f"python3 {CONTRACT_SCRIPT_PATH} validate --kind claim-curation "
+                f"--input {claim_curation_draft_path(run_dir, round_id)}"
+            ),
+        },
+    }
+
+
+def build_observation_curation_packet(
+    *,
+    run_dir: Path,
+    round_id: str,
+    mission: dict[str, Any],
+    tasks: list[dict[str, Any]],
+    context: dict[str, Any],
+    state: dict[str, Any],
+    draft_curation: dict[str, Any],
+) -> dict[str, Any]:
+    relevant_tasks = [task for task in tasks if maybe_text(task.get("assigned_role")) == "environmentalist"]
+    existing_curation = load_dict_if_exists(observation_curation_path(run_dir, round_id))
+    observation_candidates = (
+        state.get("observation_candidates_current", [])
+        if isinstance(state.get("observation_candidates_current"), list)
+        else []
+    )
+    claim_candidates = state.get("claim_candidates_current", []) if isinstance(state.get("claim_candidates_current"), list) else []
+    return {
+        "packet_kind": "observation-curation-packet",
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": utc_now_iso(),
+        "policy_profile": mission_policy_profile(mission),
+        "effective_constraints": mission_constraints(mission),
+        "run": {
+            "run_id": mission_run_id(mission),
+            "round_id": round_id,
+            "topic": maybe_text(mission.get("topic")),
+            "objective": maybe_text(mission.get("objective")),
+            "role": "environmentalist",
+        },
+        "role": "environmentalist",
+        "task_scope": relevant_tasks,
+        "context": context,
+        "candidate_pool": {
+            "claim_candidate_count": len(claim_candidates),
+            "observation_candidate_count": len(observation_candidates),
+            "claim_candidates": [compact_claim_candidate_for_curation(item) for item in claim_candidates],
+            "observation_candidates": [compact_observation_candidate_for_curation(item) for item in observation_candidates],
+        },
+        "instructions": build_observation_curation_instructions(),
+        "existing_override_requests": load_override_requests(run_dir, round_id, "environmentalist"),
+        "existing_curation": existing_curation,
+        "draft_curation": draft_curation,
+        "validation": {
+            "kind": "observation-curation",
+            "target_curation_path": str(observation_curation_path(run_dir, round_id)),
+            "draft_curation_path": str(observation_curation_draft_path(run_dir, round_id)),
+            "validate_command": (
+                f"python3 {CONTRACT_SCRIPT_PATH} validate --kind observation-curation "
+                f"--input {observation_curation_draft_path(run_dir, round_id)}"
+            ),
+        },
+    }
+
+
+def claim_curation_prompt_text(*, packet_path: Path, packet: dict[str, Any]) -> str:
+    run = packet.get("run", {}) if isinstance(packet.get("run"), dict) else {}
+    validation = packet.get("validation", {}) if isinstance(packet.get("validation"), dict) else {}
+    lines = [
+        "Use $eco-council-reporting.",
+        f"You are the sociologist for eco-council run {maybe_text(run.get('run_id'))} round {maybe_text(run.get('round_id'))}.",
+        "",
+        "Open and read this packet JSON first:",
+        str(packet_path),
+        "",
+        "Then follow these rules:",
+        "1. Treat packet `instructions` as binding.",
+        "2. Review `task_scope`, `context`, and `candidate_pool` before editing.",
+        "3. Start from `draft_curation` inside the packet, but revise it freely when the packet evidence warrants it.",
+        "4. Return only one JSON object shaped like claim-curation.",
+        "5. Keep `schema_version`, `run_id`, `round_id`, and `agent_role` consistent with the packet.",
+        "6. Do not return markdown, prose, code fences, or extra commentary.",
+        "",
+        "If you persist the result locally, write it to:",
+        maybe_text(validation.get("draft_curation_path")),
+        "",
+        "Validation command:",
+        maybe_text(validation.get("validate_command")),
+        "",
+        "Return only JSON.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def observation_curation_prompt_text(*, packet_path: Path, packet: dict[str, Any]) -> str:
+    run = packet.get("run", {}) if isinstance(packet.get("run"), dict) else {}
+    validation = packet.get("validation", {}) if isinstance(packet.get("validation"), dict) else {}
+    lines = [
+        "Use $eco-council-reporting.",
+        f"You are the environmentalist for eco-council run {maybe_text(run.get('run_id'))} round {maybe_text(run.get('round_id'))}.",
+        "",
+        "Open and read this packet JSON first:",
+        str(packet_path),
+        "",
+        "Then follow these rules:",
+        "1. Treat packet `instructions` as binding.",
+        "2. Review `task_scope`, `context`, and `candidate_pool` before editing.",
+        "3. Start from `draft_curation` inside the packet, but revise it freely when the packet evidence warrants it.",
+        "4. Return only one JSON object shaped like observation-curation.",
+        "5. Keep `schema_version`, `run_id`, `round_id`, and `agent_role` consistent with the packet.",
+        "6. Do not return markdown, prose, code fences, or extra commentary.",
+        "",
+        "If you persist the result locally, write it to:",
+        maybe_text(validation.get("draft_curation_path")),
+        "",
+        "Validation command:",
+        maybe_text(validation.get("validate_command")),
+        "",
+        "Return only JSON.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def observation_metrics_from_submissions(submissions: list[dict[str, Any]]) -> set[str]:
@@ -1582,7 +2727,7 @@ def generic_readiness_recommendations(role: str, missing_types: list[str], *, ha
                 {
                     "assigned_role": "sociologist",
                     "objective": "Collect and normalize mission-window public claims from approved channels.",
-                    "reason": "No claim submissions are available for readiness review yet.",
+                    "reason": "No auditable claim submissions are available for readiness review yet.",
                 }
             )
         else:
@@ -1590,7 +2735,7 @@ def generic_readiness_recommendations(role: str, missing_types: list[str], *, ha
                 {
                     "assigned_role": "environmentalist",
                     "objective": "Collect and normalize mission-window physical observations from approved sources.",
-                    "reason": "No observation submissions are available for readiness review yet.",
+                    "reason": "No auditable observation submissions are available for readiness review yet.",
                 }
             )
     deduped: dict[tuple[str, str], dict[str, Any]] = {}
@@ -1604,12 +2749,14 @@ def generic_readiness_recommendations(role: str, missing_types: list[str], *, ha
 
 def build_readiness_findings_from_submissions(
     *,
+    state: dict[str, Any],
     role: str,
     submissions: list[dict[str, Any]],
     max_findings: int,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    for index, submission in enumerate(submissions[:max_findings], start=1):
+    selected_submissions = representative_submissions(state, role, submissions, max_findings)
+    for index, submission in enumerate(selected_submissions, start=1):
         if role == "sociologist":
             claim_id = maybe_text(submission.get("claim_id"))
             findings.append(
@@ -1631,6 +2778,17 @@ def build_readiness_findings_from_submissions(
             )
         else:
             observation_id = maybe_text(submission.get("observation_id"))
+            statistics_obj = compact_statistics(submission.get("statistics"))
+            stats_text = ""
+            if isinstance(statistics_obj, dict):
+                stats_parts = [
+                    f"{key}={value:g}"
+                    for key in ("max", "p95", "mean", "min")
+                    for value in [maybe_number(statistics_obj.get(key))]
+                    if value is not None
+                ]
+                if stats_parts:
+                    stats_text = f" Summary stats: {', '.join(stats_parts[:4])}."
             findings.append(
                 {
                     "finding_id": f"finding-{index:03d}",
@@ -1638,7 +2796,11 @@ def build_readiness_findings_from_submissions(
                         f"{maybe_text(submission.get('metric'))} from {maybe_text(submission.get('source_skill'))}",
                         72,
                     ),
-                    "summary": truncate_text(maybe_text(submission.get("meaning")), 300),
+                    "summary": truncate_text(
+                        f"{maybe_text(submission.get('meaning'))} "
+                        f"Metric family: {observation_metric_family(submission.get('metric'))}.{stats_text}",
+                        300,
+                    ),
                     "confidence": "medium",
                     "claim_ids": [],
                     "observation_ids": [observation_id] if observation_id else [],
@@ -1657,12 +2819,19 @@ def build_data_readiness_draft(
     max_findings: int,
 ) -> dict[str, Any]:
     submissions = state_submissions(state, role)
+    current_submissions = state_current_submissions(state, role)
     fallback_summary = (
-        "Compact public submissions are available for readiness review."
+        "Auditable public submissions are available for readiness review."
         if role == "sociologist"
-        else "Compact physical submissions are available for readiness review."
+        else "Auditable physical submissions are available for readiness review."
     )
-    compact_audit = aggregate_compact_audit(submissions, fallback_summary=fallback_summary)
+    compact_audit = aggregate_compact_audit(
+        state,
+        role,
+        submissions,
+        fallback_summary=fallback_summary,
+        retained_limit=max_findings,
+    )
     missing_types = readiness_missing_types(state, role)
     has_submissions = bool(submissions)
     environment_required = not (role == "environmentalist" and not environment_role_required(state))
@@ -1677,15 +2846,25 @@ def build_data_readiness_draft(
     sufficient_for_matching = readiness_status == "ready"
     if not sufficient_for_matching:
         compact_audit["representative"] = False
-    findings = build_readiness_findings_from_submissions(role=role, submissions=submissions, max_findings=max_findings)
+    findings = build_readiness_findings_from_submissions(
+        state=state,
+        role=role,
+        submissions=submissions,
+        max_findings=max_findings,
+    )
     open_questions = [
         f"Should the next round address compact-audit concentration: {flag}?"
         for flag in compact_audit.get("concentration_flags", [])
         if maybe_text(flag)
     ]
+    open_questions.extend(
+        f"Is the compact view missing required coverage dimension `{dimension}` for matching?"
+        for dimension in compact_audit.get("missing_dimensions", [])
+        if maybe_text(dimension)
+    )
     if environment_required and not has_submissions:
         open_questions.append(
-            "Which approved source families should be expanded first to produce canonical submissions for readiness review?"
+            "Which approved source families should be expanded first to produce auditable canonical submissions for readiness review?"
         )
     recommendations = [] if not environment_required else generic_readiness_recommendations(role, missing_types, has_submissions=has_submissions)
     if missing_types:
@@ -1694,9 +2873,15 @@ def build_data_readiness_draft(
             for missing_type in missing_types
         )
     if role == "sociologist":
-        summary_lead = f"Public-side readiness reviewed {len(submissions)} claim submissions."
+        summary_lead = (
+            f"Public-side readiness reviewed {len(submissions)} auditable claim submissions "
+            f"({len(current_submissions)} newly materialized this round)."
+        )
     else:
-        summary_lead = f"Physical-side readiness reviewed {len(submissions)} observation submissions."
+        summary_lead = (
+            f"Physical-side readiness reviewed {len(submissions)} auditable observation submissions "
+            f"({len(current_submissions)} newly materialized this round)."
+        )
     summary = f"{summary_lead} Status={readiness_status}. {compact_audit.get('coverage_summary')}"
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -1725,11 +2910,12 @@ def build_data_readiness_draft(
 def build_data_readiness_instructions(role: str) -> list[str]:
     instructions = [
         "Return one JSON object only, shaped like data-readiness-report.",
-        "Judge whether the current canonical submissions are sufficiently representative for a later matching pass.",
+        "Judge whether the auditable submission library available in this round is sufficiently representative for a later matching pass.",
         "Use submission_ids, claim_ids, and observation_ids already present in the packet context only.",
         "Do not invent raw-source facts outside the packet.",
         "If the compact representation is not sufficiently representative, use readiness_status=needs-more-data.",
-        "If no canonical submissions are available, use readiness_status=blocked.",
+        "If no auditable submissions are available, use readiness_status=blocked.",
+        "Before the first matching pass, zero evidence cards is expected and must not be treated as a readiness failure by itself.",
         "Keep findings and recommendations traceable to the packet context.",
         "If the current mission envelope blocks the missing preparation you need, keep the report inside bounds and use override_requests for upstream review.",
     ]
@@ -1828,21 +3014,22 @@ def build_matching_authorization_draft(
         if isinstance(report, dict) and report
     }
     statuses = {role: maybe_text(report.get("readiness_status")) for role, report in reports.items()}
+    final_round = bool(contract_call("is_final_allowed_round", mission, round_id))
     if any(status == "blocked" for status in statuses.values()):
-        authorization_status = "not-authorized"
+        base_status = "not-authorized"
     elif set(reports) == set(READINESS_ROLES) and all(bool(report.get("sufficient_for_matching")) for report in reports.values()):
-        authorization_status = "authorized"
+        base_status = "authorized"
     else:
-        authorization_status = "deferred"
-    if authorization_status == "authorized":
-        summary = "Both data roles report that the current submissions are sufficiently prepared for a matching pass."
-        rationale = "Matching should proceed before requesting broader collection because both sides judge the current compact evidence to be representative enough."
-    elif authorization_status == "not-authorized":
-        summary = "At least one data role reports a blocked readiness state, so matching is not authorized."
-        rationale = "Matching is not reasonable when one side lacks canonical submissions or is structurally blocked."
+        base_status = "deferred"
+    if base_status == "authorized":
+        summary = "Both data roles report that the current auditable submissions are sufficiently prepared for a matching pass."
+        rationale = "Matching should proceed before requesting broader collection because both sides judge the current compact evidence library to be representative enough."
+    elif base_status == "not-authorized":
+        summary = "At least one data role reports a blocked readiness state, so matching is not yet authorized under normal readiness rules."
+        rationale = "Matching is not normally reasonable when one side lacks auditable submissions or is structurally blocked."
     else:
-        summary = "Current data readiness is incomplete or mixed, so matching is deferred pending more preparation."
-        rationale = "Matching should wait until both roles either report sufficiency or the upstream operator explicitly changes the collection boundary."
+        summary = "Current data readiness is incomplete or mixed, so matching is deferred pending more preparation under normal readiness rules."
+        rationale = "Matching should usually wait until both roles either report sufficiency or the upstream operator explicitly changes the collection boundary."
     claim_ids = [
         maybe_text(item.get("claim_id"))
         for item in state.get("claims_active", [])
@@ -1866,23 +3053,34 @@ def build_matching_authorization_draft(
             for item in report.get("open_questions", [])
             if maybe_text(item)
         )
+    if final_round and base_status != "authorized":
+        open_questions.append("This is the final allowed round. Which isolated or remand outcomes remain acceptable if direct matches stay limited?")
     payload = {
         "schema_version": SCHEMA_VERSION,
         "authorization_id": f"matchauth-{round_id}",
         "run_id": mission_run_id(mission),
         "round_id": round_id,
         "agent_role": "moderator",
-        "authorization_status": authorization_status,
+        "authorization_status": base_status,
+        "moderator_requested_status": base_status,
+        "authorization_basis": (
+            "readiness-ready"
+            if base_status == "authorized"
+            else "readiness-blocked"
+            if base_status == "not-authorized"
+            else "readiness-deferred"
+        ),
         "summary": truncate_text(summary, 400),
         "rationale": truncate_text(rationale, 500),
         "moderator_override": False,
-        "allow_isolated_evidence": authorization_status == "authorized",
+        "allow_isolated_evidence": base_status == "authorized" or final_round,
         "referenced_readiness_ids": referenced_readiness_ids,
         "claim_ids": unique_strings(claim_ids),
         "observation_ids": unique_strings(observation_ids),
         "open_questions": unique_strings(open_questions)[:6],
         "recommended_next_actions": recommendations[:4],
     }
+    payload = effective_matching_authorization(mission=mission, round_id=round_id, authorization=payload)
     validate_payload("matching-authorization", payload)
     return payload
 
@@ -1890,7 +3088,8 @@ def build_matching_authorization_draft(
 def build_matching_authorization_instructions() -> list[str]:
     return [
         "Return one JSON object only, shaped like matching-authorization.",
-        "Authorize matching only when both readiness reports indicate that the current evidence libraries are sufficiently prepared, unless you explicitly invoke moderator_override.",
+        "Authorize matching based on the auditable submission libraries and readiness reports, not on the presence of pre-existing evidence cards.",
+        "If this is the final allowed round, the council must still run one terminal matching/adjudication pass and may end with matched, isolated, or remand evidence.",
         "Use only claim_ids and observation_ids already present in the packet.",
         "Do not invent new evidence or prescribe exact source skills.",
         "If authorization is deferred or denied, keep recommended_next_actions limited to evidence needs rather than collection commands.",
@@ -1926,7 +3125,8 @@ def build_matching_authorization_packet(
         "pending_override_requests": load_override_requests(run_dir, round_id),
         "instructions": [
             "Return one JSON object only, shaped like matching-authorization.",
-            "Authorize matching only when both data-readiness reports indicate the current submissions are sufficiently prepared.",
+            "Authorize matching based on auditable submissions and readiness reports. Zero evidence cards before the first match is expected.",
+            "If this is the final allowed round, the output must still permit one terminal matching/adjudication pass.",
             "Use the packet context and referenced readiness reports only; do not invent raw data or future rounds.",
             "If readiness is incomplete or blocked, use authorization_status=deferred or not-authorized and recommend the next data-preparation actions instead.",
             "Keep claim_ids and observation_ids restricted to canonical ids already present in the packet.",
@@ -1939,6 +3139,10 @@ def build_matching_authorization_packet(
             "validate_command": (
                 f"python3 {CONTRACT_SCRIPT_PATH} validate --kind matching-authorization "
                 f"--input {matching_authorization_draft_path(run_dir, round_id)}"
+            ),
+            "promote_command": (
+                f"python3 {SCRIPT_DIR / 'eco_council_reporting.py'} promote-matching-authorization-draft "
+                f"--run-dir {run_dir} --round-id {round_id}"
             ),
         },
         "existing_authorization": load_dict_if_exists(matching_authorization_path(run_dir, round_id)),
@@ -1971,10 +3175,140 @@ def matching_authorization_prompt_text(*, packet_path: Path, packet: dict[str, A
         "Validation command:",
         maybe_text(validation.get("validate_command")),
         "",
+        "Promotion command:",
+        maybe_text(validation.get("promote_command")),
+        "",
         "Return only JSON.",
         "",
     ]
     return "\n".join(lines)
+
+
+def build_matching_adjudication_instructions() -> list[str]:
+    return [
+        "Return one JSON object only, shaped like matching-adjudication.",
+        "Treat packet.candidate_set and draft_adjudication as rule-nominated inputs, not as a binding final result.",
+        "You may merge or prune nominated observation clusters as long as all claim_ids and observation_ids stay within the authorized packet scope.",
+        "Use isolated_entries for acceptable but unmatched evidence; use remand_entries for evidence that still needs targeted follow-up.",
+        "Keep matching_result, evidence_cards, isolated_entries, remand_entries, and evidence_adjudication mutually consistent.",
+        "Do not invent raw facts, new source artifacts, or ids outside the packet candidate set and current round context.",
+        "If allow_isolated_evidence is false, leave unmatched items in remand_entries instead of isolated_entries.",
+        "Use recommended_next_actions only for concrete evidence needs; do not prescribe exact source skills or self-apply policy changes.",
+    ]
+
+
+def build_matching_adjudication_packet(
+    *,
+    run_dir: Path,
+    round_id: str,
+    mission: dict[str, Any],
+    context: dict[str, Any],
+    state: dict[str, Any],
+    candidate_set: dict[str, Any],
+    draft_adjudication: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "packet_kind": "matching-adjudication-packet",
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": utc_now_iso(),
+        "policy_profile": mission_policy_profile(mission),
+        "effective_constraints": mission_constraints(mission),
+        "run": {
+            "run_id": mission_run_id(mission),
+            "round_id": round_id,
+            "topic": maybe_text(mission.get("topic")),
+            "objective": maybe_text(mission.get("objective")),
+            "role": "moderator",
+        },
+        "context": context,
+        "readiness_reports": state.get("readiness_reports", {}),
+        "matching_authorization": state.get("matching_authorization", {}),
+        "candidate_set": candidate_set,
+        "pending_override_requests": load_override_requests(run_dir, round_id),
+        "instructions": build_matching_adjudication_instructions(),
+        "validation": {
+            "kind": "matching-adjudication",
+            "target_adjudication_path": str(matching_adjudication_path(run_dir, round_id)),
+            "draft_adjudication_path": str(matching_adjudication_draft_path(run_dir, round_id)),
+            "validate_command": (
+                f"python3 {CONTRACT_SCRIPT_PATH} validate --kind matching-adjudication "
+                f"--input {matching_adjudication_draft_path(run_dir, round_id)}"
+            ),
+            "promote_command": (
+                f"python3 {SCRIPT_DIR / 'eco_council_reporting.py'} promote-matching-adjudication-draft "
+                f"--run-dir {run_dir} --round-id {round_id}"
+            ),
+        },
+        "existing_adjudication": load_dict_if_exists(matching_adjudication_path(run_dir, round_id)),
+        "draft_adjudication": draft_adjudication,
+    }
+
+
+def matching_adjudication_prompt_text(*, packet_path: Path, packet: dict[str, Any]) -> str:
+    run = packet.get("run", {}) if isinstance(packet.get("run"), dict) else {}
+    validation = packet.get("validation", {}) if isinstance(packet.get("validation"), dict) else {}
+    lines = [
+        "Use $eco-council-reporting.",
+        f"You are the moderator for eco-council run {maybe_text(run.get('run_id'))} round {maybe_text(run.get('round_id'))}.",
+        "",
+        "Open and read this packet JSON first:",
+        str(packet_path),
+        "",
+        "Then follow these rules:",
+        "1. Treat packet `instructions` as binding.",
+        "2. Review `context`, `readiness_reports`, `matching_authorization`, and `candidate_set` before editing.",
+        "3. Start from `draft_adjudication` inside the packet.",
+        "4. Return only one JSON object shaped like matching-adjudication.",
+        "5. Keep `schema_version`, `run_id`, `round_id`, `agent_role`, and `authorization_id` consistent with the packet.",
+        "6. Only use claim ids and observation ids already present in the authorized candidate set or draft.",
+        "7. Do not return markdown, prose, code fences, or extra commentary.",
+        "",
+        "If you persist the result locally, write it to:",
+        maybe_text(validation.get("draft_adjudication_path")),
+        "",
+        "Validation command:",
+        maybe_text(validation.get("validate_command")),
+        "",
+        "Promotion command:",
+        maybe_text(validation.get("promote_command")),
+        "",
+        "Return only JSON.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def representative_observations_for_state(state: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    observation_by_id = {
+        maybe_text(item.get("observation_id")): item
+        for item in state.get("observations", [])
+        if isinstance(item, dict) and maybe_text(item.get("observation_id"))
+    }
+    selected = representative_submissions(
+        state,
+        "environmentalist",
+        state_auditable_submissions(state, "environmentalist"),
+        limit,
+    )
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for submission in selected:
+        observation_id = maybe_text(submission.get("observation_id"))
+        if not observation_id or observation_id in seen:
+            continue
+        observation = observation_by_id.get(observation_id)
+        if observation is not None:
+            ordered.append(observation)
+            seen.add(observation_id)
+    for observation in state.get("observations", []):
+        observation_id = maybe_text(observation.get("observation_id"))
+        if not observation_id or observation_id in seen:
+            continue
+        ordered.append(observation)
+        seen.add(observation_id)
+        if len(ordered) >= limit:
+            break
+    return ordered
 
 
 def build_fallback_context_from_state(*, run_dir: Path, state: dict[str, Any], role: str) -> dict[str, Any]:
@@ -1982,6 +3316,25 @@ def build_fallback_context_from_state(*, run_dir: Path, state: dict[str, Any], r
     round_id = state["round_id"]
     tasks = state.get("tasks", []) if isinstance(state.get("tasks"), list) else []
     role_tasks = [task for task in tasks if role == "moderator" or maybe_text(task.get("assigned_role")) == role]
+    claim_candidates_current = state.get("claim_candidates_current", []) if isinstance(state.get("claim_candidates_current"), list) else []
+    observation_candidates_current = (
+        state.get("observation_candidates_current", [])
+        if isinstance(state.get("observation_candidates_current"), list)
+        else []
+    )
+    claim_curation = state.get("claim_curation", {}) if isinstance(state.get("claim_curation"), dict) else {}
+    observation_curation = state.get("observation_curation", {}) if isinstance(state.get("observation_curation"), dict) else {}
+    claim_submissions_auditable = state_auditable_submissions(state, "sociologist")
+    observation_submissions_auditable = state_auditable_submissions(state, "environmentalist")
+    representative_claim_submissions = representative_submissions(state, "sociologist", claim_submissions_auditable, 6)
+    representative_observation_submissions = representative_submissions(state, "environmentalist", observation_submissions_auditable, 8)
+    representative_current_claim_submissions = representative_submissions(state, "sociologist", state_current_submissions(state, "sociologist"), 6)
+    representative_current_observation_submissions = representative_submissions(
+        state,
+        "environmentalist",
+        state_current_submissions(state, "environmentalist"),
+        8,
+    )
     return {
         "context_layer": "reporting-fallback-v2",
         "run": {
@@ -1999,35 +3352,66 @@ def build_fallback_context_from_state(*, run_dir: Path, state: dict[str, Any], r
             "claim_count": len(state.get("claims", [])),
             "observation_count": len(state.get("observations", [])),
             "evidence_count": len(state.get("cards_active", [])),
-            "claim_submission_count": len(state.get("claim_submissions_current", [])),
-            "observation_submission_count": len(state.get("observation_submissions_current", [])),
+            "claim_submission_count": len(claim_submissions_auditable),
+            "observation_submission_count": len(observation_submissions_auditable),
+            "claim_submission_current_count": len(state_current_submissions(state, "sociologist")),
+            "observation_submission_current_count": len(state_current_submissions(state, "environmentalist")),
+            "claim_candidate_count": len(claim_candidates_current),
+            "observation_candidate_count": len(observation_candidates_current),
             "isolated_count": len(state.get("isolated_active", [])),
             "remand_count": len(state.get("remands_open", [])),
         },
         "phase_state": state.get("phase_state", {}),
         "tasks": role_tasks,
         "claims": [compact_claim(item) for item in state.get("claims", [])[:6]],
-        "observations": [compact_observation(item) for item in state.get("observations", [])[:8]],
+        "observations": [compact_observation(item) for item in representative_observations_for_state(state, 8)],
         "evidence_cards": [compact_evidence_card(item) for item in state.get("cards_active", [])[:8]],
         "evidence_library": {
+            "claim_submissions_auditable": [
+                compact_claim_submission(item)
+                for item in representative_claim_submissions
+            ],
+            "observation_submissions_auditable": [
+                compact_observation_submission(item)
+                for item in representative_observation_submissions
+            ],
             "claim_submissions_current": [
                 compact_claim_submission(item)
-                for item in state.get("claim_submissions_current", [])[:6]
+                for item in representative_current_claim_submissions
             ],
             "observation_submissions_current": [
                 compact_observation_submission(item)
-                for item in state.get("observation_submissions_current", [])[:8]
+                for item in representative_current_observation_submissions
             ],
-            "claims_active": [compact_claim_submission(item) for item in state.get("claims_active", [])[:6]],
+            "claim_candidates_current": [compact_claim_candidate_for_curation(item) for item in claim_candidates_current[:12]],
+            "observation_candidates_current": [
+                compact_observation_candidate_for_curation(item) for item in observation_candidates_current[:16]
+            ],
+            "claim_curation": {
+                "status": maybe_text(claim_curation.get("status")),
+                "curated_claim_count": len(claim_curation.get("curated_claims", []))
+                if isinstance(claim_curation.get("curated_claims"), list)
+                else 0,
+            },
+            "observation_curation": {
+                "status": maybe_text(observation_curation.get("status")),
+                "curated_observation_count": len(observation_curation.get("curated_observations", []))
+                if isinstance(observation_curation.get("curated_observations"), list)
+                else 0,
+            },
+            "claims_active": [compact_claim_submission(item) for item in representative_claim_submissions],
             "observations_active": [
-                compact_observation_submission(item)
-                for item in state.get("observations_active", [])[:8]
+                compact_observation_submission(item) for item in representative_observation_submissions
             ],
             "cards_active": [compact_evidence_card(item) for item in state.get("cards_active", [])[:8]],
             "isolated_active": [compact_isolated_entry(item) for item in state.get("isolated_active", [])[:6]],
             "remands_open": [compact_remand_entry(item) for item in state.get("remands_open", [])[:6]],
         },
         "canonical_paths": {
+            "claim_candidates": str(claim_candidates_path(run_dir, round_id)),
+            "observation_candidates": str(observation_candidates_path(run_dir, round_id)),
+            "claim_curation": str(claim_curation_path(run_dir, round_id)),
+            "observation_curation": str(observation_curation_path(run_dir, round_id)),
             "claim_submissions": str(claim_submissions_path(run_dir, round_id)),
             "observation_submissions": str(observation_submissions_path(run_dir, round_id)),
             "matching_authorization": str(matching_authorization_path(run_dir, round_id)),
@@ -2041,8 +3425,12 @@ def load_context_or_fallback_from_state(*, run_dir: Path, state: dict[str, Any],
     path = role_context_path(run_dir, state["round_id"], role)
     payload = load_json_if_exists(path)
     if isinstance(payload, dict):
-        return payload
-    return build_fallback_context_from_state(run_dir=run_dir, state=state, role=role)
+        return augment_context_with_matching_state(run_dir=run_dir, state=state, context=payload)
+    return augment_context_with_matching_state(
+        run_dir=run_dir,
+        state=state,
+        context=build_fallback_context_from_state(run_dir=run_dir, state=state, role=role),
+    )
 
 
 def build_pre_match_report_findings(state: dict[str, Any], role: str, max_findings: int) -> list[dict[str, Any]]:
@@ -2051,7 +3439,12 @@ def build_pre_match_report_findings(state: dict[str, Any], role: str, max_findin
         findings = readiness.get("findings")
         if isinstance(findings, list) and findings:
             return [item for item in findings if isinstance(item, dict)][:max_findings]
-    return build_readiness_findings_from_submissions(role=role, submissions=state_submissions(state, role), max_findings=max_findings)
+    return build_readiness_findings_from_submissions(
+        state=state,
+        role=role,
+        submissions=state_submissions(state, role),
+        max_findings=max_findings,
+    )
 
 
 def expert_report_status_from_state(state: dict[str, Any], role: str) -> str:
@@ -2078,12 +3471,14 @@ def build_report_summary_from_state(state: dict[str, Any], role: str, status: st
         cards = state.get("cards_active", [])
         isolated = state.get("isolated_active", [])
         remands = state.get("remands_open", [])
+        moderator_adjudication = state.get("matching_adjudication", {})
         adjudication = state.get("evidence_adjudication", {})
         return truncate_text(
             (
                 f"Matching/adjudication is available with {len(cards)} active evidence cards, "
                 f"{len(isolated)} isolated entries, and {len(remands)} open remands. "
-                f"Status={status}. {maybe_text(adjudication.get('summary'))}"
+                f"Status={status}. "
+                f"{maybe_text(moderator_adjudication.get('summary')) or maybe_text(adjudication.get('summary'))}"
             ),
             400,
         )
@@ -2111,6 +3506,7 @@ def build_expert_report_draft_from_state(
     observations = state.get("observations", []) if isinstance(state.get("observations"), list) else []
     evidence_cards = state.get("cards_active", []) if isinstance(state.get("cards_active"), list) else []
     if matching_executed_for_state(state):
+        moderator_adjudication = state.get("matching_adjudication", {}) if isinstance(state.get("matching_adjudication"), dict) else {}
         evidence_by_claim = evidence_by_claim_map(evidence_cards)
         observations_by_id = observations_by_id_map(observations)
         claims_by_id = claims_by_id_map(claims)
@@ -2136,8 +3532,17 @@ def build_expert_report_draft_from_state(
             for item in state.get("remands_open", [])
             if isinstance(item, dict) and maybe_text(item.get("remand_id"))
         )
+        open_questions.extend(
+            maybe_text(item)
+            for item in moderator_adjudication.get("open_questions", [])
+            if maybe_text(item)
+        )
         readiness_report = state.get("readiness_reports", {}).get(role)
-        additional_reports = [readiness_report] if isinstance(readiness_report, dict) else []
+        additional_reports = [
+            item
+            for item in [moderator_adjudication, readiness_report]
+            if isinstance(item, dict) and item
+        ]
         recommendations = combine_recommendations(
             reports=[item for item in additional_reports if isinstance(item, dict)],
             missing_types=[],
@@ -2300,6 +3705,7 @@ def build_decision_summary_from_state(
         cards = len(state.get("cards_active", []))
         isolated = len(state.get("isolated_active", []))
         remands = len(state.get("remands_open", []))
+        moderator_adjudication = state.get("matching_adjudication", {})
         adjudication = state.get("evidence_adjudication", {})
         if moderator_status == "continue":
             return (
@@ -2308,7 +3714,10 @@ def build_decision_summary_from_state(
                 f"{', '.join(f'{role}:{source}' for role, source in sorted(report_sources.items()))}."
             )
         return truncate_text(
-            f"Matching/adjudication is {evidence_sufficiency}. {maybe_text(adjudication.get('summary'))}",
+            (
+                f"Matching/adjudication is {evidence_sufficiency}. "
+                f"{maybe_text(moderator_adjudication.get('summary')) or maybe_text(adjudication.get('summary'))}"
+            ),
             400,
         )
     authorization = state.get("matching_authorization", {})
@@ -2321,7 +3730,8 @@ def build_decision_summary_from_state(
     )
     return truncate_text(
         (
-            f"Matching was not executed. Authorization status is {maybe_text(authorization.get('authorization_status'))}. "
+            f"Matching was not executed. Authorization status is {maybe_text(authorization.get('authorization_status'))} "
+            f"(basis={maybe_text(authorization.get('authorization_basis')) or 'unspecified'}). "
             f"Current evidence sufficiency is {evidence_sufficiency}. {readiness_summary}"
         ),
         400,
@@ -2342,7 +3752,11 @@ def build_decision_draft_from_state(
     missing_types = build_decision_missing_types(state)
     focus_claim_ids, anchor_refs = collect_unresolved_anchor_refs(state)
     readiness_reports = state.get("readiness_reports", {})
-    recommendation_inputs = usable_reports + [
+    recommendation_inputs = [
+        item
+        for item in [state.get("matching_adjudication")]
+        if isinstance(item, dict) and item
+    ] + usable_reports + [
         report
         for report in readiness_reports.values()
         if isinstance(report, dict) and report
@@ -2363,22 +3777,27 @@ def build_decision_draft_from_state(
     authorization_status = maybe_text(state.get("matching_authorization", {}).get("authorization_status"))
     blocked_reason = ""
     blocked_by_max_rounds = False
-    if not state.get("claims") and not state.get("observations") and not state.get("claim_submissions_current") and not state.get("observation_submissions_current"):
+    if (
+        not state.get("claims")
+        and not state.get("observations")
+        and not state_auditable_submissions(state, "sociologist")
+        and not state_auditable_submissions(state, "environmentalist")
+    ):
         moderator_status = "blocked"
         next_round_required = False
-        blocked_reason = "The round did not produce enough canonical submissions, claims, or observations to continue."
-    elif max_rounds is not None and current_number is not None and next_number is not None and next_number > max_rounds and next_round_tasks:
-        moderator_status = "blocked"
-        next_round_required = False
-        blocked_reason = f"The configured max_rounds={max_rounds} would be exceeded by {next_round_id}."
-        next_round_tasks = []
-        blocked_by_max_rounds = True
+        blocked_reason = "The round did not produce enough auditable submissions, claims, or observations to continue."
     elif authorization_status == "authorized" and not matching_executed_for_state(state):
         moderator_status = "blocked"
         next_round_required = False
         blocked_reason = "Matching was authorized but matching/adjudication has not been executed yet."
     elif authorization_status in {"deferred", "not-authorized"}:
-        if next_round_tasks:
+        if max_rounds is not None and current_number is not None and next_number is not None and next_number > max_rounds and next_round_tasks:
+            moderator_status = "blocked"
+            next_round_required = False
+            blocked_reason = f"The configured max_rounds={max_rounds} would be exceeded by {next_round_id}."
+            next_round_tasks = []
+            blocked_by_max_rounds = True
+        elif next_round_tasks:
             moderator_status = "continue"
             next_round_required = True
         else:
@@ -2386,7 +3805,13 @@ def build_decision_draft_from_state(
             next_round_required = False
             blocked_reason = "Matching was not authorized and no concrete next-round tasks could be derived."
     elif state.get("remands_open") or missing_types:
-        if next_round_tasks:
+        if max_rounds is not None and current_number is not None and next_number is not None and next_number > max_rounds and next_round_tasks:
+            moderator_status = "blocked"
+            next_round_required = False
+            blocked_reason = f"The configured max_rounds={max_rounds} would be exceeded by {next_round_id}."
+            next_round_tasks = []
+            blocked_by_max_rounds = True
+        elif next_round_tasks:
             moderator_status = "continue"
             next_round_required = True
         else:
@@ -2472,6 +3897,7 @@ def build_decision_packet_from_state(
         "round_context": moderator_context,
         "readiness_reports": state.get("readiness_reports", {}),
         "matching_authorization": state.get("matching_authorization", {}),
+        "matching_adjudication": state.get("matching_adjudication", {}),
         "matching_result": state.get("matching_result", {}),
         "evidence_adjudication": state.get("evidence_adjudication", {}),
         "reports": reports,
@@ -2545,249 +3971,18 @@ def evidence_sufficiency_for_round(evidence_cards: list[dict[str, Any]], missing
     return "partial"
 
 
-def unresolved_claim_entries(claims: list[dict[str, Any]], evidence_cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    cards_by_claim = evidence_by_claim_map(evidence_cards)
-    entries: list[dict[str, Any]] = []
-    for claim in sorted(claims, key=claim_sort_key):
-        claim_id = maybe_text(claim.get("claim_id"))
-        card = cards_by_claim.get(claim_id)
-        if card is None or maybe_text(card.get("verdict")) in {"mixed", "insufficient"}:
-            entries.append(
-                {
-                    "claim_id": claim_id,
-                    "claim_type": maybe_text(claim.get("claim_type")),
-                    "summary": maybe_text(claim.get("summary")),
-                    "verdict": maybe_text(card.get("verdict")) if card is not None else "unlinked",
-                    "gaps": card.get("gaps", []) if isinstance(card, dict) else ["No linked evidence-card is available yet."],
-                }
-            )
-    return entries
-
-
-def build_decision_summary(
-    *,
-    moderator_status: str,
-    sufficiency: str,
-    evidence_cards: list[dict[str, Any]],
-    missing_evidence_types: list[str],
-    report_sources: dict[str, str],
-    blocked_reason: str,
-    authorization_status: str,
-    authorization_summary: str,
-) -> str:
-    total = len(evidence_cards)
-    resolved = sum(1 for item in evidence_cards if maybe_text(item.get("verdict")) in {"supports", "contradicts"})
-    if len(missing_evidence_types) <= 4:
-        missing_text = ", ".join(missing_evidence_types)
-    else:
-        missing_text = ", ".join(missing_evidence_types[:3]) + f", and {len(missing_evidence_types) - 3} more"
-    if moderator_status == "blocked" and blocked_reason:
-        return blocked_reason
-    if authorization_status in {"deferred", "not-authorized"} and authorization_summary:
-        return authorization_summary
-    if moderator_status == "complete":
-        return f"The round resolved {resolved} of {total} evidence cards and now has {sufficiency} evidence for closure."
-    if moderator_status == "continue":
-        if not missing_text:
-            missing_text = "additional targeted evidence"
-        return (
-            f"The round resolved {resolved} of {total} evidence cards, but another round is still needed for {missing_text}. "
-            f"Report sources used: {', '.join(f'{role}:{source}' for role, source in sorted(report_sources.items()))}."
-        )
-    return "The round could not produce enough usable reporting or evidence artifacts for a confident moderator decision."
-
-
 def build_final_brief(*, moderator_status: str, decision_summary: str, reports: dict[str, dict[str, Any] | None]) -> str:
     if moderator_status == "continue":
         return ""
-    report_summaries = [maybe_text(report.get("summary")) for report in reports.values() if isinstance(report, dict)]
-    return truncate_text(" ".join([decision_summary] + [item for item in report_summaries if item]), 600)
-
-
-def build_decision_draft(
-    *,
-    run_dir: Path,
-    mission: dict[str, Any],
-    round_id: str,
-    next_round_id: str,
-    claims: list[dict[str, Any]],
-    observations: list[dict[str, Any]],
-    evidence_cards: list[dict[str, Any]],
-    reports: dict[str, dict[str, Any] | None],
-    report_sources: dict[str, str],
-    readiness_reports: dict[str, dict[str, Any]],
-    matching_authorization: dict[str, Any],
-    evidence_adjudication: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
-    unresolved_entries = unresolved_claim_entries(claims, evidence_cards)
-    cards_by_claim = evidence_by_claim_map(evidence_cards)
-    follow_up_claim_ids: list[str] = []
-    for claim in sorted(claims, key=claim_sort_key):
-        claim_id = maybe_text(claim.get("claim_id"))
-        card = cards_by_claim.get(claim_id)
-        has_gaps = isinstance(card, dict) and isinstance(card.get("gaps"), list) and bool(card.get("gaps"))
-        is_unresolved = card is None or maybe_text(card.get("verdict")) in {"mixed", "insufficient"}
-        if claim_id and (has_gaps or is_unresolved):
-            follow_up_claim_ids.append(claim_id)
-    unresolved_claim_ids = unique_strings(follow_up_claim_ids)
-    missing_types = infer_missing_evidence_types(claims=claims, observations=observations, evidence_cards=evidence_cards)
-    usable_reports = [report for report in reports.values() if isinstance(report, dict)]
-    usable_readiness_reports = [report for report in readiness_reports.values() if isinstance(report, dict)]
-    authorization_status = maybe_text(matching_authorization.get("authorization_status"))
-    authorization_summary = maybe_text(matching_authorization.get("summary")) or maybe_text(matching_authorization.get("rationale"))
-    recommendations = combine_recommendations(reports=usable_reports + usable_readiness_reports, missing_types=missing_types)
-    anchor_refs = unique_strings([f"{round_id}:claim:{claim_id}" for claim_id in unresolved_claim_ids if maybe_text(claim_id)])
-    focus_claim_ids = unresolved_claim_ids or [maybe_text(item.get("claim_id")) for item in claims if maybe_text(item.get("claim_id"))][:5]
-    next_round_tasks, task_plan_info = build_next_round_tasks(
-        run_dir=run_dir,
-        mission=mission,
-        current_round_id=round_id,
-        next_round_id=next_round_id,
-        recommendations=recommendations,
-        focus_claim_ids=focus_claim_ids,
-        anchor_refs=anchor_refs,
-    )
-
-    max_rounds = mission_constraints(mission).get("max_rounds")
-    current_number = current_round_number(round_id)
-    next_number = current_round_number(next_round_id)
-    blocked_reason = ""
-    blocked_by_max_rounds = False
-    needs_additional_data = bool(evidence_adjudication.get("needs_additional_data"))
-    adjudication_status = maybe_text(evidence_adjudication.get("adjudication_status"))
-
-    if not claims and not observations and not evidence_cards:
-        moderator_status = "blocked"
-        next_round_required = False
-        blocked_reason = "The round did not produce enough canonical claims, observations, or evidence cards to continue."
-    elif authorization_status in {"deferred", "not-authorized"}:
-        if next_round_tasks:
-            moderator_status = "continue"
-            next_round_required = True
-        else:
-            moderator_status = "blocked"
-            next_round_required = False
-            blocked_reason = authorization_summary or "Matching was not authorized and no actionable next-round tasks were available."
-    elif max_rounds is not None and current_number is not None and next_number is not None and next_number > max_rounds and unresolved_entries:
-        moderator_status = "blocked"
-        next_round_required = False
-        blocked_reason = f"The round still has unresolved evidence, but the configured max_rounds={max_rounds} would be exceeded by {next_round_id}."
-        next_round_tasks = []
-        blocked_by_max_rounds = True
-    elif unresolved_entries or missing_types or needs_additional_data or adjudication_status == "remand-required":
-        if next_round_tasks:
-            moderator_status = "continue"
-            next_round_required = True
-        else:
-            moderator_status = "blocked"
-            next_round_required = False
-            blocked_reason = "The remaining gaps would require repeating already completed sources without adding a new evidence angle."
-    else:
-        moderator_status = "complete"
-        next_round_required = False
-        next_round_tasks = []
-
-    sufficiency = "insufficient" if authorization_status in {"deferred", "not-authorized"} else evidence_sufficiency_for_round(evidence_cards, missing_types)
-    override_requests = build_decision_override_requests(
-        mission=mission,
-        round_id=round_id,
-        next_round_id=next_round_id,
-        focus_claim_ids=focus_claim_ids,
-        anchor_refs=anchor_refs,
-        task_plan_info=task_plan_info,
-        next_round_requested_but_blocked_by_max_rounds=blocked_by_max_rounds,
-    )
-    decision_summary = build_decision_summary(
-        moderator_status=moderator_status,
-        sufficiency=sufficiency,
-        evidence_cards=evidence_cards,
-        missing_evidence_types=missing_types,
-        report_sources=report_sources,
-        blocked_reason=blocked_reason,
-        authorization_status=authorization_status,
-        authorization_summary=authorization_summary,
-    )
-    final_brief = build_final_brief(moderator_status=moderator_status, decision_summary=decision_summary, reports=reports)
-    score_reports = usable_reports or usable_readiness_reports
-
-    draft = {
-        "schema_version": SCHEMA_VERSION,
-        "decision_id": f"decision-{round_id}",
-        "run_id": mission_run_id(mission),
-        "round_id": round_id,
-        "moderator_status": moderator_status,
-        "completion_score": completion_score_for_round(evidence_cards, score_reports),
-        "evidence_sufficiency": sufficiency,
-        "decision_summary": decision_summary,
-        "next_round_required": next_round_required,
-        "missing_evidence_types": missing_types,
-        "next_round_tasks": next_round_tasks,
-        "override_requests": override_requests,
-        "final_brief": final_brief,
-    }
-    validate_payload("council-decision", draft)
-    return draft, next_round_tasks, missing_types
-
-
-def build_decision_packet(
-    *,
-    run_dir: Path,
-    round_id: str,
-    next_round_id: str,
-    mission: dict[str, Any],
-    moderator_context: dict[str, Any],
-    claims: list[dict[str, Any]],
-    evidence_cards: list[dict[str, Any]],
-    reports: dict[str, dict[str, Any] | None],
-    report_sources: dict[str, str],
-    draft_decision: dict[str, Any],
-    proposed_next_round_tasks: list[dict[str, Any]],
-    missing_evidence_types: list[str],
-    readiness_reports: dict[str, dict[str, Any]],
-    matching_authorization: dict[str, Any],
-    evidence_adjudication: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "packet_kind": "council-decision-packet",
-        "schema_version": SCHEMA_VERSION,
-        "generated_at_utc": utc_now_iso(),
-        "policy_profile": mission_policy_profile(mission),
-        "effective_constraints": mission_constraints(mission),
-        "run": {
-            "run_id": mission_run_id(mission),
-            "round_id": round_id,
-            "next_round_id": next_round_id,
-            "topic": maybe_text(mission.get("topic")),
-            "objective": maybe_text(mission.get("objective")),
-        },
-        "round_context": moderator_context,
-        "readiness_reports": readiness_reports,
-        "matching_authorization": matching_authorization,
-        "evidence_adjudication": evidence_adjudication,
-        "reports": reports,
-        "report_sources": report_sources,
-        "unresolved_claims": unresolved_claim_entries(claims, evidence_cards),
-        "missing_evidence_types": missing_evidence_types,
-        "proposed_next_round_tasks": proposed_next_round_tasks,
-        "pending_override_requests": load_override_requests(run_dir, round_id),
-        "instructions": [
-            "Return one JSON object only, shaped like council-decision.",
-            "Base the decision on the evidence-library state: readiness reports, matching authorization, matching/adjudication outputs, and expert reports when present.",
-            "Treat `round_context` as a compact summary layer first and consult `canonical_paths` only if a summary detail is insufficient.",
-            "If another round is required, add new round-task objects for next_round_id instead of editing current tasks in place.",
-            "Respect mission constraints such as max_rounds and max_tasks_per_round.",
-            "Each next_round task must introduce at least one new evidence requirement or materially different claim focus; do not prescribe concrete source skills inside moderator tasks.",
-            "If mission constraints block a necessary follow-up round or task envelope, keep the decision inside the current boundary and use override_requests for upstream review.",
-            "Keep final_brief empty unless the council is complete or blocked.",
-        ],
-        "validation": {
-            "kind": "council-decision",
-            "target_decision_path": str(decision_target_path(run_dir, round_id)),
-            "draft_decision_path": str(decision_draft_path(run_dir, round_id)),
-            "validate_command": f"python3 {CONTRACT_SCRIPT_PATH} validate --kind council-decision --input {decision_draft_path(run_dir, round_id)}",
-        },
-        "draft_decision": draft_decision,
-    }
+    summaries: list[str] = []
+    seen: set[str] = set()
+    for item in [decision_summary] + [maybe_text(report.get("summary")) for report in reports.values() if isinstance(report, dict)]:
+        text = maybe_text(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        summaries.append(text)
+    return truncate_text(" ".join(summaries), 600)
 
 
 def load_required_object(path: Path, label: str) -> dict[str, Any]:
@@ -2841,7 +4036,7 @@ def decision_prompt_text(*, packet_path: Path, packet: dict[str, Any]) -> str:
         "",
         "Then follow these rules:",
         "1. Treat packet `instructions` as binding.",
-        "2. Review `round_context`, `readiness_reports`, `matching_authorization`, `evidence_adjudication`, `reports`, and `proposed_next_round_tasks` before editing.",
+        "2. Review `round_context`, `readiness_reports`, `matching_authorization`, `matching_adjudication`, `matching_result`, `evidence_adjudication`, `reports`, and `proposed_next_round_tasks` before editing.",
         "3. Start from `draft_decision` inside the packet.",
         "4. If another round is needed, make sure each task adds at least one new evidence requirement or materially different claim focus; leave concrete source-family and layer choice to the expert source-selection stage.",
         "5. Return only one JSON object shaped like council-decision.",
@@ -2875,6 +4070,12 @@ def can_replace_existing_decision(existing_payload: dict[str, Any] | None, new_p
     return existing_payload == new_payload
 
 
+def can_replace_existing_matching_object(existing_payload: dict[str, Any] | None, new_payload: dict[str, Any]) -> bool:
+    if existing_payload is None:
+        return True
+    return existing_payload == new_payload
+
+
 def load_report_draft_payload(run_dir: Path, round_id: str, role: str, draft_path_text: str) -> tuple[Path, dict[str, Any]]:
     draft_path = Path(draft_path_text).expanduser().resolve() if draft_path_text else report_draft_path(run_dir, round_id, role)
     payload = load_required_object(draft_path, f"{role} report draft")
@@ -2892,6 +4093,36 @@ def load_decision_draft_payload(run_dir: Path, round_id: str, draft_path_text: s
     if maybe_text(payload.get("round_id")) != round_id:
         raise ValueError(f"Decision draft round mismatch: expected {round_id}, got {payload.get('round_id')!r}")
     validate_payload("council-decision", payload)
+    return draft_path, payload
+
+
+def load_matching_authorization_draft_payload(run_dir: Path, round_id: str, draft_path_text: str) -> tuple[Path, dict[str, Any]]:
+    draft_path = (
+        Path(draft_path_text).expanduser().resolve()
+        if draft_path_text
+        else matching_authorization_draft_path(run_dir, round_id)
+    )
+    payload = load_required_object(draft_path, "moderator matching-authorization draft")
+    if maybe_text(payload.get("round_id")) != round_id:
+        raise ValueError(f"Matching-authorization draft round mismatch: expected {round_id}, got {payload.get('round_id')!r}")
+    if maybe_text(payload.get("agent_role")) != "moderator":
+        raise ValueError(f"Matching-authorization draft role mismatch: expected moderator, got {payload.get('agent_role')!r}")
+    validate_payload("matching-authorization", payload)
+    return draft_path, payload
+
+
+def load_matching_adjudication_draft_payload(run_dir: Path, round_id: str, draft_path_text: str) -> tuple[Path, dict[str, Any]]:
+    draft_path = (
+        Path(draft_path_text).expanduser().resolve()
+        if draft_path_text
+        else matching_adjudication_draft_path(run_dir, round_id)
+    )
+    payload = load_required_object(draft_path, "moderator matching-adjudication draft")
+    if maybe_text(payload.get("round_id")) != round_id:
+        raise ValueError(f"Matching-adjudication draft round mismatch: expected {round_id}, got {payload.get('round_id')!r}")
+    if maybe_text(payload.get("agent_role")) != "moderator":
+        raise ValueError(f"Matching-adjudication draft role mismatch: expected moderator, got {payload.get('agent_role')!r}")
+    validate_payload("matching-adjudication", payload)
     return draft_path, payload
 
 
@@ -2943,12 +4174,165 @@ def promote_decision_draft(
     }
 
 
+def promote_matching_authorization_draft(
+    *,
+    run_dir: Path,
+    round_id: str,
+    draft_path_text: str,
+    pretty: bool,
+    allow_overwrite: bool,
+) -> dict[str, Any]:
+    draft_path, payload = load_matching_authorization_draft_payload(run_dir, round_id, draft_path_text)
+    target_path = matching_authorization_path(run_dir, round_id)
+    existing_payload = load_json_if_exists(target_path)
+    if existing_payload is not None and not isinstance(existing_payload, dict):
+        raise ValueError(f"Existing canonical matching-authorization is not a JSON object: {target_path}")
+    if not allow_overwrite and not can_replace_existing_matching_object(existing_payload, payload):
+        raise ValueError(f"Refusing to overwrite canonical matching-authorization without --allow-overwrite: {target_path}")
+    write_json(target_path, payload, pretty=pretty)
+    return {
+        "draft_path": str(draft_path),
+        "target_path": str(target_path),
+        "overwrote_existing": existing_payload is not None and existing_payload != payload,
+    }
+
+
+def promote_matching_adjudication_draft(
+    *,
+    run_dir: Path,
+    round_id: str,
+    draft_path_text: str,
+    pretty: bool,
+    allow_overwrite: bool,
+) -> dict[str, Any]:
+    draft_path, payload = load_matching_adjudication_draft_payload(run_dir, round_id, draft_path_text)
+    target_path = matching_adjudication_path(run_dir, round_id)
+    existing_payload = load_json_if_exists(target_path)
+    if existing_payload is not None and not isinstance(existing_payload, dict):
+        raise ValueError(f"Existing canonical matching-adjudication is not a JSON object: {target_path}")
+    if not allow_overwrite and not can_replace_existing_matching_object(existing_payload, payload):
+        raise ValueError(f"Refusing to overwrite canonical matching-adjudication without --allow-overwrite: {target_path}")
+    write_json(target_path, payload, pretty=pretty)
+    return {
+        "draft_path": str(draft_path),
+        "target_path": str(target_path),
+        "overwrote_existing": existing_payload is not None and existing_payload != payload,
+    }
+
+
+def curation_artifacts(*, run_dir: Path, round_id: str, pretty: bool) -> dict[str, Any]:
+    state = collect_round_state(run_dir, round_id)
+    mission = state["mission"]
+    tasks = state.get("tasks", []) if isinstance(state.get("tasks"), list) else []
+
+    sociologist_context = load_context_or_fallback_from_state(run_dir=run_dir, state=state, role="sociologist")
+    claim_draft = build_claim_curation_draft(
+        mission=mission,
+        round_id=round_id,
+        state=state,
+    )
+    claim_packet = build_claim_curation_packet(
+        run_dir=run_dir,
+        round_id=round_id,
+        mission=mission,
+        tasks=tasks,
+        context=sociologist_context,
+        state=state,
+        draft_curation=claim_draft,
+    )
+    claim_packet_file = claim_curation_packet_path(run_dir, round_id)
+    claim_draft_file = claim_curation_draft_path(run_dir, round_id)
+    write_json(claim_packet_file, claim_packet, pretty=pretty)
+    write_json(claim_draft_file, claim_draft, pretty=pretty)
+
+    environmentalist_context = load_context_or_fallback_from_state(run_dir=run_dir, state=state, role="environmentalist")
+    observation_draft = build_observation_curation_draft(
+        mission=mission,
+        round_id=round_id,
+        state=state,
+    )
+    observation_packet = build_observation_curation_packet(
+        run_dir=run_dir,
+        round_id=round_id,
+        mission=mission,
+        tasks=tasks,
+        context=environmentalist_context,
+        state=state,
+        draft_curation=observation_draft,
+    )
+    observation_packet_file = observation_curation_packet_path(run_dir, round_id)
+    observation_draft_file = observation_curation_draft_path(run_dir, round_id)
+    write_json(observation_packet_file, observation_packet, pretty=pretty)
+    write_json(observation_draft_file, observation_draft, pretty=pretty)
+
+    return {
+        "run_id": mission_run_id(mission),
+        "round_id": round_id,
+        "claim_candidate_count": len(state.get("claim_candidates_current", [])),
+        "observation_candidate_count": len(state.get("observation_candidates_current", [])),
+        "outputs": {
+            "sociologist": {
+                "packet_path": str(claim_packet_file),
+                "draft_path": str(claim_draft_file),
+            },
+            "environmentalist": {
+                "packet_path": str(observation_packet_file),
+                "draft_path": str(observation_draft_file),
+            },
+        },
+    }
+
+
+def curation_status_complete(curation: dict[str, Any]) -> bool:
+    status = maybe_text(curation.get("status"))
+    return status in {"complete", "blocked"}
+
+
+def curations_materialized_for_round(*, run_dir: Path, round_id: str, state: dict[str, Any]) -> bool:
+    claim_curation = state.get("claim_curation", {}) if isinstance(state.get("claim_curation"), dict) else {}
+    observation_curation = state.get("observation_curation", {}) if isinstance(state.get("observation_curation"), dict) else {}
+    if not curation_status_complete(claim_curation) or not curation_status_complete(observation_curation):
+        return False
+    required_paths = (
+        claim_curation_path(run_dir, round_id),
+        observation_curation_path(run_dir, round_id),
+        claim_submissions_path(run_dir, round_id),
+        observation_submissions_path(run_dir, round_id),
+    )
+    if not all(path.exists() for path in required_paths):
+        return False
+    latest_curation_mtime = max(
+        claim_curation_path(run_dir, round_id).stat().st_mtime_ns,
+        observation_curation_path(run_dir, round_id).stat().st_mtime_ns,
+    )
+    earliest_materialized_mtime = min(
+        claim_submissions_path(run_dir, round_id).stat().st_mtime_ns,
+        observation_submissions_path(run_dir, round_id).stat().st_mtime_ns,
+    )
+    return earliest_materialized_mtime >= latest_curation_mtime
+
+
 def render_openclaw_prompts(
     *,
     run_dir: Path,
     round_id: str,
 ) -> dict[str, Any]:
     outputs: dict[str, str] = {}
+    claim_packet_path_file = claim_curation_packet_path(run_dir, round_id)
+    claim_packet = load_json_if_exists(claim_packet_path_file)
+    if isinstance(claim_packet, dict):
+        prompt_path = claim_curation_prompt_path(run_dir, round_id)
+        write_text(prompt_path, claim_curation_prompt_text(packet_path=claim_packet_path_file, packet=claim_packet))
+        outputs["sociologist_claim_curation"] = str(prompt_path)
+    observation_packet_path_file = observation_curation_packet_path(run_dir, round_id)
+    observation_packet = load_json_if_exists(observation_packet_path_file)
+    if isinstance(observation_packet, dict):
+        prompt_path = observation_curation_prompt_path(run_dir, round_id)
+        write_text(
+            prompt_path,
+            observation_curation_prompt_text(packet_path=observation_packet_path_file, packet=observation_packet),
+        )
+        outputs["environmentalist_observation_curation"] = str(prompt_path)
     for role in READINESS_ROLES:
         packet_path = data_readiness_packet_path(run_dir, round_id, role)
         packet = load_json_if_exists(packet_path)
@@ -2962,6 +4346,15 @@ def render_openclaw_prompts(
         auth_prompt_path = matching_authorization_prompt_path(run_dir, round_id)
         write_text(auth_prompt_path, matching_authorization_prompt_text(packet_path=auth_packet_path, packet=auth_packet))
         outputs["moderator_matching_authorization"] = str(auth_prompt_path)
+    adjudication_packet_path = matching_adjudication_packet_path(run_dir, round_id)
+    adjudication_packet = load_json_if_exists(adjudication_packet_path)
+    if isinstance(adjudication_packet, dict):
+        adjudication_prompt = matching_adjudication_prompt_path(run_dir, round_id)
+        write_text(
+            adjudication_prompt,
+            matching_adjudication_prompt_text(packet_path=adjudication_packet_path, packet=adjudication_packet),
+        )
+        outputs["moderator_matching_adjudication"] = str(adjudication_prompt)
     for role in REPORT_ROLES:
         packet_path = report_packet_path(run_dir, round_id, role)
         packet = load_json_if_exists(packet_path)
@@ -2976,12 +4369,17 @@ def render_openclaw_prompts(
         write_text(moderator_prompt_path, decision_prompt_text(packet_path=packet_path, packet=packet))
         outputs["moderator_decision"] = str(moderator_prompt_path)
     if not outputs:
-        raise ValueError(f"No readiness, authorization, report, or decision packets exist for {round_id}.")
+        raise ValueError(f"No curation, readiness, authorization, matching-adjudication, report, or decision packets exist for {round_id}.")
     return outputs
 
 
 def data_readiness_artifacts(*, run_dir: Path, round_id: str, pretty: bool) -> dict[str, Any]:
     state = collect_round_state(run_dir, round_id)
+    if not curations_materialized_for_round(run_dir=run_dir, round_id=round_id, state=state):
+        raise ValueError(
+            "Data-readiness packets require completed claim/observation curation plus refreshed "
+            "materialized submissions. Run normalize materialize-curations after both curation payloads are imported."
+        )
     mission = state["mission"]
     tasks = state.get("tasks", []) if isinstance(state.get("tasks"), list) else []
     max_findings = mission_constraints(mission).get("max_claims_per_round", 4)
@@ -3015,8 +4413,10 @@ def data_readiness_artifacts(*, run_dir: Path, round_id: str, pretty: bool) -> d
     return {
         "run_id": mission_run_id(mission),
         "round_id": round_id,
-        "claim_submission_count": len(state.get("claim_submissions_current", [])),
-        "observation_submission_count": len(state.get("observation_submissions_current", [])),
+        "claim_submission_count": len(state_auditable_submissions(state, "sociologist")),
+        "observation_submission_count": len(state_auditable_submissions(state, "environmentalist")),
+        "claim_submission_current_count": len(state_current_submissions(state, "sociologist")),
+        "observation_submission_current_count": len(state_current_submissions(state, "environmentalist")),
         "outputs": outputs,
     }
 
@@ -3048,6 +4448,49 @@ def matching_authorization_artifacts(*, run_dir: Path, round_id: str, pretty: bo
         "round_id": round_id,
         "matching_authorization_packet_path": str(packet_path),
         "matching_authorization_draft_path": str(draft_path),
+    }
+
+
+def matching_adjudication_artifacts(*, run_dir: Path, round_id: str, pretty: bool) -> dict[str, Any]:
+    state = collect_round_state(run_dir, round_id)
+    authorization = state.get("matching_authorization", {}) if isinstance(state.get("matching_authorization"), dict) else {}
+    if maybe_text(authorization.get("authorization_status")) != "authorized":
+        raise ValueError("Matching-adjudication packets require canonical matching_authorization.json with authorization_status=authorized.")
+    authorization_id = maybe_text(authorization.get("authorization_id"))
+    candidate_set = load_dict_if_exists(matching_candidate_set_path(run_dir, round_id))
+    if not isinstance(candidate_set, dict):
+        raise ValueError(
+            "Matching candidate set is missing. Run normalize prepare-matching-adjudication after authorization before building the moderator adjudication packet."
+        )
+    if authorization_id and maybe_text(candidate_set.get("authorization_id")) != authorization_id:
+        raise ValueError("Matching candidate set authorization_id does not match matching_authorization.json. Regenerate it.")
+    draft_adjudication = load_dict_if_exists(matching_adjudication_draft_path(run_dir, round_id))
+    if not isinstance(draft_adjudication, dict):
+        raise ValueError(
+            "Matching adjudication draft is missing. Run normalize prepare-matching-adjudication after authorization before building the moderator adjudication packet."
+        )
+    validate_payload("matching-adjudication", draft_adjudication)
+    if authorization_id and maybe_text(draft_adjudication.get("authorization_id")) != authorization_id:
+        raise ValueError("Matching adjudication draft authorization_id does not match matching_authorization.json. Regenerate it.")
+    mission = state["mission"]
+    context = load_context_or_fallback_from_state(run_dir=run_dir, state=state, role="moderator")
+    packet = build_matching_adjudication_packet(
+        run_dir=run_dir,
+        round_id=round_id,
+        mission=mission,
+        context=context,
+        state=state,
+        candidate_set=candidate_set,
+        draft_adjudication=draft_adjudication,
+    )
+    packet_path = matching_adjudication_packet_path(run_dir, round_id)
+    write_json(packet_path, packet, pretty=pretty)
+    return {
+        "run_id": mission_run_id(mission),
+        "round_id": round_id,
+        "matching_candidate_set_path": str(matching_candidate_set_path(run_dir, round_id)),
+        "matching_adjudication_packet_path": str(packet_path),
+        "matching_adjudication_draft_path": str(matching_adjudication_draft_path(run_dir, round_id)),
     }
 
 
@@ -3144,6 +4587,11 @@ def command_build_report_packets(args: argparse.Namespace) -> dict[str, Any]:
     return report_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
 
 
+def command_build_curation_packets(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    return curation_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
+
+
 def command_build_data_readiness_packets(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     return data_readiness_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
@@ -3152,6 +4600,11 @@ def command_build_data_readiness_packets(args: argparse.Namespace) -> dict[str, 
 def command_build_matching_authorization_packet(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     return matching_authorization_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
+
+
+def command_build_matching_adjudication_packet(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    return matching_adjudication_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
 
 
 def command_build_decision_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -3170,15 +4623,40 @@ def command_build_all(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
     next_round_id = args.next_round_id or next_round_id_for(args.round_id)
     outputs: dict[str, Any] = {
-        "data_readiness": data_readiness_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty),
+        "curation": curation_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty),
     }
     state = collect_round_state(run_dir, args.round_id)
+    if curations_materialized_for_round(run_dir=run_dir, round_id=args.round_id, state=state):
+        outputs["data_readiness"] = data_readiness_artifacts(
+            run_dir=run_dir,
+            round_id=args.round_id,
+            pretty=args.pretty,
+        )
+        state = collect_round_state(run_dir, args.round_id)
+    else:
+        outputs["data_readiness"] = {
+            "skipped": True,
+            "reason": (
+                "Curation has not been materialized into claim/observation submissions yet; "
+                "readiness packets were intentionally not built."
+            ),
+        }
     if all(isinstance(state.get("readiness_reports", {}).get(role), dict) and state.get("readiness_reports", {}).get(role) for role in READINESS_ROLES):
         outputs["matching_authorization"] = matching_authorization_artifacts(
             run_dir=run_dir,
             round_id=args.round_id,
             pretty=args.pretty,
         )
+        state = collect_round_state(run_dir, args.round_id)
+    if maybe_text(state.get("matching_authorization", {}).get("authorization_status")) == "authorized":
+        candidate_path = matching_candidate_set_path(run_dir, args.round_id)
+        draft_path = matching_adjudication_draft_path(run_dir, args.round_id)
+        if candidate_path.exists() and draft_path.exists():
+            outputs["matching_adjudication"] = matching_adjudication_artifacts(
+                run_dir=run_dir,
+                round_id=args.round_id,
+                pretty=args.pretty,
+            )
     if matching_result_path(run_dir, args.round_id).exists() and evidence_adjudication_path(run_dir, args.round_id).exists():
         outputs["reports"] = report_artifacts(run_dir=run_dir, round_id=args.round_id, pretty=args.pretty)
     authorization_status = maybe_text(state.get("matching_authorization", {}).get("authorization_status"))
@@ -3229,8 +4707,48 @@ def command_promote_decision_draft(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def command_promote_matching_authorization_draft(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    return promote_matching_authorization_draft(
+        run_dir=run_dir,
+        round_id=args.round_id,
+        draft_path_text=args.draft_path,
+        pretty=args.pretty,
+        allow_overwrite=args.allow_overwrite,
+    )
+
+
+def command_promote_matching_adjudication_draft(args: argparse.Namespace) -> dict[str, Any]:
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    return promote_matching_adjudication_draft(
+        run_dir=run_dir,
+        round_id=args.round_id,
+        draft_path_text=args.draft_path,
+        pretty=args.pretty,
+        allow_overwrite=args.allow_overwrite,
+    )
+
+
 def command_promote_all(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
+    authorization_result = None
+    adjudication_result = None
+    if matching_authorization_draft_path(run_dir, args.round_id).exists():
+        authorization_result = promote_matching_authorization_draft(
+            run_dir=run_dir,
+            round_id=args.round_id,
+            draft_path_text="",
+            pretty=args.pretty,
+            allow_overwrite=args.allow_overwrite,
+        )
+    if matching_adjudication_draft_path(run_dir, args.round_id).exists():
+        adjudication_result = promote_matching_adjudication_draft(
+            run_dir=run_dir,
+            round_id=args.round_id,
+            draft_path_text="",
+            pretty=args.pretty,
+            allow_overwrite=args.allow_overwrite,
+        )
     report_results = []
     for role in REPORT_ROLES:
         if report_draft_path(run_dir, args.round_id, role).exists():
@@ -3257,6 +4775,8 @@ def command_promote_all(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "run_dir": str(run_dir),
         "round_id": args.round_id,
+        "matching_authorization_result": authorization_result,
+        "matching_adjudication_result": adjudication_result,
         "report_results": report_results,
         "decision_result": decision_result,
         "bundle_validation": bundle_result,
@@ -3268,8 +4788,13 @@ def add_pretty_flag(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build eco-council report packets and decision drafts.")
+    parser = argparse.ArgumentParser(description="Build eco-council curation, readiness, report packets, and decision drafts.")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    curation_packets = sub.add_parser("build-curation-packets", help="Build claim/observation curation packets and draft curations.")
+    curation_packets.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    curation_packets.add_argument("--round-id", required=True, help="Round identifier.")
+    add_pretty_flag(curation_packets)
 
     readiness_packets = sub.add_parser("build-data-readiness-packets", help="Build data-readiness packets and draft readiness reports.")
     readiness_packets.add_argument("--run-dir", required=True, help="Eco-council run directory.")
@@ -3280,6 +4805,11 @@ def build_parser() -> argparse.ArgumentParser:
     authorization_packet.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     authorization_packet.add_argument("--round-id", required=True, help="Round identifier.")
     add_pretty_flag(authorization_packet)
+
+    adjudication_packet = sub.add_parser("build-matching-adjudication-packet", help="Build moderator matching-adjudication packet from the nominated candidate set and draft.")
+    adjudication_packet.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    adjudication_packet.add_argument("--round-id", required=True, help="Round identifier.")
+    add_pretty_flag(adjudication_packet)
 
     report_packets = sub.add_parser("build-report-packets", help="Build expert report packets and draft expert reports.")
     report_packets.add_argument("--run-dir", required=True, help="Eco-council run directory.")
@@ -3300,7 +4830,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_all.add_argument("--prefer-draft-reports", action="store_true", help="Prefer derived report drafts over canonical expert reports whenever drafts are present.")
     add_pretty_flag(build_all)
 
-    render_prompts = sub.add_parser("render-openclaw-prompts", help="Render OpenClaw text prompts from existing report and decision packets.")
+    render_prompts = sub.add_parser("render-openclaw-prompts", help="Render OpenClaw text prompts from existing curation, readiness, matching, report, and decision packets.")
     render_prompts.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     render_prompts.add_argument("--round-id", required=True, help="Round identifier.")
     add_pretty_flag(render_prompts)
@@ -3320,6 +4850,34 @@ def build_parser() -> argparse.ArgumentParser:
     promote_decision.add_argument("--allow-overwrite", action="store_true", help="Allow overwrite of an existing canonical decision.")
     add_pretty_flag(promote_decision)
 
+    promote_matching_authorization = sub.add_parser(
+        "promote-matching-authorization-draft",
+        help="Promote the moderator matching-authorization draft into the canonical moderator path.",
+    )
+    promote_matching_authorization.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    promote_matching_authorization.add_argument("--round-id", required=True, help="Round identifier.")
+    promote_matching_authorization.add_argument("--draft-path", default="", help="Optional explicit draft JSON path.")
+    promote_matching_authorization.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        help="Allow overwrite of an existing canonical matching-authorization.",
+    )
+    add_pretty_flag(promote_matching_authorization)
+
+    promote_matching_adjudication = sub.add_parser(
+        "promote-matching-adjudication-draft",
+        help="Promote the moderator matching-adjudication draft into the canonical moderator path.",
+    )
+    promote_matching_adjudication.add_argument("--run-dir", required=True, help="Eco-council run directory.")
+    promote_matching_adjudication.add_argument("--round-id", required=True, help="Round identifier.")
+    promote_matching_adjudication.add_argument("--draft-path", default="", help="Optional explicit draft JSON path.")
+    promote_matching_adjudication.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        help="Allow overwrite of an existing canonical matching-adjudication.",
+    )
+    add_pretty_flag(promote_matching_adjudication)
+
     promote_all = sub.add_parser("promote-all", help="Promote derived expert-report drafts plus the moderator decision draft into canonical paths.")
     promote_all.add_argument("--run-dir", required=True, help="Eco-council run directory.")
     promote_all.add_argument("--round-id", required=True, help="Round identifier.")
@@ -3332,14 +4890,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     handlers = {
+        "build-curation-packets": command_build_curation_packets,
         "build-data-readiness-packets": command_build_data_readiness_packets,
         "build-matching-authorization-packet": command_build_matching_authorization_packet,
+        "build-matching-adjudication-packet": command_build_matching_adjudication_packet,
         "build-report-packets": command_build_report_packets,
         "build-decision-packet": command_build_decision_packet,
         "build-all": command_build_all,
         "render-openclaw-prompts": command_render_openclaw_prompts,
         "promote-report-draft": command_promote_report_draft,
         "promote-decision-draft": command_promote_decision_draft,
+        "promote-matching-authorization-draft": command_promote_matching_authorization_draft,
+        "promote-matching-adjudication-draft": command_promote_matching_adjudication_draft,
         "promote-all": command_promote_all,
     }
     try:
