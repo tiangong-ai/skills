@@ -12,6 +12,7 @@ Use this skill when the eco-council flow should be driven by one deterministic l
 1. Initialize one run with `init-run`.
    - Optionally attach one local case-library SQLite database so the moderator receives compact similar-case context automatically.
    - By default, `init-run` also provisions the fixed OpenClaw moderator/sociologist/environmentalist agents and writes their workspace guides.
+   - By default, the supervisor also auto-archives into `runs/archives/eco_council_case_library.sqlite` and `runs/archives/eco_council_signal_corpus.sqlite`; use `--disable-auto-archive` only for special runs.
 2. Use `provision-openclaw-agents` only to repair or recreate the three fixed agents later, or use `--no-provision-openclaw` at `init-run` time when you intentionally want a scaffolded run without live agents.
 3. Let the moderator review or revise `tasks.json`.
 4. Let the sociologist and environmentalist each return one audited `source-selection` object.
@@ -28,21 +29,23 @@ Use this skill when the eco-council flow should be driven by one deterministic l
   - `import-report`
   - `import-decision`
 8. If raw fetch is produced by an external runner instead of `continue-run`, import the canonical `fetch_execution.json` with `import-fetch-execution`.
-9. After `run-data-plane` produces normalized analytics databases, optionally import the run into the offline signal corpus for cross-run aggregation.
+9. After `run-data-plane`, the supervisor auto-imports normalized analytics into the offline signal corpus by default, and after `promote-all` it auto-imports the run snapshot into the case library by default.
 
 ## Command Surface
 
-- `python3 scripts/eco_council_supervisor.py init-run --run-dir ... --mission-input ... [--workspace-root ...] [--history-db ... --history-top-k 3] [--no-provision-openclaw] [--yes] --pretty`
+- `python3 scripts/eco_council_supervisor.py init-run --run-dir ... --mission-input ... [--workspace-root ...] [--history-db ... --history-top-k 3] [--case-library-db ...] [--signal-corpus-db ...] [--disable-auto-archive] [--no-provision-openclaw] [--yes] --pretty`
   - Calls `$eco-council-orchestrate bootstrap-run`.
   - Creates supervisor state plus role/session prompt files.
   - By default, also creates or reuses the three fixed OpenClaw agents; use `--no-provision-openclaw` to skip that on purpose.
   - When `--history-db` is set, moderator task-review and decision turns also receive a compact similar-case summary from the local history library.
-  - When `--signal-corpus-db` is set, every successful `run-data-plane` step also overwrites the corresponding run inside the offline signal corpus automatically.
+  - By default, every run auto-archives into the repo-local case library and signal corpus under `runs/archives/`.
+  - `--case-library-db` or `--signal-corpus-db` overrides those default archive paths.
+  - `--disable-auto-archive` turns off both archive imports for special cases.
 - `python3 scripts/eco_council_supervisor.py provision-openclaw-agents --run-dir ... --pretty`
   - Creates or reuses fixed OpenClaw agent ids for moderator, sociologist, and environmentalist.
   - Refreshes each agent workspace `IDENTITY.md` plus `OPENCLAW_AGENT_GUIDE.md`.
-- `python3 scripts/eco_council_supervisor.py status --run-dir ... [--history-db ... --history-top-k 3] [--disable-history-context] [--signal-corpus-db ...] [--disable-signal-corpus-import] --pretty`
-  - Shows current round, stage, outbox prompts, `CURRENT_STEP.txt`, the current historical-context attachment state, and the current automatic offline signal-corpus import attachment state.
+- `python3 scripts/eco_council_supervisor.py status --run-dir ... [--history-db ... --history-top-k 3] [--disable-history-context] [--case-library-db ...] [--signal-corpus-db ...] [--disable-auto-archive] --pretty`
+  - Shows current round, stage, outbox prompts, `CURRENT_STEP.txt`, the current historical-context attachment state, and the current automatic archive attachment state for both the case library and signal corpus.
 - `python3 scripts/eco_council_supervisor.py summarize-run --run-dir ... --lang zh --pretty`
   - Renders one human-readable Markdown meeting record under `RUN_DIR/reports/`.
   - Supports `--lang zh|en` for report language only; workflow payloads remain in English.
@@ -96,6 +99,7 @@ Use this skill when the eco-council flow should be driven by one deterministic l
 - Treat the case-library SQLite database as historical record storage, not as a replacement for canonical per-run JSON artifacts.
 - Treat the signal-corpus SQLite database as an offline cross-run aggregation and training-prep store built from normalized analytics DBs, not as a replacement for canonical per-run JSON artifacts or the live per-run analytics databases.
 - Automatic signal-corpus import happens only after `run-data-plane` succeeds; it never replaces the live per-run analytics DBs that were just written.
+- Automatic case-library import happens only after `promote-all` succeeds; it stores run/round/evidence summaries for retrieval and audit, not the live raw artifacts.
 - Treat moderator historical context as planning-only retrieval help; it must not override current-run evidence.
 
 ## References

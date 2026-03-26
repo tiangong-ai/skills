@@ -68,6 +68,12 @@ The supervisor keeps a strict split:
 
 - Import a run into the offline signal corpus only after `run-data-plane` has produced normalized analytics databases, or when the run directory already contains those databases from an earlier execution.
 - `scripts/eco_council_signal_corpus.py` resolves analytics DB paths from `RUN_DIR/run_manifest.json` first and otherwise falls back to `RUN_DIR/analytics/public_signals.sqlite` plus `RUN_DIR/analytics/environment_signals.sqlite`.
-- If supervisor state has `signal_corpus.db` configured, `continue-run` automatically imports the current run into that offline signal corpus immediately after a successful `run-data-plane` step.
+- New runs default `signal_corpus.db` to `runs/archives/eco_council_signal_corpus.sqlite`, so `continue-run` automatically imports the current run into that offline signal corpus immediately after a successful `run-data-plane` step unless `--disable-auto-archive` was used.
 - The offline signal corpus is a separate cross-run aggregation store for retrieval, evaluation, and training preparation. Keep canonical per-run JSON artifacts and per-run analytics DBs as the source of truth for an individual run.
 - Replay fixtures or eval bundles that only materialize shared JSON outputs without analytics DB tables will not populate the offline signal corpus.
+
+## Case Library Archive
+
+- New runs default `case_library_archive.db` to `runs/archives/eco_council_case_library.sqlite`.
+- `continue-run` automatically imports the current run into that case library immediately after a successful `promote-all` step unless `--disable-auto-archive` was used.
+- The case library stores run-level, round-level, and curated evidence summaries for retrieval and audit. It does not replace canonical per-run JSON artifacts or raw fetch outputs.

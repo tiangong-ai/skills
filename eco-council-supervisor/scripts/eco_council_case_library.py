@@ -123,9 +123,26 @@ def connect_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+
+
+def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+    if column_name in table_columns(conn, table_name):
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
+def migrate_db(conn: sqlite3.Connection) -> None:
+    # Older archive DBs predate source_governance_json; add it lazily so import-run
+    # can overwrite into existing archives instead of failing on a missing column.
+    ensure_column(conn, "cases", "source_governance_json", "TEXT NOT NULL DEFAULT '{}'")
+
+
 def init_db(path: Path) -> None:
     with connect_db(path) as conn:
         conn.executescript(read_ddl())
+        migrate_db(conn)
         conn.commit()
 
 
@@ -263,45 +280,42 @@ def insert_case(conn: sqlite3.Connection, snapshot: dict[str, Any], run_dir: Pat
     if not case_id:
         raise ValueError("mission.run_id is required")
 
+    governance_json = json_text(SUP.contract_call("source_governance", mission) or {})
+    case_values = {
+        "case_id": case_id,
+        "run_dir": str(run_dir),
+        "topic": maybe_text(mission.get("topic")),
+        "objective": maybe_text(mission.get("objective")),
+        "region_label": maybe_text(region.get("label")),
+        "region_geometry_json": json_text(region.get("geometry", {})),
+        "window_start_utc": maybe_text(window.get("start_utc")),
+        "window_end_utc": maybe_text(window.get("end_utc")),
+        "max_rounds": constraints.get("max_rounds"),
+        "max_claims_per_round": constraints.get("max_claims_per_round"),
+        "max_tasks_per_round": constraints.get("max_tasks_per_round"),
+        "source_governance_json": governance_json,
+        "source_policy_json": governance_json,
+        "current_round_id": maybe_text(state.get("current_round_id")),
+        "current_stage": maybe_text(state.get("stage")),
+        "round_count": len(snapshot["round_ids"]),
+        "latest_decision_round_id": maybe_text(latest_decision_round.get("round_id")),
+        "final_moderator_status": maybe_text(latest_decision.get("moderator_status")),
+        "final_evidence_sufficiency": maybe_text(latest_decision.get("evidence_sufficiency")),
+        "final_decision_summary": maybe_text(latest_decision.get("decision_summary")),
+        "final_brief": maybe_text(latest_decision.get("final_brief")),
+        "final_missing_evidence_types_json": json_text(latest_decision.get("missing_evidence_types", [])),
+        "latest_claim_count": int(current_summary.get("shared", {}).get("claim_count") or 0),
+        "latest_observation_count": int(current_summary.get("shared", {}).get("observation_count") or 0),
+        "latest_evidence_count": int(current_summary.get("shared", {}).get("evidence_count") or 0),
+        "imported_at_utc": utc_now_iso(),
+        "mission_json": json_text(mission),
+    }
+    actual_columns = table_columns(conn, "cases")
+    ordered_columns = [column for column in case_values if column in actual_columns]
+    placeholders = ", ".join("?" for _ in ordered_columns)
     conn.execute(
-        """
-        INSERT INTO cases (
-            case_id, run_dir, topic, objective, region_label, region_geometry_json,
-            window_start_utc, window_end_utc, max_rounds, max_claims_per_round, max_tasks_per_round,
-            source_governance_json, current_round_id, current_stage, round_count, latest_decision_round_id,
-            final_moderator_status, final_evidence_sufficiency, final_decision_summary, final_brief,
-            final_missing_evidence_types_json, latest_claim_count, latest_observation_count, latest_evidence_count,
-            imported_at_utc, mission_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            case_id,
-            str(run_dir),
-            maybe_text(mission.get("topic")),
-            maybe_text(mission.get("objective")),
-            maybe_text(region.get("label")),
-            json_text(region.get("geometry", {})),
-            maybe_text(window.get("start_utc")),
-            maybe_text(window.get("end_utc")),
-            constraints.get("max_rounds"),
-            constraints.get("max_claims_per_round"),
-            constraints.get("max_tasks_per_round"),
-            json_text(SUP.contract_call("source_governance", mission) or {}),
-            maybe_text(state.get("current_round_id")),
-            maybe_text(state.get("stage")),
-            len(snapshot["round_ids"]),
-            maybe_text(latest_decision_round.get("round_id")),
-            maybe_text(latest_decision.get("moderator_status")),
-            maybe_text(latest_decision.get("evidence_sufficiency")),
-            maybe_text(latest_decision.get("decision_summary")),
-            maybe_text(latest_decision.get("final_brief")),
-            json_text(latest_decision.get("missing_evidence_types", [])),
-            int(current_summary.get("shared", {}).get("claim_count") or 0),
-            int(current_summary.get("shared", {}).get("observation_count") or 0),
-            int(current_summary.get("shared", {}).get("evidence_count") or 0),
-            utc_now_iso(),
-            json_text(mission),
-        ),
+        f"INSERT INTO cases ({', '.join(ordered_columns)}) VALUES ({placeholders})",
+        tuple(case_values[column] for column in ordered_columns),
     )
     return case_id
 

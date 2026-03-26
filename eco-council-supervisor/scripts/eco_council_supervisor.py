@@ -29,6 +29,9 @@ CONTRACT_SCRIPT = REPO_DIR / "eco-council-data-contract" / "scripts" / "eco_coun
 NORMALIZE_SCRIPT = REPO_DIR / "eco-council-normalize" / "scripts" / "eco_council_normalize.py"
 CASE_LIBRARY_SCRIPT = SKILL_DIR / "scripts" / "eco_council_case_library.py"
 SIGNAL_CORPUS_SCRIPT = SKILL_DIR / "scripts" / "eco_council_signal_corpus.py"
+DEFAULT_ARCHIVE_DIR = REPO_DIR / "runs" / "archives"
+DEFAULT_CASE_LIBRARY_DB = DEFAULT_ARCHIVE_DIR / "eco_council_case_library.sqlite"
+DEFAULT_SIGNAL_CORPUS_DB = DEFAULT_ARCHIVE_DIR / "eco_council_signal_corpus.sqlite"
 
 SCHEMA_VERSION = "1.0.0"
 ROUND_ID_PATTERN = re.compile(r"^round-\d{3}$")
@@ -844,12 +847,83 @@ def history_cli_updates_requested(args: argparse.Namespace) -> bool:
     )
 
 
+def default_case_library_db_path() -> str:
+    return str(DEFAULT_CASE_LIBRARY_DB.resolve())
+
+
+def default_signal_corpus_db_path() -> str:
+    return str(DEFAULT_SIGNAL_CORPUS_DB.resolve())
+
+
+def ensure_case_library_archive_config(state: dict[str, Any]) -> dict[str, Any]:
+    archive = state.get("case_library_archive")
+    if not isinstance(archive, dict):
+        archive = {
+            "db": default_case_library_db_path(),
+            "auto_import": True,
+            "last_imported_round_id": "",
+            "last_imported_at_utc": "",
+            "last_import": {},
+        }
+    db_text = maybe_text(archive.get("db"))
+    if not db_text and "db" not in archive:
+        db_text = default_case_library_db_path()
+    archive["db"] = db_text
+    if not db_text:
+        archive["auto_import"] = False
+    elif "auto_import" not in archive:
+        archive["auto_import"] = True
+    else:
+        archive["auto_import"] = bool(archive.get("auto_import"))
+    archive["last_imported_round_id"] = maybe_text(archive.get("last_imported_round_id"))
+    archive["last_imported_at_utc"] = maybe_text(archive.get("last_imported_at_utc"))
+    last_import = archive.get("last_import")
+    if not isinstance(last_import, dict):
+        last_import = {}
+    archive["last_import"] = last_import
+    state["case_library_archive"] = archive
+    return archive
+
+
+def apply_case_library_archive_cli_config(state: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    archive = ensure_case_library_archive_config(state)
+    if bool(getattr(args, "disable_auto_archive", False)):
+        archive["db"] = ""
+        archive["auto_import"] = False
+    elif maybe_text(getattr(args, "case_library_db", "")):
+        archive["db"] = str(Path(args.case_library_db).expanduser().resolve())
+        archive["auto_import"] = True
+    state["case_library_archive"] = archive
+    return archive
+
+
+def case_library_archive_cli_updates_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, "disable_auto_archive", False)
+        or maybe_text(getattr(args, "case_library_db", ""))
+    )
+
+
 def ensure_signal_corpus_config(state: dict[str, Any]) -> dict[str, Any]:
     signal_corpus = state.get("signal_corpus")
     if not isinstance(signal_corpus, dict):
-        signal_corpus = {}
-    signal_corpus["db"] = maybe_text(signal_corpus.get("db"))
-    signal_corpus["auto_import"] = bool(signal_corpus.get("auto_import")) if signal_corpus["db"] else False
+        signal_corpus = {
+            "db": default_signal_corpus_db_path(),
+            "auto_import": True,
+            "last_imported_round_id": "",
+            "last_imported_at_utc": "",
+            "last_import": {},
+        }
+    db_text = maybe_text(signal_corpus.get("db"))
+    if not db_text and "db" not in signal_corpus:
+        db_text = default_signal_corpus_db_path()
+    signal_corpus["db"] = db_text
+    if not db_text:
+        signal_corpus["auto_import"] = False
+    elif "auto_import" not in signal_corpus:
+        signal_corpus["auto_import"] = True
+    else:
+        signal_corpus["auto_import"] = bool(signal_corpus.get("auto_import"))
     signal_corpus["last_imported_round_id"] = maybe_text(signal_corpus.get("last_imported_round_id"))
     signal_corpus["last_imported_at_utc"] = maybe_text(signal_corpus.get("last_imported_at_utc"))
     last_import = signal_corpus.get("last_import")
@@ -862,7 +936,7 @@ def ensure_signal_corpus_config(state: dict[str, Any]) -> dict[str, Any]:
 
 def apply_signal_corpus_cli_config(state: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     signal_corpus = ensure_signal_corpus_config(state)
-    if bool(getattr(args, "disable_signal_corpus_import", False)):
+    if bool(getattr(args, "disable_auto_archive", False) or getattr(args, "disable_signal_corpus_import", False)):
         signal_corpus["db"] = ""
         signal_corpus["auto_import"] = False
     elif maybe_text(getattr(args, "signal_corpus_db", "")):
@@ -874,7 +948,8 @@ def apply_signal_corpus_cli_config(state: dict[str, Any], args: argparse.Namespa
 
 def signal_corpus_cli_updates_requested(args: argparse.Namespace) -> bool:
     return bool(
-        getattr(args, "disable_signal_corpus_import", False)
+        getattr(args, "disable_auto_archive", False)
+        or getattr(args, "disable_signal_corpus_import", False)
         or maybe_text(getattr(args, "signal_corpus_db", ""))
     )
 
@@ -1874,9 +1949,16 @@ def build_state_payload(*, run_dir: Path, round_id: str, agent_prefix: str) -> d
             "db": "",
             "top_k": DEFAULT_HISTORY_TOP_K,
         },
+        "case_library_archive": {
+            "db": default_case_library_db_path(),
+            "auto_import": True,
+            "last_imported_round_id": "",
+            "last_imported_at_utc": "",
+            "last_import": {},
+        },
         "signal_corpus": {
-            "db": "",
-            "auto_import": False,
+            "db": default_signal_corpus_db_path(),
+            "auto_import": True,
             "last_imported_round_id": "",
             "last_imported_at_utc": "",
             "last_import": {},
@@ -1914,6 +1996,7 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
 
     session_paths = {role: str(session_prompt_path(run_dir, role)) for role in ROLES}
     history = ensure_history_context_config(state)
+    case_library_archive = ensure_case_library_archive_config(state)
     signal_corpus = ensure_signal_corpus_config(state)
     history_file = history_context_path(run_dir, round_id) if round_id else None
     return {
@@ -2008,6 +2091,13 @@ def build_status_payload(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]
             "db": maybe_text(history.get("db")),
             "top_k": normalize_history_top_k(history.get("top_k")),
             "context_path": str(history_file) if history_file is not None and history_file.exists() else "",
+        },
+        "case_library_archive": {
+            "db": maybe_text(case_library_archive.get("db")),
+            "auto_import": bool(case_library_archive.get("auto_import")),
+            "last_imported_round_id": maybe_text(case_library_archive.get("last_imported_round_id")),
+            "last_imported_at_utc": maybe_text(case_library_archive.get("last_imported_at_utc")),
+            "last_import": case_library_archive.get("last_import", {}),
         },
         "signal_corpus": {
             "db": maybe_text(signal_corpus.get("db")),
@@ -4910,6 +5000,7 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
     round_id = latest_round_id(run_dir)
     state = build_state_payload(run_dir=run_dir, round_id=round_id, agent_prefix=args.agent_prefix)
     apply_history_cli_config(state, args)
+    apply_case_library_archive_cli_config(state, args)
     apply_signal_corpus_cli_config(state, args)
     ensure_openclaw_config(run_dir, state, workspace_root_text=args.workspace_root)
     provision_result: dict[str, Any]
@@ -4945,10 +5036,15 @@ def command_init_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_status(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(args.run_dir).expanduser().resolve()
-    if history_cli_updates_requested(args) or signal_corpus_cli_updates_requested(args):
+    if (
+        history_cli_updates_requested(args)
+        or case_library_archive_cli_updates_requested(args)
+        or signal_corpus_cli_updates_requested(args)
+    ):
         with exclusive_file_lock(supervisor_state_lock_path(run_dir)):
             state = load_state(run_dir)
             apply_history_cli_config(state, args)
+            apply_case_library_archive_cli_config(state, args)
             apply_signal_corpus_cli_config(state, args)
             save_state(run_dir, state)
         return build_status_payload(run_dir, state)
@@ -5158,6 +5254,56 @@ def maybe_auto_import_signal_corpus(run_dir: Path, state: dict[str, Any], round_
     return result
 
 
+def maybe_auto_import_case_library(run_dir: Path, state: dict[str, Any], round_id: str) -> dict[str, Any] | None:
+    archive = ensure_case_library_archive_config(state)
+    db_text = maybe_text(archive.get("db"))
+    if not db_text or not bool(archive.get("auto_import")):
+        return {
+            "enabled": bool(db_text),
+            "attempted": False,
+        }
+    attempted_at_utc = utc_now_iso()
+    try:
+        payload = run_json_command(
+            [
+                "python3",
+                str(CASE_LIBRARY_SCRIPT),
+                "import-run",
+                "--db",
+                db_text,
+                "--run-dir",
+                str(run_dir),
+                "--overwrite",
+                "--pretty",
+            ],
+            cwd=REPO_DIR,
+        )
+        result = {
+            "enabled": True,
+            "attempted": True,
+            "ok": True,
+            "db": db_text,
+            "round_id": round_id,
+            "attempted_at_utc": attempted_at_utc,
+            "import_result": payload.get("payload") if isinstance(payload, dict) and isinstance(payload.get("payload"), dict) else payload,
+        }
+        archive["last_imported_round_id"] = round_id
+        archive["last_imported_at_utc"] = attempted_at_utc
+    except Exception as exc:  # noqa: BLE001
+        result = {
+            "enabled": True,
+            "attempted": True,
+            "ok": False,
+            "db": db_text,
+            "round_id": round_id,
+            "attempted_at_utc": attempted_at_utc,
+            "error": str(exc),
+        }
+    archive["last_import"] = result
+    state["case_library_archive"] = archive
+    return result
+
+
 def continue_run_data_plane(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     round_id = maybe_text(state.get("current_round_id"))
     payload = run_json_command(
@@ -5301,6 +5447,10 @@ def continue_promote(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     else:
         state["stage"] = STAGE_COMPLETED
     save_state(run_dir, state)
+    case_library_import = maybe_auto_import_case_library(run_dir, state, round_id)
+    save_state(run_dir, state)
+    if case_library_import is not None and isinstance(payload, dict):
+        payload["case_library_import"] = case_library_import
     return {"action": "promote-all", "payload": payload, "state": build_status_payload(run_dir, state)}
 
 
@@ -5841,7 +5991,9 @@ def build_parser() -> argparse.ArgumentParser:
     init_run.add_argument("--yes", action="store_true", help="Skip interactive approval when provisioning agents.")
     init_run.add_argument("--history-db", default="", help="Optional case-library SQLite path for moderator historical context.")
     init_run.add_argument("--history-top-k", type=int, default=DEFAULT_HISTORY_TOP_K, help="Number of similar historical cases to inject into moderator turns.")
-    init_run.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path for automatic post-data-plane imports.")
+    init_run.add_argument("--case-library-db", default="", help="Optional case-library SQLite path for automatic run archiving. Defaults to runs/archives/eco_council_case_library.sqlite.")
+    init_run.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path for automatic post-data-plane imports. Defaults to runs/archives/eco_council_signal_corpus.sqlite.")
+    init_run.add_argument("--disable-auto-archive", action="store_true", help="Disable automatic imports into the case library and signal corpus for this run.")
     init_run.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     provision = sub.add_parser("provision-openclaw-agents", help="Create or reuse three isolated OpenClaw agents.")
@@ -5855,8 +6007,9 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--history-db", default="", help="Optional case-library SQLite path to attach for moderator historical context.")
     status.add_argument("--history-top-k", type=int, default=0, help="Optional override for moderator historical-case count.")
     status.add_argument("--disable-history-context", action="store_true", help="Disable moderator historical-case context for this run.")
-    status.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path to attach for automatic post-data-plane imports.")
-    status.add_argument("--disable-signal-corpus-import", action="store_true", help="Disable automatic post-data-plane signal-corpus imports for this run.")
+    status.add_argument("--case-library-db", default="", help="Optional case-library SQLite path for automatic run archiving.")
+    status.add_argument("--signal-corpus-db", default="", help="Optional signal-corpus SQLite path for automatic post-data-plane imports.")
+    status.add_argument("--disable-auto-archive", action="store_true", help="Disable automatic imports into the case library and signal corpus for this run.")
     status.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     summarize = sub.add_parser("summarize-run", help="Render one human-readable run report from the run directory.")
