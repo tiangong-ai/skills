@@ -68,7 +68,8 @@
                 "./fetch-abstract-to-kb",
                 "./document-granular-decompose",
                 "./notebooklm-Invoke",
-                "./figshare-data-download"
+                "./figshare-data-download",
+                "./domain-onboarding"
             ]
         },
         {
