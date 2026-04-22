@@ -1,0 +1,4 @@
+interface:
+  display_name: "Domain Onboarding"
+  short_description: "Orient users in unfamiliar domains"
+  default_prompt: "Use $domain-onboarding to help me build a practical mental map of an unfamiliar field before going deeper."
