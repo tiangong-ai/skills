@@ -1,4 +1,23 @@
-# 天工 LCA Skills
+---
+docType: guide
+scope: repo
+status: current
+authoritative: true
+owner: skills
+language: zh-CN
+whenToUse: "安装、更新或使用 Tiangong AI 可复用 skills 仓库时。"
+whenToUpdate: "当安装命令、目标 agent、安装范围、环境变量或 skill 可用性说明变化时。"
+checkPaths:
+  - AGENTS.md
+  - .docpact/config.yaml
+  - README.md
+  - .claude-plugin/**
+  - "*/SKILL.md"
+lastReviewedAt: 2026-04-29
+lastReviewedCommit: 7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1
+---
+
+# 天工 AI Skills
 
 仓库地址: https://github.com/tiangong-ai/skills
 
@@ -20,7 +39,7 @@ npm i skills -g
   ```
 - 安装指定技能:
   ```bash
-  npx skills add https://github.com/tiangong-ai/skills --skill flow-hybrid-search --skill process-hybrid-search
+  npx skills add https://github.com/tiangong-ai/skills --skill sci-journals-hybrid-search --skill dify-knowledge-base-search
   ```
 
 ## 目标 agent 与作用域
@@ -56,9 +75,6 @@ npm i skills -g
   ```
 
 ## 环境变量
-- `sci-journals-hybrid-search`
-  - `TIANGONG_AI_APIKEY`: 必填。用于 Supabase edge function 的 `x-api-key`。
-- `dify-knowledge-base-search`
-  - `DIFY_API_BASE_URL`: 必填。示例 `https://api.dify.ai/v1`。
-  - `DIFY_DATASET_ID`: 必填。Dify 数据集（知识库）ID。
-  - `DIFY_API_KEY`: 必填。用于 `Authorization: Bearer <DIFY_API_KEY>`。
+
+环境变量要求由各 skill 自己维护。使用会调用外部服务的 skill 前，优先阅读该
+skill 的 `references/env.md`（如存在）。

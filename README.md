@@ -1,3 +1,22 @@
+---
+docType: guide
+scope: repo
+status: current
+authoritative: true
+owner: skills
+language: en
+whenToUse: "When installing, updating, or using the Tiangong AI reusable skills repository."
+whenToUpdate: "When install commands, target agents, scope behavior, environment variables, or available skill guidance changes."
+checkPaths:
+  - AGENTS.md
+  - .docpact/config.yaml
+  - README.zh-CN.md
+  - .claude-plugin/**
+  - "*/SKILL.md"
+lastReviewedAt: 2026-04-29
+lastReviewedCommit: 7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1
+---
+
 # Tiangong AI Skills
 
 Repository: https://github.com/tiangong-ai/skills
@@ -20,7 +39,7 @@ npm i skills -g
   ```
 - Install specific skills:
   ```bash
-  npx skills add https://github.com/tiangong-ai/skills --skill flow-hybrid-search --skill process-hybrid-search
+  npx skills add https://github.com/tiangong-ai/skills --skill sci-journals-hybrid-search --skill dify-knowledge-base-search
   ```
 
 ## Target agents and scope
@@ -55,10 +74,7 @@ npm i skills -g
   npx skills update
   ```
 
-## Environment variables
-- `sci-journals-hybrid-search`
-  - `TIANGONG_AI_APIKEY`: required. Used as `x-api-key` for the Supabase edge function.
-- `dify-knowledge-base-search`
-  - `DIFY_API_BASE_URL`: required. Example `https://api.dify.ai/v1`.
-  - `DIFY_DATASET_ID`: required. Dify dataset (knowledge base) ID.
-  - `DIFY_API_KEY`: required. Used as `Authorization: Bearer <DIFY_API_KEY>`.
+## Environment Variables
+
+Environment requirements live with each skill. Before using a skill that calls
+an external service, read that skill's `references/env.md` when present.
