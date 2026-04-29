@@ -10,6 +10,7 @@ whenToUpdate: "When skill creation workflow, validation commands, docpact config
 checkPaths:
   - AGENTS.md
   - .docpact/config.yaml
+  - .github/workflows/docpact.yml
   - _docs/**
 lastReviewedAt: 2026-04-29
 lastReviewedCommit: 7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1

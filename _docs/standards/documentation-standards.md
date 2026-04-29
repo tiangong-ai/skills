@@ -10,6 +10,7 @@ whenToUpdate: "When documentation layers, metadata rules, skill doc requirements
 checkPaths:
   - AGENTS.md
   - .docpact/config.yaml
+  - .github/workflows/docpact.yml
   - _docs/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-04-29
@@ -23,6 +24,8 @@ lastReviewedCommit: 7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1
 - `AGENTS.md`: mandatory repository entry guidance and skill creation rules.
 - `.docpact/config.yaml`: machine-readable governance, routing, coverage, and
   document inventory.
+- `.github/workflows/docpact.yml`: CI enforcement for config validation and PR
+  documentation lint.
 - `_docs/contracts/**`: current constraints and ownership rules.
 - `_docs/architecture/**`: current repository topology and integration facts.
 - `_docs/runbooks/**`: executable procedures.

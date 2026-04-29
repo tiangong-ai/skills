@@ -12,6 +12,7 @@ routing:
       paths:
         - AGENTS.md
         - .docpact/**
+        - .github/workflows/docpact.yml
         - _docs/**
         - README.md
         - README.zh-CN.md
@@ -32,6 +33,7 @@ coverage:
     - README.md
     - README.zh-CN.md
     - .docpact/**
+    - .github/workflows/docpact.yml
     - _docs/**
     - .claude-plugin/**
     - "*/SKILL.md"
@@ -81,6 +83,8 @@ rules:
         kind: agent-contract
       - path: .docpact/config.yaml
         kind: machine-contract
+      - path: .github/workflows/docpact.yml
+        kind: governance-ci
       - path: _docs/**
         kind: governed-docs
       - path: README.md
