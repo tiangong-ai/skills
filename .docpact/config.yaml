@@ -1,0 +1,157 @@
+version: 1
+layout: repo
+lastReviewedAt: "2026-04-29"
+lastReviewedCommit: "7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1"
+
+repo:
+  id: skills
+
+routing:
+  intents:
+    governance:
+      paths:
+        - AGENTS.md
+        - .docpact/**
+        - .github/workflows/docpact.yml
+        - _docs/**
+        - README.md
+        - README.zh-CN.md
+    skill:
+      paths:
+        - "*/SKILL.md"
+        - "*/agents/**"
+        - "*/scripts/**"
+        - "*/references/**"
+        - "*/assets/**"
+    marketplace:
+      paths:
+        - .claude-plugin/**
+
+coverage:
+  include:
+    - AGENTS.md
+    - README.md
+    - README.zh-CN.md
+    - .docpact/**
+    - .github/workflows/docpact.yml
+    - _docs/**
+    - .claude-plugin/**
+    - "*/SKILL.md"
+    - "*/agents/**"
+    - "*/scripts/**"
+    - "*/references/**"
+    - "*/assets/**"
+    - "*/README.md"
+    - "*/README.zh-CN.md"
+    - "*/QUICKSTART_CN.md"
+  exclude:
+    - .git/**
+    - .docpact/runs/**
+    - node_modules/**
+    - dist/**
+    - build/**
+    - coverage/**
+    - .DS_Store
+    - "**/.DS_Store"
+
+docInventory:
+  include:
+    - AGENTS.md
+    - README.md
+    - README.zh-CN.md
+    - .docpact/config.yaml
+    - _docs/**
+  exclude:
+    - .git/**
+    - .docpact/runs/**
+    - node_modules/**
+    - dist/**
+    - build/**
+    - coverage/**
+
+freshness:
+  warn_after_commits: 50
+  warn_after_days: 90
+  critical_after_days: 180
+
+rules:
+  - id: skills-governance
+    scope: repo
+    repo: skills
+    triggers:
+      - path: AGENTS.md
+        kind: agent-contract
+      - path: .docpact/config.yaml
+        kind: machine-contract
+      - path: .github/workflows/docpact.yml
+        kind: governance-ci
+      - path: _docs/**
+        kind: governed-docs
+      - path: README.md
+        kind: repo-entry
+      - path: README.zh-CN.md
+        kind: localized-repo-entry
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: .docpact/config.yaml
+        mode: review_or_update
+      - path: _docs/README.md
+        mode: review_or_update
+      - path: _docs/contracts/repo-contract.md
+        mode: review_or_update
+      - path: _docs/standards/documentation-standards.md
+        mode: review_or_update
+    reason: Repository entry guidance, governance config, and documentation standards must remain aligned.
+  - id: skills-skill-surface
+    scope: repo
+    repo: skills
+    triggers:
+      - path: "*/SKILL.md"
+        kind: skill-entry
+      - path: "*/agents/**"
+        kind: generated-agent-config
+      - path: "*/scripts/**"
+        kind: skill-script
+      - path: "*/references/**"
+        kind: skill-reference
+      - path: "*/assets/**"
+        kind: skill-asset
+      - path: "*/README.md"
+        kind: skill-readme
+      - path: "*/README.zh-CN.md"
+        kind: localized-skill-readme
+      - path: "*/QUICKSTART_CN.md"
+        kind: skill-quickstart
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: README.md
+        mode: review_or_update
+      - path: README.zh-CN.md
+        mode: review_or_update
+      - path: _docs/architecture/repo-architecture.md
+        mode: review_or_update
+      - path: _docs/contracts/repo-contract.md
+        mode: review_or_update
+      - path: _docs/runbooks/development.md
+        mode: review_or_update
+    reason: Skill definitions, generated agent configs, scripts, references, assets, and per-skill docs must follow the repository skill workflow.
+  - id: skills-marketplace
+    scope: repo
+    repo: skills
+    triggers:
+      - path: .claude-plugin/**
+        kind: marketplace-metadata
+    requiredDocs:
+      - path: README.md
+        mode: review_or_update
+      - path: README.zh-CN.md
+        mode: review_or_update
+      - path: _docs/architecture/repo-architecture.md
+        mode: review_or_update
+      - path: _docs/runbooks/development.md
+        mode: review_or_update
+      - path: _docs/contracts/repo-contract.md
+        mode: review_or_update
+    reason: Marketplace metadata affects skill discovery and installation and must stay aligned with repository docs.

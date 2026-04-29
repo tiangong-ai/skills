@@ -1,37 +1,64 @@
-# AGENTS.md
+---
+docType: agent-contract
+scope: repo
+status: current
+authoritative: true
+owner: skills
+language: zh-CN
+whenToUse: "Before editing the reusable skills repository."
+whenToUpdate: "When skill creation workflow, validation commands, docpact config, marketplace metadata, or repo documentation rules change."
+checkPaths:
+  - AGENTS.md
+  - .docpact/config.yaml
+  - .github/workflows/docpact.yml
+  - _docs/**
+lastReviewedAt: 2026-04-29
+lastReviewedCommit: 7bcc1db8d066fa546ffa6e5c9c4b0def46c81ca1
+---
 
-适用范围：本仓库根目录及全部子目录。
+# Tiangong AI Skills Agent Contract
 
-## 强制规则：使用 Codex 创建或更新 Skill
+本仓库负责可复用 agent skills。workspace 根仓负责子模块集成与交付治理；
+skill 内容、skill 规范、marketplace 元数据和本仓文档治理属于本仓库。
 
-1. 必须参考 Codex 内置 `skill-creator` 指南并按其要求执行。
-2. 默认参考路径：
-   - `/root/.codex/skills/.system/skill-creator/SKILL.md`
-   - 若运行环境不同，使用等价的 `$CODEX_HOME/skills/.system/skill-creator/SKILL.md`
-3. 当任务是“新建 skill / 修改 skill / 规范化 skill”时，优先触发并遵循 `skill-creator` 流程。
-4. 如本文件与 `skill-creator` 细则存在冲突，以 `skill-creator` 为准。
+## Required Load Order
 
-## Skill 实施流程（必须遵守）
+1. 阅读本文件。
+2. 阅读 `.docpact/config.yaml`。
+3. 对计划修改的路径，在本仓根目录运行
+   `docpact route --root . --paths <target-paths> --format json`。
+4. 阅读 `_docs/contracts/**`、`_docs/architecture/**`、`_docs/runbooks/**`
+   中与 route 结果相关的文档。
+5. 如果任务涉及新建或修改 skill，继续按下方现有 `skill-creator` 强制规则执行。
 
-1. 明确 skill 的触发场景与典型用例。
-2. 规划可复用资源（`scripts/`、`references/`、`assets/`）。
-3. 新 skill 优先使用 `init_skill.py` 初始化目录与模板。
-4. 按规范填写/更新 `SKILL.md` 与资源文件。
-5. 生成或更新 `agents/openai.yaml`（使用官方脚本与 `--interface` 参数）。
-6. 运行 `quick_validate.py <skill-path>`，修复后直到通过。
+## Source Of Truth
 
-## Skill 文件规范
+- `.docpact/config.yaml`：机器可读治理规则、route alias、coverage、
+  doc inventory 与 freshness 策略。
+- `README.md` / `README.zh-CN.md`：安装、更新、环境变量和使用说明。
+- `_docs/contracts/repo-contract.md`：本仓边界、skill 规范与完成条件。
+- `_docs/architecture/repo-architecture.md`：skill 仓库结构和分发拓扑。
+- `_docs/runbooks/development.md`：创建、校验、生成 agent 配置和交付流程。
 
-1. Skill 目录名仅使用小写字母、数字、连字符（hyphen-case），且应小于 64 字符。
-2. 每个 skill 至少包含 `SKILL.md`。
-3. `SKILL.md` 的 YAML frontmatter 仅允许：
-   - `name`
-   - `description`
-4. `description` 必须写清楚“做什么 + 何时使用（触发条件）”。
-5. 仅在确有必要时创建 `scripts/`、`references/`、`assets/`，避免冗余文件。
+## Hard Boundaries
 
-## 交付前检查
+- 不要把 workspace 子模块策略、分支策略或集成完成规则复制进本仓。
+- 不要绕过 `skill-creator` 规范手写不合规 skill。
+- 不要提交真实 API key、账号密码或用户私有数据到 skill 资源中。
+- 修改 skill 触发条件、脚本、引用资料、agent 配置或 marketplace 元数据时，
+  同步检查本仓 docs 和 docpact route 结果。
 
-1. 校验通过：`quick_validate.py` 返回通过结果。
-2. 若新增脚本：至少运行一次代表性测试，确认可执行与输出合理。
-3. 变更说明中明确列出：新增/修改的 skill 文件与校验结果。
+## Completion Criteria
+
+- 修改前已查看相关 `docpact route` 输出。
+- route 命中的文档已 reviewed 或 updated。
+- 治理变更后 `docpact validate-config --root . --strict` 通过。
+- skill 变更按 `skill-creator` 流程运行对应校验。
+
+## Skill-Creator Workflow
+
+For new or modified skills, load
+`$CODEX_HOME/skills/.system/skill-creator/SKILL.md`, or
+`~/.codex/skills/.system/skill-creator/SKILL.md` when `CODEX_HOME` is unset.
+Use that skill's scripts by path: `scripts/init_skill.py`,
+`scripts/generate_openai_yaml.py`, and `scripts/quick_validate.py <skill-path>`.
