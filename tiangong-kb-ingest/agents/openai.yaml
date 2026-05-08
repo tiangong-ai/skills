@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Ingest"
+  short_description: "Upload files to Tiangong KB with an API key"
+  default_prompt: "Use $tiangong-kb-ingest to upload local files into a Tiangong KB collection with a bearer API key and poll ingest status."
