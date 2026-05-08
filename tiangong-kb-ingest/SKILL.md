@@ -11,9 +11,9 @@ Use the Tiangong AI CLI for execution. The skill only decides when to use the CL
 
 CLI-owned behavior:
 
-- `tiangong kb ingest upload`
-- `tiangong kb ingest status`
-- `tiangong kb collections list`
+- `tiangong-ai kb ingest upload`
+- `tiangong-ai kb ingest status`
+- `tiangong-ai kb collections list`
 - manifest/checkpoint
 - concurrency/retry
 - JSON output

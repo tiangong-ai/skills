@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const skillDir = resolve(scriptDir, "..");
-const workspaceCli = resolve(skillDir, "..", "..", "tiangong-ai-cli", "bin", "tiangong.js");
+const workspaceCli = resolve(skillDir, "..", "..", "tiangong-ai-cli", "bin", "tiangong-ai.js");
 
 function isExecutable(path) {
   try {
@@ -59,12 +59,12 @@ if (isExecutable(workspaceCli)) {
   run(process.execPath, [workspaceCli, ...normalizedArgs]);
 }
 
-run("tiangong", normalizedArgs);
+run("tiangong-ai", normalizedArgs);
 
 process.stderr.write(
   [
     "Unable to execute the Tiangong AI CLI.",
-    "Install @tiangong-ai/cli, add tiangong to PATH, or set TIANGONG_AI_CLI_BIN.",
+    "Install @tiangong-ai/cli, add tiangong-ai to PATH, or set TIANGONG_AI_CLI_BIN.",
     "",
   ].join("\n"),
 );

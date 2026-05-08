@@ -29,7 +29,7 @@ TIANGONG_KB_UPLOAD_RETRIES=3
 TIANGONG_KB_POLL_INTERVAL=2
 TIANGONG_KB_TIMEOUT=300
 TIANGONG_KB_WAIT_TIMEOUT=300
-TIANGONG_AI_CLI_BIN=/absolute/path/to/tiangong
+TIANGONG_AI_CLI_BIN=/absolute/path/to/tiangong-ai
 ```
 
 `TIANGONG_KB_API_BASE_URL` is optional because the CLI defaults to `https://thuenv.tiangong.world:7300`. Set it only for local, staging, or another compatible deployment.
@@ -38,7 +38,7 @@ TIANGONG_AI_CLI_BIN=/absolute/path/to/tiangong
 
 `TIANGONG_KB_API_KEY` is accepted as a fallback alias for `TIANGONG_AI_API_KEY`.
 
-`TIANGONG_AI_CLI_BIN` is optional. Set it only when `tiangong` is not on PATH
+`TIANGONG_AI_CLI_BIN` is optional. Set it only when `tiangong-ai` is not on PATH
 and the skill is not running inside the workspace checkout that contains
 `tiangong-ai-cli`.
 
