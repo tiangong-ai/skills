@@ -110,6 +110,11 @@ def env_required(name: str) -> str:
     return value
 
 
+def env_optional(name: str) -> str | None:
+    value = os.environ.get(name, "").strip()
+    return value or None
+
+
 def validate_file_type(file_path: Path) -> None:
     suffix = file_path.suffix.lower()
     if not suffix:
@@ -198,14 +203,19 @@ def request_fulltext(
     api_url: str,
     file_path: Path,
     token: str,
-    provider: str,
-    model: str,
+    provider: str | None,
+    model: str | None,
     timeout: int,
     insecure: bool,
 ) -> str:
     url = with_return_txt_true(api_url)
+    fields: dict[str, str] = {}
+    if provider:
+        fields["provider"] = provider
+    if model:
+        fields["model"] = model
     body, boundary = build_multipart_body(
-        fields={"provider": provider, "model": model},
+        fields=fields,
         file_field="file",
         file_path=file_path,
     )
@@ -274,8 +284,8 @@ def main() -> int:
 
     try:
         token = env_required(ENV_AUTH_TOKEN)
-        provider = env_required(ENV_PROVIDER)
-        model = env_required(ENV_MODEL)
+        provider = env_optional(ENV_PROVIDER)
+        model = env_optional(ENV_MODEL)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2

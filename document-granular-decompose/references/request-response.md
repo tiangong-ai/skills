@@ -9,8 +9,8 @@ Request:
 - Header: `Authorization: Bearer $UNSTRUCTURED_AUTH_TOKEN`
 - Multipart form fields:
   - `file` (required)
-  - `provider` (from `UNSTRUCTURED_PROVIDER`)
-  - `model` (from `UNSTRUCTURED_MODEL`)
+  - `provider` (optional, sent only when `UNSTRUCTURED_PROVIDER` is set)
+  - `model` (optional, sent only when `UNSTRUCTURED_MODEL` is set)
 - Supported file types only:
   - `.bmp, .doc, .docm, .docx, .dot, .dotx, .gif, .jp2, .jpeg, .jpg, .markdown, .md, .odp, .odt, .pdf, .png, .pot, .potx, .pps, .ppsx, .ppt, .pptm, .pptx, .tiff, .webp, .xls, .xlsm, .xlsx, .xlt, .xltx`
 - Supported office formats:

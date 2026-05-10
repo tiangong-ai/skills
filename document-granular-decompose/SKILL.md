@@ -1,6 +1,6 @@
 ---
 name: document-granular-decompose
-description: Upload local documents to TianGong AI Unstructure `/mineru_with_images` API for fine-grained parsing and return only plain fulltext content. Use when a task needs document fulltext extraction with `return_txt=true`, strict file-type allowlist validation, and API base URL/provider/model/auth token from environment variables.
+description: Upload local documents to TianGong AI Unstructure `/mineru_with_images` API for fine-grained parsing and return only plain fulltext content. Use when a task needs document fulltext extraction with `return_txt=true`, strict file-type allowlist validation, API base URL/auth token from environment variables, and optional provider/model overrides.
 ---
 
 # Document Granular Decompose
@@ -11,8 +11,8 @@ description: Upload local documents to TianGong AI Unstructure `/mineru_with_ima
 - Read environment variables for endpoint, request identity, and model routing:
   - `UNSTRUCTURED_API_BASE_URL` (example: `https://your-unstructured-host:7770`)
   - `UNSTRUCTURED_AUTH_TOKEN`
-  - `UNSTRUCTURED_PROVIDER`
-  - `UNSTRUCTURED_MODEL`
+  - `UNSTRUCTURED_PROVIDER` (optional)
+  - `UNSTRUCTURED_MODEL` (optional)
 - Return only plain fulltext (prefer API `txt`; fallback to joined `result[].text`).
 
 ## Triggering Conditions
@@ -25,9 +25,10 @@ description: Upload local documents to TianGong AI Unstructure `/mineru_with_ima
 
 ```bash
 export UNSTRUCTURED_AUTH_TOKEN="your-fastapi-bearer-token"
+export UNSTRUCTURED_API_BASE_URL="https://your-unstructured-host:7770"
+# Optional routing overrides. Omit them to let the server choose its defaults.
 export UNSTRUCTURED_PROVIDER="vllm"
 export UNSTRUCTURED_MODEL="Qwen/Qwen3.5-122B-A10B-FP8"
-export UNSTRUCTURED_API_BASE_URL="https://your-unstructured-host:7770"
 ```
 
 2. Run extraction and print fulltext to stdout.
@@ -55,8 +56,8 @@ python3 scripts/mineru_fulltext_extract.py \
   - Force `return_txt=true` (always set by script).
 - Form fields sent:
   - `file` (required)
-  - `provider` (from `UNSTRUCTURED_PROVIDER`)
-  - `model` (from `UNSTRUCTURED_MODEL`)
+  - `provider` (optional, from `UNSTRUCTURED_PROVIDER` when set)
+  - `model` (optional, from `UNSTRUCTURED_MODEL` when set)
 - Header sent:
   - `Authorization: Bearer $UNSTRUCTURED_AUTH_TOKEN`
 
@@ -75,7 +76,8 @@ python3 scripts/mineru_fulltext_extract.py \
 - Do not output chunk metadata/json unless the user explicitly requests debugging.
 
 ## Error Handling
-- Missing env vars: fail fast with actionable message.
+- Missing required env vars (`UNSTRUCTURED_API_BASE_URL`, `UNSTRUCTURED_AUTH_TOKEN`): fail fast with actionable message.
+- Missing `UNSTRUCTURED_PROVIDER` or `UNSTRUCTURED_MODEL`: omit the form field and let the service choose its default.
 - HTTP 401/403: report token/auth issue.
 - HTTP 4xx/5xx: print status and API error body if available.
 - Missing text in response: fail with explicit schema mismatch error.
