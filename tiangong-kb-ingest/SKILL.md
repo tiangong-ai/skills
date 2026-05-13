@@ -34,7 +34,7 @@ Skill-owned behavior:
    - use `--collection-key`, `--collection-path`, or `--collection-id` only when the user provides an exact selector
 3. For a first check, run `node scripts/run_kb_ingest.mjs collections list --json`.
 4. Ingest with `node scripts/run_kb_ingest.mjs bulk <path> --json`.
-5. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; the wrapper defaults `--max-polls` to `120` unless the user passes a value.
+5. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
 6. If the user asks to verify later state, use `node scripts/run_kb_ingest.mjs status <document-id-or-job-id> --json`.
 7. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
 
