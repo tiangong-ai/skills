@@ -36,8 +36,26 @@ const subcommand = args[0] ?? "";
 const nested = args[1] ?? "";
 let normalizedArgs;
 
+function hasFlag(items, name) {
+  return items.some((item) => item === name || item.startsWith(`${name}=`));
+}
+
+function withDefaultMaxPolls(items) {
+  if (hasFlag(items, "--max-polls")) return items;
+  return [...items, "--max-polls", process.env.TIANGONG_KB_BULK_MAX_POLLS?.trim() || "120"];
+}
+
+function withDefaultBulkRunMaxPolls(items) {
+  if (["scan", "preflight", "dry-run", "resume", "export"].includes(items[0] ?? "")) {
+    return items;
+  }
+  return withDefaultMaxPolls(items);
+}
+
 if (subcommand === "upload") {
-  normalizedArgs = ["kb", "ingest", "upload", ...args.slice(1)];
+  normalizedArgs = ["kb", "ingest", "bulk", ...withDefaultBulkRunMaxPolls(args.slice(1))];
+} else if (subcommand === "bulk") {
+  normalizedArgs = ["kb", "ingest", "bulk", ...withDefaultBulkRunMaxPolls(args.slice(1))];
 } else if (subcommand === "status") {
   normalizedArgs = ["kb", "ingest", "status", ...args.slice(1)];
 } else if (subcommand === "collections" && nested === "list") {

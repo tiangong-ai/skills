@@ -11,10 +11,10 @@ Use the Tiangong AI CLI for execution. The skill only decides when to use the CL
 
 CLI-owned behavior:
 
-- `tiangong-ai kb ingest upload`
+- `tiangong-ai kb ingest bulk`
 - `tiangong-ai kb ingest status`
 - `tiangong-ai kb collections list`
-- manifest/checkpoint
+- SQLite checkpoint and resume
 - concurrency/retry
 - JSON output
 - API key and env handling
@@ -33,9 +33,9 @@ Skill-owned behavior:
    - prefer `--collection-name` or `TIANGONG_KB_DEFAULT_COLLECTION_NAME` when the user gives a unique display name
    - use `--collection-key`, `--collection-path`, or `--collection-id` only when the user provides an exact selector
 3. For a first check, run `node scripts/run_kb_ingest.mjs collections list --json`.
-4. Upload with `node scripts/run_kb_ingest.mjs upload <path> --json`.
-5. For folders or long runs, add `--recursive`, `--concurrency`, `--retries`, and optionally `--manifest`.
-6. If the user asks to wait or verify later state, use `--wait` on upload or `node scripts/run_kb_ingest.mjs status <document-id> --json`.
+4. Ingest with `node scripts/run_kb_ingest.mjs bulk <path> --json`.
+5. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; the wrapper defaults `--max-polls` to `120` unless the user passes a value.
+6. If the user asks to verify later state, use `node scripts/run_kb_ingest.mjs status <document-id-or-job-id> --json`.
 7. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
 
 ## Examples
@@ -43,13 +43,13 @@ Skill-owned behavior:
 Upload one file:
 
 ```bash
-node scripts/run_kb_ingest.mjs upload /path/to/document.pdf --json
+node scripts/run_kb_ingest.mjs bulk /path/to/document.pdf --json
 ```
 
-Upload a folder recursively:
+Upload a folder:
 
 ```bash
-node scripts/run_kb_ingest.mjs upload /path/to/folder --recursive --concurrency 3 --retries 3 --json
+node scripts/run_kb_ingest.mjs bulk /path/to/folder --upload-concurrency 3 --retries 3 --json
 ```
 
 List uploadable collections:
@@ -70,7 +70,7 @@ node scripts/run_kb_ingest.mjs status <document-id> --json
 - `duplicate: false` or missing: do not claim dedupe was checked unless the backend response says so.
 - `documentId`: use this id for follow-up status checks.
 - `status`: explain it as backend state. Terminal states are success/failure/deleted according to the API response; nonterminal states mean processing is still underway.
-- `jobId`, `requestId`, `idempotencyKey`, `rawUri`: include them when present because they help support/debugging.
+- `jobId`, `statePath`, `requestId`, `idempotencyKey`, `rawUri`: include them when present because they help support/debugging.
 
 ## Safety Boundary
 
