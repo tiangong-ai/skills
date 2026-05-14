@@ -337,21 +337,30 @@ function buildMetadataMap(schemaSnapshot, scanSummary) {
   }
 
   if (hasField(fields, "source_unit")) {
-    const name = collectionName(schemaSnapshot);
-    domainRules.push({
-      name: "source_unit_from_path",
-      match: { glob: "**/*" },
-      fields: {
-        source_unit: name ? { const: name } : { source: "top_dir" },
+    domainRules.push(
+      {
+        name: "source_unit_thu_humanities_links",
+        match: { path_prefix: "清华人文大展/链接/" },
+        fields: { source_unit: { source: "path_segment", index: 2 } },
       },
-    });
+      {
+        name: "source_unit_links",
+        match: { path_prefix: "链接/" },
+        fields: { source_unit: { source: "path_segment", index: 1 } },
+      },
+      {
+        name: "source_unit_from_top_dir",
+        match: { glob: "**/*" },
+        fields: { source_unit: { source: "top_dir" } },
+      },
+    );
   }
 
-  if (hasField(fields, "source_section")) {
+  if (hasField(fields, "tags")) {
     domainRules.push({
-      name: "source_section_from_parent_dir",
+      name: "tags_thu_humanities",
       match: { glob: "**/*" },
-      fields: { source_section: { source: "parent_dir" } },
+      fields: { tags: { const: ["thu_humanities"] } },
     });
   }
 
@@ -378,11 +387,6 @@ function buildMetadataMap(schemaSnapshot, scanSummary) {
         fields: { material_type: { const: "announcement" } },
       },
       {
-        name: "material_type_event",
-        match: { regex: "(活动|讲座|event)" },
-        fields: { material_type: { const: "event" } },
-      },
-      {
         name: "material_type_report",
         match: { regex: "(报告|report)" },
         fields: { material_type: { const: "report" } },
@@ -393,14 +397,14 @@ function buildMetadataMap(schemaSnapshot, scanSummary) {
         fields: { material_type: { const: "periodical" } },
       },
       {
-        name: "material_type_image_asset",
+        name: "material_type_image_attachment",
         match: { ext: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff"] },
-        fields: { material_type: { const: "image_asset" } },
+        fields: { material_type: { const: "attachment" } },
       },
       {
         name: "material_type_web_article",
         match: { ext: [".html", ".htm"] },
-        fields: { material_type: { const: "web_article" } },
+        fields: { material_type: { const: "web_page" } },
       },
       {
         name: "material_type_book_pdf_epub",
@@ -428,6 +432,20 @@ function buildMetadataMap(schemaSnapshot, scanSummary) {
         published_date: {
           source: "relative_path",
           regex: "(\\d{4}-\\d{2}-\\d{2})",
+        },
+      },
+    });
+  }
+
+  if (hasField(fields, "year")) {
+    detectorRules.push({
+      name: "year_path_detector",
+      match: { regex: "(?:18|19|20)\\d{2}" },
+      fields: {
+        year: {
+          source: "relative_path",
+          regex: "((?:18|19|20)\\d{2})",
+          type: "number",
         },
       },
     });
