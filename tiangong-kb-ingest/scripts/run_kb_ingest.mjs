@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,45 @@ import { spawnSync } from "node:child_process";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const skillDir = resolve(scriptDir, "..");
 const workspaceCli = resolve(skillDir, "..", "..", "tiangong-ai-cli", "bin", "tiangong-ai.js");
+const VALUE_FLAGS = new Set([
+  "--api-key",
+  "--api-base-url",
+  "--api-path-prefix",
+  "--timeout",
+  "--collection-name",
+  "--collection-key",
+  "--collection-path",
+  "--collection-id",
+  "--state",
+  "--metadata-map",
+  "--metadata-map-output",
+  "--schema-file",
+  "--window-size",
+  "--top-up-max",
+  "--upload-concurrency",
+  "--retries",
+  "--poll-interval",
+  "--max-polls",
+  "--scan-budget",
+  "--min-samples-per-pattern",
+  "--max-patterns",
+]);
+const SELECTOR_AND_CONFIG_FLAGS = new Set([
+  "--api-key",
+  "--api-base-url",
+  "--api-path-prefix",
+  "--timeout",
+  "--collection-name",
+  "--collection-key",
+  "--collection-path",
+  "--collection-id",
+  "--schema-file",
+]);
+const SKILL_ONLY_FLAGS = new Set([
+  "--metadata-map-output",
+  "--no-metadata-map-autogen",
+  "--metadata-map-autogen",
+]);
 
 function isExecutable(path) {
   try {
@@ -17,57 +56,569 @@ function isExecutable(path) {
   }
 }
 
-function run(command, args) {
+function cliInvocation() {
+  const explicitCli = process.env.TIANGONG_AI_CLI_BIN?.trim();
+  if (explicitCli) {
+    return explicitCli.endsWith(".js")
+      ? { command: process.execPath, prefix: [explicitCli] }
+      : { command: explicitCli, prefix: [] };
+  }
+  if (isExecutable(workspaceCli)) {
+    return { command: process.execPath, prefix: [workspaceCli] };
+  }
+  return { command: "tiangong-ai", prefix: [] };
+}
+
+function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    stdio: "inherit",
+    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     env: process.env,
     shell: false,
+    encoding: options.capture ? "utf8" : undefined,
   });
 
   if (result.error) {
-    return false;
+    if (options.capture) {
+      throw result.error;
+    }
+    return { ok: false, status: 127 };
   }
-  process.exit(result.status ?? 1);
+  return {
+    ok: (result.status ?? 1) === 0,
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
 }
 
-const explicitCli = process.env.TIANGONG_AI_CLI_BIN?.trim();
+function runCli(args, options = {}) {
+  const invocation = cliInvocation();
+  return run(invocation.command, [...invocation.prefix, ...args], options);
+}
+
+function execCliJson(args) {
+  const result = runCli(args, { capture: true });
+  if (!result.ok) {
+    process.stderr.write(result.stderr || `Command failed: tiangong-ai ${args.join(" ")}\n`);
+    process.exit(result.status);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    process.stderr.write(
+      [
+        `Expected JSON output from: tiangong-ai ${args.join(" ")}`,
+        error instanceof Error ? error.message : String(error),
+        result.stdout.slice(0, 1000),
+        "",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+}
+
+function exitWithCli(args) {
+  const result = runCli(args);
+  if (!result.ok && result.status === 127) {
+    process.stderr.write(
+      [
+        "Unable to execute the Tiangong AI CLI.",
+        "Install @tiangong-ai/cli, add tiangong-ai to PATH, or set TIANGONG_AI_CLI_BIN.",
+        "",
+      ].join("\n"),
+    );
+  }
+  process.exit(result.status);
+}
+
+function parseItems(items) {
+  const flags = new Map();
+  const positionals = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item) continue;
+    if (!item.startsWith("--")) {
+      positionals.push(item);
+      continue;
+    }
+    const equalsIndex = item.indexOf("=");
+    const [name, inlineValue] =
+      equalsIndex >= 0
+        ? [item.slice(0, equalsIndex), item.slice(equalsIndex + 1)]
+        : [item, undefined];
+    if (inlineValue !== undefined) {
+      flags.set(name, inlineValue);
+      continue;
+    }
+    if (VALUE_FLAGS.has(name) && items[index + 1] && !items[index + 1].startsWith("--")) {
+      flags.set(name, items[index + 1]);
+      index += 1;
+      continue;
+    }
+    flags.set(name, true);
+  }
+
+  return { flags, positionals };
+}
+
+function stripSkillOnlyFlags(items) {
+  const output = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const name = item?.startsWith("--") ? item.split("=", 1)[0] : "";
+    if (SKILL_ONLY_FLAGS.has(name)) {
+      if (!item.includes("=") && VALUE_FLAGS.has(name) && items[index + 1]) index += 1;
+      continue;
+    }
+    output.push(item);
+  }
+  return output;
+}
+
+function flagArgs(items, allowed) {
+  const output = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item?.startsWith("--")) continue;
+    const name = item.split("=", 1)[0];
+    if (!allowed.has(name)) {
+      if (!item.includes("=") && VALUE_FLAGS.has(name) && items[index + 1]) index += 1;
+      continue;
+    }
+    output.push(item);
+    if (!item.includes("=") && VALUE_FLAGS.has(name) && items[index + 1]) {
+      output.push(items[index + 1]);
+      index += 1;
+    }
+  }
+  return output;
+}
+
+function hasFlag(items, name) {
+  return items.some((item) => item === name || item.startsWith(`${name}=`));
+}
+
+function getFlagValue(items, name) {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (item === name) return items[index + 1];
+    if (item?.startsWith(`${name}=`)) return item.slice(name.length + 1);
+  }
+  return undefined;
+}
+
+function bulkRunContext(items) {
+  const first = items[0] ?? "";
+  if (["scan", "preflight", "dry-run", "resume", "export", "metadata-dry-run"].includes(first)) {
+    return undefined;
+  }
+  const parsed = parseItems(items);
+  const positionals = parsed.positionals[0] === "run" ? parsed.positionals.slice(1) : parsed.positionals;
+  const rootPath = positionals[0];
+  if (!rootPath) return undefined;
+  return { rootPath, parsed };
+}
+
+function responseData(payload) {
+  return isObject(payload?.data) ? payload.data : payload;
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function metadataSchemaFields(schemaSnapshot) {
+  const data = responseData(schemaSnapshot);
+  const collection = isObject(data) ? data.collection : undefined;
+  const schema =
+    (isObject(collection) ? collection.metadataSchema : undefined) ??
+    (isObject(data) ? data.metadataSchema : undefined) ??
+    (isObject(schemaSnapshot) ? schemaSnapshot.metadataSchema : undefined) ??
+    schemaSnapshot;
+  return isObject(schema) && Array.isArray(schema.fields) ? schema.fields.filter(isObject) : [];
+}
+
+function collectionName(schemaSnapshot) {
+  const data = responseData(schemaSnapshot);
+  const collection = isObject(data) ? data.collection : undefined;
+  return typeof collection?.name === "string" && collection.name ? collection.name : undefined;
+}
+
+function safeRuleName(value) {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "rule";
+}
+
+function enumValues(field) {
+  return Array.isArray(field.values) ? field.values.filter((value) => typeof value === "string") : [];
+}
+
+function requiredDefault(field) {
+  if (field.required !== true) return undefined;
+  const values = enumValues(field);
+  if (values.includes("other")) return "other";
+  if (values.length > 0) return values[0];
+  if (field.type === "number") return 0;
+  if (field.type === "boolean") return false;
+  if (field.type === "date") return "1970-01-01";
+  return "unknown";
+}
+
+function topLevelDirs(scanSummary) {
+  const dirs = isObject(scanSummary?.topLevelDirs) ? scanSummary.topLevelDirs : {};
+  return Object.entries(dirs)
+    .filter(([name]) => name && name !== "(root)")
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .map(([name]) => name);
+}
+
+function sourceGroupForTopDir(name) {
+  const lower = name.toLowerCase();
+  if (/网页|网站|web|html|wechat|微信/.test(lower)) return "web";
+  if (/样本|sample|demo|fixture/.test(lower)) return "sample";
+  if (/备份|backup|archive/.test(lower)) return "backup";
+  if (/其他|other|misc/.test(lower)) return "other";
+  return "document";
+}
+
+function hasField(fields, key) {
+  return fields.some((field) => field.key === key);
+}
+
+function buildMetadataMap(schemaSnapshot, scanSummary) {
+  const fields = metadataSchemaFields(schemaSnapshot);
+  const defaults = { source: "local_bulk_upload" };
+  for (const field of fields) {
+    const value = requiredDefault(field);
+    if (value !== undefined && typeof field.key === "string") defaults[field.key] = value;
+  }
+
+  const layers = [
+    {
+      name: "base",
+      merge: "all",
+      rules: [
+        {
+          name: "filesystem",
+          match: { glob: "**/*" },
+          fields: {
+            relative_path: { source: "relative_path" },
+            filename: { source: "filename" },
+            filename_stem: { source: "filename_stem" },
+            ext: { source: "ext" },
+            path_depth: { source: "path_depth" },
+            top_dir: { source: "top_dir" },
+            parent_dir: { source: "parent_dir" },
+          },
+        },
+      ],
+    },
+  ];
+
+  const domainRules = [];
+  const dirs = topLevelDirs(scanSummary);
+  if (hasField(fields, "source_group")) {
+    for (const [index, dir] of dirs.entries()) {
+      domainRules.push({
+        name: `source_group_${safeRuleName(dir)}_${index + 1}`,
+        match: { path_prefix: `${dir}/` },
+        fields: { source_group: { const: sourceGroupForTopDir(dir) } },
+      });
+    }
+    domainRules.push({
+      name: "source_group_fallback",
+      match: { glob: "**/*" },
+      fields: { source_group: { const: "document" } },
+    });
+  }
+
+  if (hasField(fields, "source_unit")) {
+    const name = collectionName(schemaSnapshot);
+    domainRules.push({
+      name: "source_unit_from_path",
+      match: { glob: "**/*" },
+      fields: {
+        source_unit: name ? { const: name } : { source: "top_dir" },
+      },
+    });
+  }
+
+  if (hasField(fields, "source_section")) {
+    domainRules.push({
+      name: "source_section_from_parent_dir",
+      match: { glob: "**/*" },
+      fields: { source_section: { source: "parent_dir" } },
+    });
+  }
+
+  if (domainRules.length > 0) {
+    layers.push({ name: "domain", merge: "all", rules: domainRules });
+  }
+
+  const detectorRules = [];
+  if (hasField(fields, "material_type")) {
+    detectorRules.push(
+      {
+        name: "material_type_wechat_article",
+        match: { regex: "(微信|wechat)" },
+        fields: { material_type: { const: "wechat_article" } },
+      },
+      {
+        name: "material_type_news",
+        match: { regex: "(新闻|news)" },
+        fields: { material_type: { const: "news" } },
+      },
+      {
+        name: "material_type_announcement",
+        match: { regex: "(通知|公告|announcement)" },
+        fields: { material_type: { const: "announcement" } },
+      },
+      {
+        name: "material_type_event",
+        match: { regex: "(活动|讲座|event)" },
+        fields: { material_type: { const: "event" } },
+      },
+      {
+        name: "material_type_report",
+        match: { regex: "(报告|report)" },
+        fields: { material_type: { const: "report" } },
+      },
+      {
+        name: "material_type_periodical",
+        match: { regex: "(期刊|journal|periodical)" },
+        fields: { material_type: { const: "periodical" } },
+      },
+      {
+        name: "material_type_image_asset",
+        match: { ext: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff"] },
+        fields: { material_type: { const: "image_asset" } },
+      },
+      {
+        name: "material_type_web_article",
+        match: { ext: [".html", ".htm"] },
+        fields: { material_type: { const: "web_article" } },
+      },
+      {
+        name: "material_type_book_pdf_epub",
+        match: { ext: [".pdf", ".epub", ".mobi"] },
+        fields: { material_type: { const: "book" } },
+      },
+      {
+        name: "material_type_attachment_office",
+        match: { ext: [".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".md"] },
+        fields: { material_type: { const: "attachment" } },
+      },
+      {
+        name: "material_type_fallback",
+        match: { glob: "**/*" },
+        fields: { material_type: { const: "other" } },
+      },
+    );
+  }
+
+  if (hasField(fields, "published_date")) {
+    detectorRules.push({
+      name: "published_date_iso_path_detector",
+      match: { regex: "\\d{4}-\\d{2}-\\d{2}" },
+      fields: {
+        published_date: {
+          source: "relative_path",
+          regex: "(\\d{4}-\\d{2}-\\d{2})",
+        },
+      },
+    });
+  }
+
+  if (detectorRules.length > 0) {
+    layers.push({ name: "detectors", merge: "all", rules: detectorRules });
+  }
+
+  return { version: 1, rule_mode: "layered", defaults, layers };
+}
+
+function yamlScalar(value) {
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null) return "null";
+  return JSON.stringify(String(value));
+}
+
+function toYaml(value, indent = 0) {
+  const space = " ".repeat(indent);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (isObject(item)) {
+          const entries = Object.entries(item);
+          if (entries.length === 0) return `${space}- {}`;
+          const [[firstKey, firstValue], ...rest] = entries;
+          const firstLine =
+            isObject(firstValue) || Array.isArray(firstValue)
+              ? `${space}- ${firstKey}:\n${toYaml(firstValue, indent + 4)}`
+              : `${space}- ${firstKey}: ${yamlScalar(firstValue)}`;
+          const restLines = rest
+            .map(([key, restValue]) => {
+              if (isObject(restValue) || Array.isArray(restValue)) {
+                return `${" ".repeat(indent + 2)}${key}:\n${toYaml(restValue, indent + 4)}`;
+              }
+              return `${" ".repeat(indent + 2)}${key}: ${yamlScalar(restValue)}`;
+            })
+            .join("\n");
+          return restLines ? `${firstLine}\n${restLines}` : firstLine;
+        }
+        if (isObject(item) || Array.isArray(item)) {
+          const rendered = toYaml(item, indent + 2);
+          return `${space}-\n${rendered}`;
+        }
+        return `${space}- ${yamlScalar(item)}`;
+      })
+      .join("\n");
+  }
+  if (isObject(value)) {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        if (isObject(item) || Array.isArray(item)) {
+          return `${space}${key}:\n${toYaml(item, indent + 2)}`;
+        }
+        return `${space}${key}: ${yamlScalar(item)}`;
+      })
+      .join("\n");
+  }
+  return `${space}${yamlScalar(value)}`;
+}
+
+function dryRunProblems(summary) {
+  const missing = Object.values(summary?.requiredMissing ?? {}).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  const typeErrors = Object.values(summary?.typeErrors ?? {}).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  const unknown = Object.values(summary?.unknownRequired ?? {}).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  return missing + typeErrors + unknown;
+}
+
+function writeMetadataMap(path, metadataMap) {
+  writeFileSync(
+    path,
+    [
+      "# Generated by tiangong-kb-ingest skill.",
+      "# Review and edit when collection-specific semantics require higher precision.",
+      toYaml(metadataMap),
+      "",
+    ].join("\n"),
+  );
+}
+
+function repairMetadataMap(metadataMap, summary, schemaSnapshot) {
+  const fieldsByKey = new Map(
+    metadataSchemaFields(schemaSnapshot)
+      .filter((field) => typeof field.key === "string")
+      .map((field) => [field.key, field]),
+  );
+  let changed = false;
+  for (const key of Object.keys(summary?.requiredMissing ?? {})) {
+    if (metadataMap.defaults?.[key] !== undefined) continue;
+    const fallback = requiredDefault(fieldsByKey.get(key) ?? { key, required: true });
+    metadataMap.defaults = { ...(metadataMap.defaults ?? {}), [key]: fallback };
+    changed = true;
+  }
+  for (const key of Object.keys(summary?.unknownRequired ?? {})) {
+    if (metadataMap.defaults?.[key] !== undefined) continue;
+    metadataMap.defaults = { ...(metadataMap.defaults ?? {}), [key]: "unknown" };
+    changed = true;
+  }
+  return changed;
+}
+
+function metadataMapPath(items) {
+  return getFlagValue(items, "--metadata-map-output") ?? "metadata-map.yaml";
+}
+
+function ensureMetadataMapForBulk(items) {
+  if (hasFlag(items, "--metadata-map") || hasFlag(items, "--no-metadata-map-autogen")) {
+    return items;
+  }
+  const context = bulkRunContext(items);
+  if (!context) return items;
+
+  const outputPath = resolve(metadataMapPath(items));
+  const cleanItems = stripSkillOnlyFlags(items);
+  if (existsSync(outputPath) && !hasFlag(items, "--metadata-map-autogen")) {
+    process.stderr.write(`Using existing metadata map: ${outputPath}\n`);
+    return [...cleanItems, "--metadata-map", outputPath];
+  }
+
+  const rootPath = context.rootPath;
+  const selectorArgs = flagArgs(items, SELECTOR_AND_CONFIG_FLAGS);
+  const schemaFile = getFlagValue(items, "--schema-file");
+  const schemaSnapshot = schemaFile
+    ? JSON.parse(readFileSync(resolve(schemaFile), "utf8"))
+    : execCliJson(["kb", "collections", "schema", ...selectorArgs, "--json"]);
+  const scanSummary = execCliJson(["kb", "ingest", "bulk", "scan", rootPath, "--json"]);
+  const metadataMap = buildMetadataMap(schemaSnapshot, scanSummary);
+
+  writeMetadataMap(outputPath, metadataMap);
+
+  let lastSummary;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    lastSummary = execCliJson([
+      "kb",
+      "ingest",
+      "metadata",
+      "dry-run",
+      rootPath,
+      ...selectorArgs,
+      "--metadata-map",
+      outputPath,
+      "--json",
+    ]);
+    if (dryRunProblems(lastSummary) === 0) break;
+    if (attempt < 3 && repairMetadataMap(metadataMap, lastSummary, schemaSnapshot)) {
+      writeMetadataMap(outputPath, metadataMap);
+      continue;
+    }
+    break;
+  }
+
+  process.stderr.write(
+    [
+      `Generated metadata map: ${outputPath}`,
+      `Metadata dry-run validRate: ${lastSummary?.validRate ?? "unknown"}`,
+      `Metadata dry-run fallbackRate: ${lastSummary?.fallbackRate ?? "unknown"}`,
+      "",
+    ].join("\n"),
+  );
+  return [...cleanItems, "--metadata-map", outputPath];
+}
+
 const args = process.argv.slice(2);
 const subcommand = args[0] ?? "";
 const nested = args[1] ?? "";
 let normalizedArgs;
 
 if (subcommand === "upload") {
-  normalizedArgs = ["kb", "ingest", "bulk", ...args.slice(1)];
+  normalizedArgs = ["kb", "ingest", "bulk", ...ensureMetadataMapForBulk(args.slice(1))];
 } else if (subcommand === "bulk") {
-  normalizedArgs = ["kb", "ingest", "bulk", ...args.slice(1)];
+  normalizedArgs = ["kb", "ingest", "bulk", ...ensureMetadataMapForBulk(args.slice(1))];
 } else if (subcommand === "status") {
   normalizedArgs = ["kb", "ingest", "status", ...args.slice(1)];
 } else if (subcommand === "collections" && nested === "list") {
   normalizedArgs = ["kb", "collections", "list", ...args.slice(2)];
+} else if (subcommand === "collections" && nested === "schema") {
+  normalizedArgs = ["kb", "collections", "schema", ...args.slice(2)];
 } else if (subcommand === "collections") {
   normalizedArgs = ["kb", "collections", "list", ...args.slice(1)];
 } else {
   normalizedArgs = args;
 }
 
-if (explicitCli) {
-  const commandArgs = explicitCli.endsWith(".js")
-    ? [explicitCli, ...normalizedArgs]
-    : normalizedArgs;
-  run(explicitCli.endsWith(".js") ? process.execPath : explicitCli, commandArgs);
-}
-
-if (isExecutable(workspaceCli)) {
-  run(process.execPath, [workspaceCli, ...normalizedArgs]);
-}
-
-run("tiangong-ai", normalizedArgs);
-
-process.stderr.write(
-  [
-    "Unable to execute the Tiangong AI CLI.",
-    "Install @tiangong-ai/cli, add tiangong-ai to PATH, or set TIANGONG_AI_CLI_BIN.",
-    "",
-  ].join("\n"),
-);
-process.exit(127);
+exitWithCli(normalizedArgs);

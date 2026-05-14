@@ -7,13 +7,16 @@ description: Upload local files or folders into Tiangong KB through the Tiangong
 
 ## Boundary
 
-Use the Tiangong AI CLI for execution. The skill only decides when to use the CLI, which collection selector to pass, how to explain duplicate/status output, and which secrets or backend systems must stay out of scope.
+Use the Tiangong AI CLI for execution. The skill wrapper may orchestrate CLI schema, scan, metadata dry-run, and bulk commands, but it must not call backend databases or storage systems directly.
 
 CLI-owned behavior:
 
 - `tiangong-ai kb ingest bulk`
+- `tiangong-ai kb ingest bulk scan`
+- `tiangong-ai kb ingest metadata dry-run`
 - `tiangong-ai kb ingest status`
 - `tiangong-ai kb collections list`
+- `tiangong-ai kb collections schema`
 - SQLite checkpoint and resume
 - concurrency/retry
 - JSON output
@@ -23,6 +26,8 @@ Skill-owned behavior:
 
 - choose this workflow when the user wants to upload local files/folders into Tiangong KB
 - choose the safest collection selector
+- generate a conservative `rule_mode: layered` metadata map from collection schema plus folder scan when the user did not pass `--metadata-map`
+- run CLI metadata dry-run before bulk run and pass the generated metadata map into bulk ingest
 - explain returned `duplicate`, `existingDocumentId`, document status, job id, request id, and idempotency key
 - keep backend secrets and storage/search systems out of the agent workflow
 
@@ -33,10 +38,15 @@ Skill-owned behavior:
    - prefer `--collection-name` or `TIANGONG_KB_DEFAULT_COLLECTION_NAME` when the user gives a unique display name
    - use `--collection-key`, `--collection-path`, or `--collection-id` only when the user provides an exact selector
 3. For a first check, run `node scripts/run_kb_ingest.mjs collections list --json`.
-4. Ingest with `node scripts/run_kb_ingest.mjs bulk <path> --json`.
-5. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
-6. If the user asks to verify later state, use `node scripts/run_kb_ingest.mjs status <document-id-or-job-id> --json`.
-7. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
+4. For bulk/upload runs without `--metadata-map`, let the wrapper generate `metadata-map.yaml`:
+   - call CLI collection schema through the Tiangong KB ingest API
+   - call CLI bulk scan for folder structure
+   - write a layered metadata map with base filesystem fields plus conservative domain/detector rules
+   - run CLI metadata dry-run against the generated map
+5. Ingest with `node scripts/run_kb_ingest.mjs bulk <path> --json`; the wrapper adds `--metadata-map metadata-map.yaml` unless a metadata map is already provided or `--no-metadata-map-autogen` is set.
+6. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
+7. If the user asks to verify later state, use `node scripts/run_kb_ingest.mjs status <document-id-or-job-id> --json`.
+8. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
 
 ## Examples
 
@@ -52,10 +62,28 @@ Upload a folder:
 node scripts/run_kb_ingest.mjs bulk /path/to/folder --upload-concurrency 3 --retries 3 --json
 ```
 
+Use an existing metadata map:
+
+```bash
+node scripts/run_kb_ingest.mjs bulk /path/to/folder --metadata-map metadata-map.yaml --json
+```
+
+Generate the metadata map at a specific path:
+
+```bash
+node scripts/run_kb_ingest.mjs bulk /path/to/folder --metadata-map-output course-map.yaml --json
+```
+
 List uploadable collections:
 
 ```bash
 node scripts/run_kb_ingest.mjs collections list --capability upload --json
+```
+
+Read a collection schema through the API:
+
+```bash
+node scripts/run_kb_ingest.mjs collections schema --collection-key course/thu_humanities --json
 ```
 
 Check document status:
@@ -71,6 +99,7 @@ node scripts/run_kb_ingest.mjs status <document-id> --json
 - `documentId`: use this id for follow-up status checks.
 - `status`: explain it as backend state. Terminal states are success/failure/deleted according to the API response; nonterminal states mean processing is still underway.
 - `jobId`, `statePath`, `requestId`, `idempotencyKey`, `rawUri`: include them when present because they help support/debugging.
+- `metadata-map.yaml`: explain it as a reusable layered rules file. It is not per-file metadata; CLI evaluates the same rule file for each file.
 
 ## Safety Boundary
 
