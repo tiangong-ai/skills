@@ -245,14 +245,6 @@ function collectionName(schemaSnapshot) {
   return typeof collection?.name === "string" && collection.name ? collection.name : undefined;
 }
 
-function safeRuleName(value) {
-  return value
-    .normalize("NFKD")
-    .replace(/[^\w.-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80) || "rule";
-}
-
 function enumValues(field) {
   return Array.isArray(field.values) ? field.values.filter((value) => typeof value === "string") : [];
 }
@@ -266,27 +258,6 @@ function requiredDefault(field) {
   if (field.type === "boolean") return false;
   if (field.type === "date") return "1970-01-01";
   return "unknown";
-}
-
-function topLevelDirs(scanSummary) {
-  const dirs = isObject(scanSummary?.topLevelDirs) ? scanSummary.topLevelDirs : {};
-  return Object.entries(dirs)
-    .filter(([name]) => name && name !== "(root)")
-    .sort((left, right) => Number(right[1]) - Number(left[1]))
-    .map(([name]) => name);
-}
-
-function sourceGroupForTopDir(name) {
-  const lower = name.toLowerCase();
-  if (/网页|网站|web|html|wechat|微信/.test(lower)) return "web";
-  if (/样本|sample|demo|fixture/.test(lower)) return "sample";
-  if (/备份|backup|archive/.test(lower)) return "backup";
-  if (/其他|other|misc/.test(lower)) return "other";
-  return "document";
-}
-
-function hasField(fields, key) {
-  return fields.some((field) => field.key === key);
 }
 
 function buildMetadataMap(schemaSnapshot, scanSummary) {
@@ -306,154 +277,12 @@ function buildMetadataMap(schemaSnapshot, scanSummary) {
           name: "filesystem",
           match: { glob: "**/*" },
           fields: {
-            relative_path: { source: "relative_path" },
-            filename: { source: "filename" },
-            filename_stem: { source: "filename_stem" },
-            ext: { source: "ext" },
-            path_depth: { source: "path_depth" },
-            top_dir: { source: "top_dir" },
-            parent_dir: { source: "parent_dir" },
+            raw_relative_path: { source: "relative_path" },
           },
         },
       ],
     },
   ];
-
-  const domainRules = [];
-  const dirs = topLevelDirs(scanSummary);
-  if (hasField(fields, "source_group")) {
-    for (const [index, dir] of dirs.entries()) {
-      domainRules.push({
-        name: `source_group_${safeRuleName(dir)}_${index + 1}`,
-        match: { path_prefix: `${dir}/` },
-        fields: { source_group: { const: sourceGroupForTopDir(dir) } },
-      });
-    }
-    domainRules.push({
-      name: "source_group_fallback",
-      match: { glob: "**/*" },
-      fields: { source_group: { const: "document" } },
-    });
-  }
-
-  if (hasField(fields, "source_unit")) {
-    domainRules.push(
-      {
-        name: "source_unit_thu_humanities_links",
-        match: { path_prefix: "清华人文大展/链接/" },
-        fields: { source_unit: { source: "path_segment", index: 2 } },
-      },
-      {
-        name: "source_unit_links",
-        match: { path_prefix: "链接/" },
-        fields: { source_unit: { source: "path_segment", index: 1 } },
-      },
-      {
-        name: "source_unit_from_top_dir",
-        match: { glob: "**/*" },
-        fields: { source_unit: { source: "top_dir" } },
-      },
-    );
-  }
-
-  if (hasField(fields, "tags")) {
-    domainRules.push({
-      name: "tags_thu_humanities",
-      match: { glob: "**/*" },
-      fields: { tags: { const: ["thu_humanities"] } },
-    });
-  }
-
-  if (domainRules.length > 0) {
-    layers.push({ name: "domain", merge: "all", rules: domainRules });
-  }
-
-  const detectorRules = [];
-  if (hasField(fields, "material_type")) {
-    detectorRules.push(
-      {
-        name: "material_type_wechat_article",
-        match: { regex: "(微信|wechat)" },
-        fields: { material_type: { const: "wechat_article" } },
-      },
-      {
-        name: "material_type_news",
-        match: { regex: "(新闻|news)" },
-        fields: { material_type: { const: "news" } },
-      },
-      {
-        name: "material_type_announcement",
-        match: { regex: "(通知|公告|announcement)" },
-        fields: { material_type: { const: "announcement" } },
-      },
-      {
-        name: "material_type_report",
-        match: { regex: "(报告|report)" },
-        fields: { material_type: { const: "report" } },
-      },
-      {
-        name: "material_type_periodical",
-        match: { regex: "(期刊|journal|periodical)" },
-        fields: { material_type: { const: "periodical" } },
-      },
-      {
-        name: "material_type_image_attachment",
-        match: { ext: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff"] },
-        fields: { material_type: { const: "attachment" } },
-      },
-      {
-        name: "material_type_web_article",
-        match: { ext: [".html", ".htm"] },
-        fields: { material_type: { const: "web_page" } },
-      },
-      {
-        name: "material_type_book_pdf_epub",
-        match: { ext: [".pdf", ".epub", ".mobi"] },
-        fields: { material_type: { const: "book" } },
-      },
-      {
-        name: "material_type_attachment_office",
-        match: { ext: [".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".txt", ".md"] },
-        fields: { material_type: { const: "attachment" } },
-      },
-      {
-        name: "material_type_fallback",
-        match: { glob: "**/*" },
-        fields: { material_type: { const: "other" } },
-      },
-    );
-  }
-
-  if (hasField(fields, "published_date")) {
-    detectorRules.push({
-      name: "published_date_iso_path_detector",
-      match: { regex: "\\d{4}-\\d{2}-\\d{2}" },
-      fields: {
-        published_date: {
-          source: "relative_path",
-          regex: "(\\d{4}-\\d{2}-\\d{2})",
-        },
-      },
-    });
-  }
-
-  if (hasField(fields, "year")) {
-    detectorRules.push({
-      name: "year_path_detector",
-      match: { regex: "(?:18|19|20)\\d{2}" },
-      fields: {
-        year: {
-          source: "relative_path",
-          regex: "((?:18|19|20)\\d{2})",
-          type: "number",
-        },
-      },
-    });
-  }
-
-  if (detectorRules.length > 0) {
-    layers.push({ name: "detectors", merge: "all", rules: detectorRules });
-  }
 
   return { version: 1, rule_mode: "layered", defaults, layers };
 }
