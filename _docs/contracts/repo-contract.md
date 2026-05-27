@@ -14,8 +14,8 @@ checkPaths:
   - .claude-plugin/**
   - .docpact/config.yaml
   - "*/SKILL.md"
-lastReviewedAt: 2026-05-13
-lastReviewedCommit: 7686882fd5ea816b32d8519b07b70e8e46c08846
+lastReviewedAt: 2026-05-27
+lastReviewedCommit: 54cac29f2f3805022c83dc838a1f928ab059172a
 ---
 
 # Skills Repository Contract
