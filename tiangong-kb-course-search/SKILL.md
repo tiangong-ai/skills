@@ -1,0 +1,69 @@
+---
+name: tiangong-kb-course-search
+description: "Search Tiangong knowledge-base course sources through the Tiangong AI CLI. Use for courseware, lessons, teaching material, Qinghua/Tsinghua humanities archive course collections, and evidence-grounded education-history retrieval. This skill searches only the course source."
+---
+
+# Tiangong KB Course Search
+
+Use this skill for Tiangong course-source retrieval. It is intentionally
+single-source: always search `course`, never `all`, `edu`, or `textbook`.
+
+## Prerequisites
+
+- `tiangong-ai` must be available on `PATH`, or set `TIANGONG_AI_CLI` to the CLI
+  executable path.
+- Course search should use bearer auth. Pass `bearer_token`; if only `api_key`
+  is provided to this wrapper, it is also forwarded as `--bearer-token` so the
+  CLI emits `Authorization: Bearer ...` for the course source.
+- Optionally set `TIANGONG_AI_API_BASE_URL`; the CLI accepts a Supabase project
+  root, `/functions/v1`, or `/rest/v1` and derives Functions URLs.
+
+## Search
+
+For normal searches, pass a query:
+
+```bash
+./scripts/course_search.sh '{
+  "query": "马约翰 清华 体育 孙立人 梁实秋 钱三强",
+  "top_k": 8,
+  "ext_k": 20
+}'
+```
+
+The script calls:
+
+```bash
+tiangong-ai education search --query <query> --sources course --json
+```
+
+For exact edge-function payloads, provide `request_file` or `input_file`:
+
+```bash
+./scripts/course_search.sh '{
+  "request_file": "./course-request.json",
+  "dry_run": true
+}'
+```
+
+The script calls:
+
+```bash
+tiangong-ai education search --input <request.json> --sources course --json
+```
+
+## Input Fields
+
+- `query` or `input`: convenience query text.
+- `request_file` or `input_file`: JSON body forwarded unchanged.
+- `sources`: optional compatibility field; only `course` or `default` is
+  accepted.
+- `dry_run`: true to return the exact request plan with masked credentials.
+- `api_base_url`, `api_key`, `bearer_token`, `course_api_key`. For course
+  search, prefer `bearer_token`; `api_key` is treated as the same token when
+  `bearer_token` is omitted.
+- `course_url`, `region`, `timeout`.
+- `top_k`, `ext_k`: only used in query mode.
+
+When writing reader-facing prose from retrieved results, state historical facts
+directly and cite source titles when useful. Do not mention retrieval mechanics,
+source grouping, or internal confidence checks.

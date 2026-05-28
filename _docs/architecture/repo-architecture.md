@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-05-27
-lastReviewedCommit: 54cac29f2f3805022c83dc838a1f928ab059172a
+lastReviewedAt: 2026-05-28
+lastReviewedCommit: 1fa58e95a5824ba31ccb8b76767d0867bbf0dc74
 ---
 
 # Skills Repository Architecture

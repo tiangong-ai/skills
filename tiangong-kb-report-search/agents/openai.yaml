@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Report Search"
+  short_description: "Search only Tiangong KB report sources via CLI"
+  default_prompt: "Use $tiangong-kb-report-search to search Tiangong KB report sources only."

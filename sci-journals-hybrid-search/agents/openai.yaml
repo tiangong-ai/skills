@@ -1,4 +1,0 @@
-interface:
-  display_name: "SCI Journals Hybrid Search"
-  short_description: "Query SCI journal chunks via hybrid search API"
-  default_prompt: "Use this skill to call or debug the sci_search edge function: send query/topK/extK/filter/datefilter/getMeta with x-api-key, validate response behavior, and troubleshoot filter/date issues."

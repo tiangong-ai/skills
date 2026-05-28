@@ -13,8 +13,8 @@ checkPaths:
   - README.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-05-27
-lastReviewedCommit: 54cac29f2f3805022c83dc838a1f928ab059172a
+lastReviewedAt: 2026-05-28
+lastReviewedCommit: 1fa58e95a5824ba31ccb8b76767d0867bbf0dc74
 ---
 
 # 天工 AI Skills
@@ -39,7 +39,7 @@ npm i skills -g
   ```
 - 安装指定技能:
   ```bash
-  npx skills add https://github.com/tiangong-ai/skills --skill sci-journals-hybrid-search --skill dify-knowledge-base-search
+  npx skills add https://github.com/tiangong-ai/skills --skill tiangong-kb-sci-search --skill dify-knowledge-base-search
   ```
 
 ## 目标 agent 与作用域

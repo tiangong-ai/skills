@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Textbook Search"
+  short_description: "Search only Tiangong KB textbook sources via CLI"
+  default_prompt: "Use $tiangong-kb-textbook-search to search Tiangong KB textbook sources only."

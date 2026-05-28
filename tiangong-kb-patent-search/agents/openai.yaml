@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Patent Search"
+  short_description: "Search only Tiangong KB patent sources via CLI"
+  default_prompt: "Use $tiangong-kb-patent-search to search Tiangong KB patent sources only."

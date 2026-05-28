@@ -62,7 +62,12 @@
             "skills": [
                 "./dify-knowledge-base-search",
                 "./dify-knowledge-base-upload",
-                "./sci-journals-hybrid-search",
+                "./tiangong-kb-course-search",
+                "./tiangong-kb-edu-search",
+                "./tiangong-kb-textbook-search",
+                "./tiangong-kb-sci-search",
+                "./tiangong-kb-report-search",
+                "./tiangong-kb-patent-search",
                 "./fetch-meta-to-kb",
                 "./fetch-meta-from-kb",
                 "./fetch-abstract-to-kb",

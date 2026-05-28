@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Course Search"
+  short_description: "Search only Tiangong KB course sources via CLI"
+  default_prompt: "Use $tiangong-kb-course-search to search Tiangong KB course sources only."

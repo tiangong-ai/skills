@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Edu Search"
+  short_description: "Search only Tiangong KB general education sources via CLI"
+  default_prompt: "Use $tiangong-kb-edu-search to search Tiangong KB edu sources only."

@@ -1,0 +1,55 @@
+---
+name: tiangong-kb-patent-search
+description: "Search Tiangong knowledge-base patent sources through the Tiangong AI CLI. Use for inventions, technical routes, claims, patent evidence, and prior art. This skill searches only the patent source, not sci or report."
+---
+
+# Tiangong KB Patent Search
+
+Use this skill for Tiangong patent-source retrieval. It is intentionally
+single-source: always search `patent`, never `all`, `sci`, or `report`.
+
+## Prerequisites
+
+- `tiangong-ai` must be available on `PATH`, or set `TIANGONG_AI_CLI` to the CLI
+  executable path.
+- Set the authentication environment variables expected by `tiangong-ai`, or
+  pass `api_key` / `patent_api_key` to the wrapper script.
+- Optionally set `TIANGONG_AI_API_BASE_URL`; the CLI accepts a Supabase project
+  root, `/functions/v1`, or `/rest/v1` and derives Functions URLs.
+
+## Search
+
+For normal searches, pass a query:
+
+```bash
+./scripts/patent_search.sh '{
+  "query": "mechanical recycling polymer purification patent",
+  "top_k": 5
+}'
+```
+
+The script calls:
+
+```bash
+tiangong-ai research search --query <query> --sources patent --json
+```
+
+For exact edge-function payloads, provide `request_file` or `input_file`:
+
+```bash
+./scripts/patent_search.sh '{
+  "request_file": "./patent-request.json",
+  "dry_run": true
+}'
+```
+
+## Input Fields
+
+- `query`, `input`, or `claim`: convenience query text.
+- `request_file` or `input_file`: JSON body forwarded unchanged.
+- `sources`: optional compatibility field; only `patent` or `default` is
+  accepted.
+- `dry_run`: true to return the exact request plan with masked credentials.
+- `api_base_url`, `api_key`, `patent_api_key`.
+- `patent_url`, `region`, `timeout`.
+- `top_k`, `ext_k`, `get_meta`: only used in query mode.

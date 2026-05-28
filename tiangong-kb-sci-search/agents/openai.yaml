@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB SCI Search"
+  short_description: "Search only Tiangong KB SCI sources via CLI"
+  default_prompt: "Use $tiangong-kb-sci-search to search Tiangong KB SCI sources only."

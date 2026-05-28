@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tiangong KB Research Search"
-  short_description: "Search Tiangong KB research sources via CLI"
-  default_prompt: "Use $tiangong-kb-research-search to search Tiangong KB research sources across SCI, report, and patent content."
