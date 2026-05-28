@@ -42,10 +42,40 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 }'
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `textbook_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "如何减排二氧化碳？",
+  "filter": {
+    "isbn_number": ["9787030641274"]
+  },
+  "datefilter": {
+    "publication_date": { "gte": 1262304000 }
+  },
+  "topK": 5,
+  "extK": 1
+}
+```
+
+- `filter`: metadata term filters, shaped as `{ "field": ["value"] }`.
+- `datefilter`: numeric range filters, shaped as
+  `{ "field": { "gte"?: number, "lte"?: number } }`, for indexed numeric/date
+  metadata fields.
+- `topK`, `extK`: raw edge-function names for result count and adjacent chunk
+  expansion.
+- `getMeta` is not supported by `textbook_search`.
+
 ## Input Fields
 
 - `query` or `input`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `datefilter`, `topK`, `extK`: optional inline raw payload fields
+  for textbook search.
 - `sources`: optional compatibility field; only `textbook` or `default` is
   accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.

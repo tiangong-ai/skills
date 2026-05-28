@@ -43,10 +43,40 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 }'
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `edu_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "water treatment filter backwashing",
+  "filter": {
+    "course": ["水处理工程"]
+  },
+  "topK": 5,
+  "extK": 1
+}
+```
+
+- Normal search currently uses only `filter.course` to narrow retrieval to one
+  or more course names; other metadata fields are not applied in the retrieval
+  path.
+- `edu_search` has a separate `{"action":"list_filter_options"}` mode for
+  discovering metadata values. In that mode, `fields` may include `course`,
+  `type`, `file_type`, `language`, `chapter_number`, and `name`; optional
+  `filter` narrows the listed options.
+- `topK`, `extK`: raw edge-function names for result count and adjacent chunk
+  expansion.
+- `datefilter` and `getMeta` are not supported by `edu_search`.
+
 ## Input Fields
 
 - `query` or `input`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `action`, `fields`, `topK`, `extK`: optional inline raw payload
+  fields for `edu_search`.
 - `sources`: optional compatibility field; only `edu` or `default` is accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.
 - `api_base_url`, `api_key`, `edu_api_key`.

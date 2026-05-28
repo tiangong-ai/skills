@@ -58,6 +58,35 @@ esac
 
 REQUEST_FILE=$(echo "$JSON_INPUT" | jq -r '.request_file // .input_file // empty')
 QUERY=$(echo "$JSON_INPUT" | jq -r '.query // .input // empty')
+TMP_REQUEST_FILE=""
+
+cleanup() {
+    if [ -n "$TMP_REQUEST_FILE" ]; then
+        rm -f "$TMP_REQUEST_FILE"
+    fi
+}
+trap cleanup EXIT
+
+if [ -z "$REQUEST_FILE" ]; then
+    if echo "$JSON_INPUT" | jq -e 'has("datefilter")' >/dev/null; then
+        echo "Error: inline datefilter is not supported for tiangong-kb-course-search; use indexed metadata filters such as tags/raw_relative_path" >&2
+        exit 2
+    fi
+    if echo "$JSON_INPUT" | jq -e 'has("filter") or has("topK") or has("extK")' >/dev/null; then
+        if [ -z "$QUERY" ]; then
+            echo "Error: 'query' or 'input' field is required when using inline raw payload fields" >&2
+            exit 1
+        fi
+        TMP_REQUEST_FILE=$(mktemp "${TMPDIR:-/tmp}/tiangong-kb-course.XXXXXX.json")
+        echo "$JSON_INPUT" | jq '{
+            query: (.query // .input)
+        }
+        + (if has("filter") then {filter: .filter} else {} end)
+        + (if has("topK") then {topK: .topK} elif has("top_k") then {topK: .top_k} else {} end)
+        + (if has("extK") then {extK: .extK} elif has("ext_k") then {extK: .ext_k} else {} end)' > "$TMP_REQUEST_FILE"
+        REQUEST_FILE="$TMP_REQUEST_FILE"
+    fi
+fi
 
 ARGS=(education search --sources course --json)
 

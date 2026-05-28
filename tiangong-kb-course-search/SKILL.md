@@ -51,10 +51,36 @@ The script calls:
 tiangong-ai education search --input <request.json> --sources course --json
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `course_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "马约翰 清华 体育",
+  "filter": {
+    "tags": ["thu_humanities"]
+  },
+  "topK": 8,
+  "extK": 20
+}
+```
+
+- `filter`: metadata term filters, shaped as `{ "field": ["value"] }`.
+  Course collections currently use metadata keys such as `tags` and
+  `raw_relative_path` when those keys are indexed for the collection.
+- `topK`, `extK`: raw edge-function names for result count and adjacent chunk
+  expansion.
+- `datefilter` is not exposed by this wrapper for course search.
+
 ## Input Fields
 
 - `query` or `input`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `topK`, `extK`: optional inline raw payload fields for course
+  search.
 - `sources`: optional compatibility field; only `course` or `default` is
   accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.

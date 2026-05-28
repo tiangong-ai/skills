@@ -43,13 +43,37 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 }'
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `report_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "mechanical recycling policy report",
+  "filter": {
+    "source": ["IEA"]
+  },
+  "topK": 5,
+  "extK": 2
+}
+```
+
+- `filter`: metadata term filters, shaped as `{ "field": ["value"] }`.
+- `topK`, `extK`: raw edge-function names for result count and adjacent chunk
+  expansion.
+- `datefilter` and `getMeta` are not supported by `report_search`.
+
 ## Input Fields
 
 - `query`, `input`, or `claim`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `topK`, `extK`: optional inline raw payload fields for report
+  search.
 - `sources`: optional compatibility field; only `report` or `default` is
   accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.
 - `api_base_url`, `api_key`, `report_api_key`.
 - `report_url`, `region`, `timeout`.
-- `top_k`, `ext_k`, `get_meta`: only used in query mode.
+- `top_k`, `ext_k`: only used in query mode.

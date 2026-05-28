@@ -52,6 +52,35 @@ esac
 
 REQUEST_FILE=$(echo "$JSON_INPUT" | jq -r '.request_file // .input_file // empty')
 QUERY=$(echo "$JSON_INPUT" | jq -r '.query // .input // .claim // empty')
+TMP_REQUEST_FILE=""
+
+cleanup() {
+    if [ -n "$TMP_REQUEST_FILE" ]; then
+        rm -f "$TMP_REQUEST_FILE"
+    fi
+}
+trap cleanup EXIT
+
+if [ -z "$REQUEST_FILE" ]; then
+    if echo "$JSON_INPUT" | jq -e 'has("extK") or has("ext_k") or has("getMeta") or has("get_meta")' >/dev/null; then
+        echo "Error: inline extK/ext_k/getMeta fields are not supported for tiangong-kb-patent-search" >&2
+        exit 2
+    fi
+    if echo "$JSON_INPUT" | jq -e 'has("filter") or has("datefilter") or has("topK")' >/dev/null; then
+        if [ -z "$QUERY" ]; then
+            echo "Error: 'query', 'input', or 'claim' field is required when using inline raw payload fields" >&2
+            exit 1
+        fi
+        TMP_REQUEST_FILE=$(mktemp "${TMPDIR:-/tmp}/tiangong-kb-patent.XXXXXX.json")
+        echo "$JSON_INPUT" | jq '{
+            query: (.query // .input // .claim)
+        }
+        + (if has("filter") then {filter: .filter} else {} end)
+        + (if has("datefilter") then {datefilter: .datefilter} else {} end)
+        + (if has("topK") then {topK: .topK} elif has("top_k") then {topK: .top_k} else {} end)' > "$TMP_REQUEST_FILE"
+        REQUEST_FILE="$TMP_REQUEST_FILE"
+    fi
+fi
 
 ARGS=(research search --sources patent --json)
 
@@ -84,10 +113,6 @@ value_arg "timeout" "--timeout"
 
 if [ -z "$REQUEST_FILE" ]; then
     value_arg "top_k" "--top-k"
-    value_arg "ext_k" "--ext-k"
-    if jq_bool "get_meta"; then
-        ARGS+=(--get-meta)
-    fi
 fi
 
 if jq_bool "dry_run"; then

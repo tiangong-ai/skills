@@ -43,13 +43,41 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 }'
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `patent_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "battery recycling equipment",
+  "filter": {
+    "assignee": ["example company"]
+  },
+  "datefilter": {
+    "publication_date": { "gte": 1262304000 }
+  },
+  "topK": 5
+}
+```
+
+- `filter`: metadata term filters, shaped as `{ "field": ["value"] }`.
+- `datefilter`: numeric range filters, shaped as
+  `{ "field": { "gte"?: number, "lte"?: number } }`, for indexed numeric/date
+  metadata fields.
+- `topK`: raw edge-function name for result count.
+- `extK` and `getMeta` are not supported by `patent_search`.
+
 ## Input Fields
 
 - `query`, `input`, or `claim`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `datefilter`, `topK`: optional inline raw payload fields for patent
+  search.
 - `sources`: optional compatibility field; only `patent` or `default` is
   accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.
 - `api_base_url`, `api_key`, `patent_api_key`.
 - `patent_url`, `region`, `timeout`.
-- `top_k`, `ext_k`, `get_meta`: only used in query mode.
+- `top_k`: only used in query mode.

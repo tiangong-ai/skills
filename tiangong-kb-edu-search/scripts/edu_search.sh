@@ -52,6 +52,35 @@ esac
 
 REQUEST_FILE=$(echo "$JSON_INPUT" | jq -r '.request_file // .input_file // empty')
 QUERY=$(echo "$JSON_INPUT" | jq -r '.query // .input // empty')
+TMP_REQUEST_FILE=""
+
+cleanup() {
+    if [ -n "$TMP_REQUEST_FILE" ]; then
+        rm -f "$TMP_REQUEST_FILE"
+    fi
+}
+trap cleanup EXIT
+
+if [ -z "$REQUEST_FILE" ]; then
+    if echo "$JSON_INPUT" | jq -e 'has("datefilter") or has("getMeta") or has("get_meta")' >/dev/null; then
+        echo "Error: inline datefilter/getMeta fields are not supported for tiangong-kb-edu-search" >&2
+        exit 2
+    fi
+    if echo "$JSON_INPUT" | jq -e 'has("filter") or has("action") or has("fields") or has("topK") or has("extK")' >/dev/null; then
+        if ! echo "$JSON_INPUT" | jq -e 'has("action")' >/dev/null && [ -z "$QUERY" ]; then
+            echo "Error: 'query' or 'input' field is required when using inline search payload fields" >&2
+            exit 1
+        fi
+        TMP_REQUEST_FILE=$(mktemp "${TMPDIR:-/tmp}/tiangong-kb-edu.XXXXXX.json")
+        echo "$JSON_INPUT" | jq '
+        (if has("action") then {action: .action} else {query: (.query // .input)} end)
+        + (if has("filter") then {filter: .filter} else {} end)
+        + (if has("fields") then {fields: .fields} else {} end)
+        + (if has("topK") then {topK: .topK} elif has("top_k") then {topK: .top_k} else {} end)
+        + (if has("extK") then {extK: .extK} elif has("ext_k") then {extK: .ext_k} else {} end)' > "$TMP_REQUEST_FILE"
+        REQUEST_FILE="$TMP_REQUEST_FILE"
+    fi
+fi
 
 ARGS=(education search --sources edu --json)
 

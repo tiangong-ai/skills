@@ -44,10 +44,41 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 }'
 ```
 
+## Raw Payload Filters
+
+Wrapper JSON can include inline raw `sci_search` fields; the wrapper will
+forward them through the CLI `--input` path. The same payload can also be put in
+`request_file` / `input_file`:
+
+```json
+{
+  "query": "critical metal material flows",
+  "filter": {
+    "journal": ["JOURNAL OF INDUSTRIAL ECOLOGY"]
+  },
+  "datefilter": {
+    "date": { "gte": 1262304000 }
+  },
+  "topK": 5,
+  "extK": 2,
+  "getMeta": true
+}
+```
+
+- `filter`: metadata term filters, shaped as `{ "field": ["value"] }`.
+- `datefilter`: numeric range filters, shaped as
+  `{ "field": { "gte"?: number, "lte"?: number } }`, for indexed numeric/date
+  metadata fields.
+- `getMeta`: when true, returns paper metadata for matched DOI records.
+- `topK`, `extK`: raw edge-function names for result count and adjacent chunk
+  expansion.
+
 ## Input Fields
 
 - `query`, `input`, or `claim`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `filter`, `datefilter`, `topK`, `extK`, `getMeta`: optional inline raw
+  payload fields for SCI search.
 - `sources`: optional compatibility field; only `sci` or `default` is accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.
 - `api_base_url`, `api_key`, `sci_api_key`.

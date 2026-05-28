@@ -52,6 +52,33 @@ esac
 
 REQUEST_FILE=$(echo "$JSON_INPUT" | jq -r '.request_file // .input_file // empty')
 QUERY=$(echo "$JSON_INPUT" | jq -r '.query // .input // .claim // empty')
+TMP_REQUEST_FILE=""
+
+cleanup() {
+    if [ -n "$TMP_REQUEST_FILE" ]; then
+        rm -f "$TMP_REQUEST_FILE"
+    fi
+}
+trap cleanup EXIT
+
+if [ -z "$REQUEST_FILE" ]; then
+    if echo "$JSON_INPUT" | jq -e 'has("filter") or has("datefilter") or has("topK") or has("extK") or has("getMeta")' >/dev/null; then
+        if [ -z "$QUERY" ]; then
+            echo "Error: 'query', 'input', or 'claim' field is required when using inline raw payload fields" >&2
+            exit 1
+        fi
+        TMP_REQUEST_FILE=$(mktemp "${TMPDIR:-/tmp}/tiangong-kb-sci.XXXXXX.json")
+        echo "$JSON_INPUT" | jq '{
+            query: (.query // .input // .claim)
+        }
+        + (if has("filter") then {filter: .filter} else {} end)
+        + (if has("datefilter") then {datefilter: .datefilter} else {} end)
+        + (if has("topK") then {topK: .topK} elif has("top_k") then {topK: .top_k} else {} end)
+        + (if has("extK") then {extK: .extK} elif has("ext_k") then {extK: .ext_k} else {} end)
+        + (if has("getMeta") then {getMeta: .getMeta} elif has("get_meta") then {getMeta: .get_meta} else {} end)' > "$TMP_REQUEST_FILE"
+        REQUEST_FILE="$TMP_REQUEST_FILE"
+    fi
+fi
 
 ARGS=(research search --sources sci --json)
 
