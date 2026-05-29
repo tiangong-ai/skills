@@ -63,6 +63,7 @@
                 "./dify-knowledge-base-search",
                 "./dify-knowledge-base-upload",
                 "./tiangong-kb-course-search",
+                "./tiangong-kb-course-fulltext-fetch",
                 "./tiangong-kb-edu-search",
                 "./tiangong-kb-textbook-search",
                 "./tiangong-kb-sci-search",

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB Course Fulltext Fetch"
+  short_description: "Fetch full text for a Tiangong KB course document"
+  default_prompt: "Use $tiangong-kb-course-fulltext-fetch to fetch the full text for a Tiangong KB course document by document_id and tags."
