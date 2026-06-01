@@ -7,7 +7,7 @@ description: Upload local files or folders into Tiangong KB through the Tiangong
 
 ## Boundary
 
-Use the Tiangong AI CLI for execution. The skill wrapper may orchestrate CLI schema, scan, metadata dry-run, and bulk commands, but it must not call backend databases or storage systems directly.
+Use the Tiangong AI CLI for execution through `npx @tiangong-ai/cli@latest` by default, so users do not need a preinstalled CLI. The agent may orchestrate CLI schema, scan, metadata dry-run, and bulk commands, but it must not call backend databases or storage systems directly.
 
 CLI-owned behavior:
 
@@ -37,59 +37,109 @@ Skill-owned behavior:
 2. Pick one collection selector:
    - prefer `--collection-name` or `TIANGONG_KB_DEFAULT_COLLECTION_NAME` when the user gives a unique display name
    - use `--collection-key`, `--collection-path`, or `--collection-id` only when the user provides an exact selector
-3. For a first check, run `node scripts/run_kb_ingest.mjs collections list --json`.
-4. For bulk/upload runs without `--metadata-map`, let the wrapper generate `metadata-map.yaml`:
+3. For a first check, run `npx @tiangong-ai/cli@latest kb collections list --json`.
+4. For bulk/upload runs without `--metadata-map`, generate `metadata-map.yaml`:
    - call CLI collection schema through the Tiangong KB ingest API
    - call CLI bulk scan for folder structure
    - write a layered metadata map with base filesystem fields plus conservative domain/detector rules
    - run CLI metadata dry-run against the generated map
-5. Ingest with `node scripts/run_kb_ingest.mjs bulk <path> --json`; the wrapper adds `--metadata-map metadata-map.yaml` unless a metadata map is already provided or `--no-metadata-map-autogen` is set.
+5. Ingest with `npx @tiangong-ai/cli@latest kb ingest bulk <path> --json`; pass `--metadata-map metadata-map.yaml` unless a metadata map is already provided or the user explicitly asks to skip metadata-map generation.
 6. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
-7. If the user asks to verify later state, use `node scripts/run_kb_ingest.mjs status <document-id-or-job-id> --json`.
+7. If the user asks to verify later state, use `npx @tiangong-ai/cli@latest kb ingest status <document-id-or-job-id> --json`.
 8. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
+
+## Metadata Map Minimum
+
+When generating `metadata-map.yaml`, start from this conservative layered map
+and add only collection-specific fields that the schema requires:
+
+```yaml
+version: 1
+rule_mode: layered
+defaults:
+  source: local_bulk_upload
+layers:
+  - name: base
+    merge: all
+    rules:
+      - name: filesystem
+        match:
+          glob: "**/*"
+        fields:
+          relative_path:
+            source: relative_path
+          filename:
+            source: filename
+          filename_stem:
+            source: filename_stem
+          ext:
+            source: ext
+          path_depth:
+            source: path_depth
+          top_dir:
+            source: top_dir
+          parent_dir:
+            source: parent_dir
+```
+
+For required schema fields not covered by path rules, add safe defaults under
+`defaults`: prefer `other` when it is an enum value, otherwise the first enum
+value, `0` for numbers, `false` for booleans, `1970-01-01` for dates, and
+`unknown` for strings.
+
+Validate before upload:
+
+```bash
+npx @tiangong-ai/cli@latest kb ingest bulk scan /path/to/folder --json
+npx @tiangong-ai/cli@latest kb collections schema --collection-key course/thu_humanities --json
+npx @tiangong-ai/cli@latest kb ingest metadata dry-run /path/to/folder --metadata-map metadata-map.yaml --json
+```
+
+For offline validation with a captured schema, pass
+`--schema-file schema.json` to `metadata dry-run`.
 
 ## Examples
 
 Upload one file:
 
 ```bash
-node scripts/run_kb_ingest.mjs bulk /path/to/document.pdf --json
+npx @tiangong-ai/cli@latest kb ingest bulk /path/to/document.pdf --json
 ```
 
 Upload a folder:
 
 ```bash
-node scripts/run_kb_ingest.mjs bulk /path/to/folder --upload-concurrency 3 --retries 3 --json
+npx @tiangong-ai/cli@latest kb ingest bulk /path/to/folder --upload-concurrency 3 --retries 3 --json
 ```
 
 Use an existing metadata map:
 
 ```bash
-node scripts/run_kb_ingest.mjs bulk /path/to/folder --metadata-map metadata-map.yaml --json
+npx @tiangong-ai/cli@latest kb ingest bulk /path/to/folder --metadata-map metadata-map.yaml --json
 ```
 
-Generate the metadata map at a specific path:
+Use a metadata map saved at a specific path:
 
 ```bash
-node scripts/run_kb_ingest.mjs bulk /path/to/folder --metadata-map-output course-map.yaml --json
+npx @tiangong-ai/cli@latest kb ingest bulk /path/to/folder --metadata-map course-map.yaml --json
 ```
 
 List uploadable collections:
 
 ```bash
-node scripts/run_kb_ingest.mjs collections list --capability upload --json
+npx @tiangong-ai/cli@latest kb collections list --capability upload --json
 ```
 
 Read a collection schema through the API:
 
 ```bash
-node scripts/run_kb_ingest.mjs collections schema --collection-key course/thu_humanities --json
+npx @tiangong-ai/cli@latest kb collections schema --collection-key course/thu_humanities --json
 ```
 
 Check document status:
 
 ```bash
-node scripts/run_kb_ingest.mjs status <document-id> --json
+npx @tiangong-ai/cli@latest kb ingest status <document-id> --json
 ```
 
 ## Result Interpretation
