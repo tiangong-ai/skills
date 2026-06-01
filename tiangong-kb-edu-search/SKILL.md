@@ -11,9 +11,15 @@ intentionally single-source: always search `edu`, never `all`, `course`, or
 
 ## Prerequisites
 
-- `tiangong-ai` must be available on `PATH`, or set `TIANGONG_AI_CLI` to the CLI
-  executable path.
+- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+  preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
+  override the CLI entrypoint.
 - Set the authentication environment variables expected by `tiangong-ai`.
+- When `request_file` / `input_file` is provided, the wrapper loads `.env` from
+  that file's directory by default. `env_file` can point to a different dotenv
+  file. Loaded dotenv values only fill unset environment variables; explicit
+  JSON fields such as `api_key`, `edu_api_key`, and `api_base_url` are passed as
+  CLI flags and take precedence.
 - Optionally set `TIANGONG_AI_API_BASE_URL`; the CLI accepts a Supabase project
   root, `/functions/v1`, or `/rest/v1` and derives Functions URLs.
 
@@ -31,7 +37,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-tiangong-ai education search --query <query> --sources edu --json
+npx @tiangong-ai/cli@latest education search --query <query> --sources edu --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
@@ -75,6 +81,8 @@ forward them through the CLI `--input` path. The same payload can also be put in
 
 - `query` or `input`: convenience query text.
 - `request_file` or `input_file`: JSON body forwarded unchanged.
+- `env_file`: optional dotenv file. Without it, `request_file` /
+  `input_file` causes the wrapper to load `.env` from that file's directory.
 - `filter`, `action`, `fields`, `topK`, `extK`: optional inline raw payload
   fields for `edu_search`.
 - `sources`: optional compatibility field; only `edu` or `default` is accepted.

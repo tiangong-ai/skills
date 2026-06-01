@@ -2,6 +2,12 @@
 
 The skill invokes the Tiangong AI CLI with `npx @tiangong-ai/cli@latest` by default. The CLI calls the Tiangong KB ingest API and authenticates with an API key sent as `Authorization: Bearer <token>`.
 
+For local file or folder uploads, load dotenv defaults from the target path
+directory before invoking the CLI: use the parent directory for a file and the
+folder itself for a folder. Loaded dotenv values should only fill unset
+environment variables. Explicit user-provided CLI flags such as `--api-key`,
+`--api-base-url`, and collection selectors take precedence.
+
 ## Required
 
 ```text

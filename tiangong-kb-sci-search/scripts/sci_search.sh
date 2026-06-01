@@ -6,7 +6,14 @@ set -euo pipefail
 
 JSON_INPUT="${1:-}"
 OUTPUT_FILE="${2:-}"
-CLI="${TIANGONG_AI_CLI:-tiangong-ai}"
+CLI_COMMAND=()
+if [ -n "${TIANGONG_AI_CLI:-}" ]; then
+    read -r -a CLI_COMMAND <<< "$TIANGONG_AI_CLI"
+elif [ -n "${TIANGONG_AI_CLI_BIN:-}" ]; then
+    CLI_COMMAND=("$TIANGONG_AI_CLI_BIN")
+else
+    CLI_COMMAND=(npx @tiangong-ai/cli@latest)
+fi
 
 if [ -z "$JSON_INPUT" ]; then
     echo "Usage: ./sci_search.sh '<json>' [output_file]" >&2
@@ -33,6 +40,37 @@ jq_bool() {
     [ "$(echo "$JSON_INPUT" | jq -r ".${key} // false")" = "true" ]
 }
 
+load_env_file() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        line="${line#export }"
+        local key="${line%%=*}"
+        local value="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [ -n "${!key+x}" ] && continue
+        value="${value%\"}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value#\'}"
+        export "$key=$value"
+    done < "$env_file"
+}
+
+load_env_near_file() {
+    local input_file="$1"
+    local dir
+    dir="$(cd "$(dirname "$input_file")" 2>/dev/null && pwd || true)"
+    [ -n "$dir" ] && load_env_file "$dir/.env"
+}
+
 SOURCE_INPUT=$(echo "$JSON_INPUT" | jq -r '
     if (.sources | type) == "array" then
         [.sources[]] | join(",")
@@ -53,6 +91,13 @@ esac
 REQUEST_FILE=$(echo "$JSON_INPUT" | jq -r '.request_file // .input_file // empty')
 QUERY=$(echo "$JSON_INPUT" | jq -r '.query // .input // .claim // empty')
 TMP_REQUEST_FILE=""
+ENV_FILE=$(echo "$JSON_INPUT" | jq -r '.env_file // empty')
+
+if [ -n "$ENV_FILE" ]; then
+    load_env_file "$ENV_FILE"
+elif [ -n "$REQUEST_FILE" ]; then
+    load_env_near_file "$REQUEST_FILE"
+fi
 
 cleanup() {
     if [ -n "$TMP_REQUEST_FILE" ]; then
@@ -121,9 +166,17 @@ if jq_bool "dry_run"; then
     ARGS+=(--dry-run)
 fi
 
+run_cli() {
+    if [[ "${CLI_COMMAND[0]}" == *.js ]]; then
+        node "${CLI_COMMAND[@]}" "${ARGS[@]}"
+    else
+        "${CLI_COMMAND[@]}" "${ARGS[@]}"
+    fi
+}
+
 if [ -n "$OUTPUT_FILE" ]; then
     TMP_OUTPUT="${OUTPUT_FILE}.tmp.$$"
-    if "$CLI" "${ARGS[@]}" > "$TMP_OUTPUT"; then
+    if run_cli > "$TMP_OUTPUT"; then
         mv "$TMP_OUTPUT" "$OUTPUT_FILE"
         echo "Results saved to: $OUTPUT_FILE"
     else
@@ -133,5 +186,5 @@ if [ -n "$OUTPUT_FILE" ]; then
         exit "$STATUS"
     fi
 else
-    "$CLI" "${ARGS[@]}"
+    run_cli
 fi

@@ -13,7 +13,7 @@ and needs the full processed text for that document.
 Always call the Tiangong AI CLI:
 
 ```bash
-tiangong-ai kb course fulltext --document-id <document_id> --tags <tags>
+npx @tiangong-ai/cli@latest kb course fulltext --document-id <document_id> --tags <tags>
 ```
 
 Do not call S3, NAS, Supabase, Pinecone, or OpenSearch directly from the skill.
@@ -22,14 +22,16 @@ handling.
 
 ## Prerequisites
 
-- `tiangong-ai` must be available on `PATH`, or set `TIANGONG_AI_CLI` /
-  `TIANGONG_AI_CLI_BIN` to the CLI executable path.
+- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+  preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
+  override the CLI entrypoint.
 - AWS credentials must already be available in the environment through the AWS
   SDK default chain, such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
   `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_REGION`, or `AWS_DEFAULT_REGION`.
-- If the current workspace stores credentials in `.env.ops.local`, load that
-  file into the shell environment before running the wrapper. Never print secret
-  values.
+- If credentials live in a dotenv file, pass `env_file`. Loaded dotenv values
+  only fill unset environment variables; explicit JSON fields such as `bucket`,
+  `prefix`, and `region` are passed as CLI flags and take precedence. Never
+  print secret values.
 
 ## Fetch Full Text
 
@@ -45,7 +47,7 @@ Pass the course `document_id` and `tags`:
 The wrapper calls:
 
 ```bash
-tiangong-ai kb course fulltext --document-id <document_id> --tags <tags>
+npx @tiangong-ai/cli@latest kb course fulltext --document-id <document_id> --tags <tags>
 ```
 
 To save the full text:
@@ -73,6 +75,7 @@ To return CLI metadata and text as JSON:
 - `tags` or `tag`: required course tag, such as `thu_humanities`.
 - `output_file`: optional output path. The second wrapper argument takes
   precedence when both are provided.
+- `env_file`: optional dotenv file to load before calling the CLI.
 - `json`: true to return the CLI JSON payload instead of plain text.
 - `bucket`, `prefix`, `region`: optional overrides for the CLI command.
 

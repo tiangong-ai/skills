@@ -9,16 +9,14 @@ OUTPUT_FILE_ARG="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-WORKSPACE_CLI="$SKILL_DIR/../../tiangong-ai-cli/bin/tiangong-ai.js"
+CLI_COMMAND=()
 
 if [ -n "${TIANGONG_AI_CLI:-}" ]; then
-    CLI_COMMAND="$TIANGONG_AI_CLI"
+    read -r -a CLI_COMMAND <<< "$TIANGONG_AI_CLI"
 elif [ -n "${TIANGONG_AI_CLI_BIN:-}" ]; then
-    CLI_COMMAND="$TIANGONG_AI_CLI_BIN"
-elif [ -f "$WORKSPACE_CLI" ]; then
-    CLI_COMMAND="$WORKSPACE_CLI"
+    CLI_COMMAND=("$TIANGONG_AI_CLI_BIN")
 else
-    CLI_COMMAND="tiangong-ai"
+    CLI_COMMAND=(npx @tiangong-ai/cli@latest)
 fi
 
 if [ -z "$JSON_INPUT" ]; then
@@ -30,6 +28,7 @@ if [ -z "$JSON_INPUT" ]; then
     echo "  output_file: optional output path; second argument takes precedence" >&2
     echo "  json: true/false" >&2
     echo "  bucket, prefix, region: optional CLI overrides" >&2
+    echo "  env_file: optional dotenv file to load before calling the CLI" >&2
     exit 1
 fi
 
@@ -53,9 +52,38 @@ jq_bool() {
     [ "$(echo "$JSON_INPUT" | jq -r ".${key} // false")" = "true" ]
 }
 
+load_env_file() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        line="${line#export }"
+        local key="${line%%=*}"
+        local value="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [ -n "${!key+x}" ] && continue
+        value="${value%\"}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value#\'}"
+        export "$key=$value"
+    done < "$env_file"
+}
+
 DOCUMENT_ID=$(jq_value '.document_id // .documentId // empty')
 TAGS=$(jq_value '(.tags // .tag // empty) | if type == "array" then (.[0] // "") else . end')
 OUTPUT_FILE="${OUTPUT_FILE_ARG:-$(jq_value '.output_file // empty')}"
+ENV_FILE=$(jq_value '.env_file // empty')
+
+if [ -n "$ENV_FILE" ]; then
+    load_env_file "$ENV_FILE"
+fi
 
 if [ -z "$DOCUMENT_ID" ]; then
     echo "Error: document_id or documentId is required" >&2
@@ -88,10 +116,10 @@ if jq_bool "json"; then
 fi
 
 run_cli() {
-    if [[ "$CLI_COMMAND" == *.js ]]; then
-        node "$CLI_COMMAND" "${ARGS[@]}"
+    if [[ "${CLI_COMMAND[0]}" == *.js ]]; then
+        node "${CLI_COMMAND[@]}" "${ARGS[@]}"
     else
-        "$CLI_COMMAND" "${ARGS[@]}"
+        "${CLI_COMMAND[@]}" "${ARGS[@]}"
     fi
 }
 

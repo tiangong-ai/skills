@@ -37,16 +37,21 @@ Skill-owned behavior:
 2. Pick one collection selector:
    - prefer `--collection-name` or `TIANGONG_KB_DEFAULT_COLLECTION_NAME` when the user gives a unique display name
    - use `--collection-key`, `--collection-path`, or `--collection-id` only when the user provides an exact selector
-3. For a first check, run `npx @tiangong-ai/cli@latest kb collections list --json`.
-4. For bulk/upload runs without `--metadata-map`, generate `metadata-map.yaml`:
+3. Load dotenv defaults from the target path directory when present:
+   - for a file, read `.env` from the file's parent directory
+   - for a folder, read `.env` from that folder
+   - loaded dotenv values fill only unset environment variables; explicit user
+     inputs passed as CLI flags take precedence
+4. For a first check, run `npx @tiangong-ai/cli@latest kb collections list --json`.
+5. For bulk/upload runs without `--metadata-map`, generate `metadata-map.yaml`:
    - call CLI collection schema through the Tiangong KB ingest API
    - call CLI bulk scan for folder structure
    - write a layered metadata map with base filesystem fields plus conservative domain/detector rules
    - run CLI metadata dry-run against the generated map
-5. Ingest with `npx @tiangong-ai/cli@latest kb ingest bulk <path> --json`; pass `--metadata-map metadata-map.yaml` unless a metadata map is already provided or the user explicitly asks to skip metadata-map generation.
-6. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
-7. If the user asks to verify later state, use `npx @tiangong-ai/cli@latest kb ingest status <document-id-or-job-id> --json`.
-8. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
+6. Ingest with `npx @tiangong-ai/cli@latest kb ingest bulk <path> --json`; pass `--metadata-map metadata-map.yaml` unless a metadata map is already provided or the user explicitly asks to skip metadata-map generation.
+7. For long runs, tune `--window-size`, `--top-up-max`, `--upload-concurrency`, `--retries`, and `--state`; do not add `--max-polls` unless the user explicitly wants a bounded monitoring run.
+8. If the user asks to verify later state, use `npx @tiangong-ai/cli@latest kb ingest status <document-id-or-job-id> --json`.
+9. Report only current CLI output and backend response fields. Do not infer success from direct database queries.
 
 ## Metadata Map Minimum
 
