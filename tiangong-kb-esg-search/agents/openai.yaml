@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tiangong KB ESG Search"
+  short_description: "Search only Tiangong KB ESG disclosures via CLI"
+  default_prompt: "Use $tiangong-kb-esg-search to search Tiangong KB ESG disclosures only."
