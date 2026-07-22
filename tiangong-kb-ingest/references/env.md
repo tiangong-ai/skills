@@ -1,6 +1,6 @@
 # Environment
 
-The skill invokes the Tiangong AI CLI with `npx @tiangong-ai/cli@latest` by default. The CLI calls the Tiangong KB ingest API and authenticates with an API key sent as `Authorization: Bearer <token>`.
+The skill invokes the Tiangong AI CLI with `npx @tiangong-ai/cli@0.0.19` by default. The CLI calls the Tiangong KB ingest API and authenticates with an API key sent as `Authorization: Bearer <token>`.
 
 For local file or folder uploads, load dotenv defaults from the target path
 directory before invoking the CLI: use the parent directory for a file and the
@@ -43,7 +43,7 @@ TIANGONG_AI_CLI_BIN=/absolute/path/to/tiangong-ai
 `TIANGONG_KB_API_KEY` is accepted as a fallback alias for `TIANGONG_AI_API_KEY`.
 
 `TIANGONG_AI_CLI_BIN` is optional. Set it only when intentionally overriding the
-default `npx @tiangong-ai/cli@latest` entrypoint with a local or pinned
+default `npx @tiangong-ai/cli@0.0.19` entrypoint with a local or pinned
 `tiangong-ai` executable.
 
 Bulk ingest stores local checkpoint state in SQLite under the CLI app-data job

@@ -13,7 +13,7 @@ and needs the full processed text for that document.
 Always call the Tiangong AI CLI:
 
 ```bash
-npx @tiangong-ai/cli@latest kb course fulltext --document-id <document_id> --tags <tags>
+npx @tiangong-ai/cli@0.0.19 kb course fulltext --document-id <document_id> --tags <tags>
 ```
 
 Do not call S3, NAS, Supabase, Pinecone, or OpenSearch directly from the skill.
@@ -22,7 +22,7 @@ handling.
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
   override the CLI entrypoint.
 - AWS credentials must already be available in the environment through the AWS
@@ -47,7 +47,7 @@ Pass the course `document_id` and `tags`:
 The wrapper calls:
 
 ```bash
-npx @tiangong-ai/cli@latest kb course fulltext --document-id <document_id> --tags <tags>
+npx @tiangong-ai/cli@0.0.19 kb course fulltext --document-id <document_id> --tags <tags>
 ```
 
 To save the full text:
