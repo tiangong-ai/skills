@@ -11,7 +11,7 @@ multi-source preset.
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
   override the CLI entrypoint. Native ESG search requires
   `@tiangong-ai/cli@0.0.19` or later.
@@ -40,7 +40,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@latest research search --sources esg --query <query> --json
+npx @tiangong-ai/cli@0.0.19 research search --sources esg --query <query> --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:

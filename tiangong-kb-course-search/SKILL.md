@@ -10,7 +10,7 @@ single-source: always search `course`, never `all`, `edu`, or `textbook`.
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
   override the CLI entrypoint.
 - Course search should use bearer auth. Pass `bearer_token`; if only `api_key`
@@ -39,7 +39,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@latest education search --query <query> --sources course --json
+npx @tiangong-ai/cli@0.0.19 education search --query <query> --sources course --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
@@ -54,7 +54,7 @@ For exact edge-function payloads, provide `request_file` or `input_file`:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@latest education search --input <request.json> --sources course --json
+npx @tiangong-ai/cli@0.0.19 education search --input <request.json> --sources course --json
 ```
 
 ## Raw Payload Filters

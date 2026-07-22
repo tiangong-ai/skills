@@ -12,7 +12,7 @@ if [ -n "${TIANGONG_AI_CLI:-}" ]; then
 elif [ -n "${TIANGONG_AI_CLI_BIN:-}" ]; then
     CLI_COMMAND=("$TIANGONG_AI_CLI_BIN")
 else
-    CLI_COMMAND=(npx @tiangong-ai/cli@latest)
+    CLI_COMMAND=(npx @tiangong-ai/cli@0.0.19)
 fi
 
 if [ -z "$JSON_INPUT" ]; then

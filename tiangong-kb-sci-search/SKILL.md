@@ -10,7 +10,7 @@ single-source: always search `sci`, never `all`, `report`, or `patent`.
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@latest`; users do not need a
+- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
   override the CLI entrypoint.
 - Set the authentication environment variables expected by `tiangong-ai`, or
@@ -38,7 +38,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@latest research search --query <query> --sources sci --json
+npx @tiangong-ai/cli@0.0.19 research search --query <query> --sources sci --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
