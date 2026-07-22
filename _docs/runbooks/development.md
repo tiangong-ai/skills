@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-06-01
-lastReviewedCommit: bf2b7e84d8913a5bb602bab51330ae0e59e40f2d
+lastReviewedAt: 2026-07-22
+lastReviewedCommit: 65aa9a05ecb4d9eb18e52d83d58a5567fbbbe33c
 ---
 
 # Skills Development Runbook
