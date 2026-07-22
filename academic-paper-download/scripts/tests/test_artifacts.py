@@ -33,6 +33,11 @@ class ArtifactTests(unittest.TestCase):
         manifest = json.loads(manifest_path(path).read_text(encoding="utf-8"))
         self.assertEqual(manifest["doi"], "10.1234/one")
         self.assertEqual(manifest["sha256"], result["sha256"])
+        self.assertEqual(manifest["size"], result["size"])
+        self.assertEqual(manifest["size"], path.stat().st_size)
+        self.assertEqual(manifest["sha256"], result["sha256"])
+        self.assertEqual(manifest["license"], "unknown")
+        self.assertEqual(manifest["license_status"], "unknown")
         self.assertIn("张三", path.name)
         self.assertEqual(list(self.directory.glob("*.part")), [])
 
@@ -92,6 +97,28 @@ class ArtifactTests(unittest.TestCase):
                 )
         self.assertEqual(raised.exception.code, "pdf_validator_unavailable")
         self.assertEqual(list(self.directory.glob("*.pdf")), [])
+
+    def test_symbolic_link_output_directory_is_rejected(self):
+        target = self.directory / "target"
+        target.mkdir()
+        link = self.directory / "linked-output"
+        link.symlink_to(target, target_is_directory=True)
+        http = RoutingHttp(download_payloads={self.url: PDF_BYTES})
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(link, http).save(
+                "10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1
+            )
+        self.assertEqual(raised.exception.code, "output_dir_error")
+
+    def test_file_used_as_output_directory_is_rejected(self):
+        blocked = self.directory / "not-a-directory"
+        blocked.write_text("blocked", encoding="utf-8")
+        http = RoutingHttp(download_payloads={self.url: PDF_BYTES})
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(blocked, http).save(
+                "10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1
+            )
+        self.assertEqual(raised.exception.code, "output_dir_error")
 
 
 if __name__ == "__main__":

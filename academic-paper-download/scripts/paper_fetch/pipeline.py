@@ -8,10 +8,11 @@ from .errors import PaperFetchError
 from .models import Candidate, ChannelResolution, PaperMetadata
 from .normalize import normalize_doi
 from .resolvers import OpenAccessResolvers
-from .scihub import SciHubResolver
+from .sanitize import sanitize_data, sanitize_url
 
 
 Progress = Callable[[str, dict[str, Any]], None]
+SOURCE_ORDER = ("unpaywall", "semantic_scholar", "arxiv", "browser_handoff")
 
 
 def _noop_progress(event: str, fields: dict[str, Any]) -> None:
@@ -19,25 +20,21 @@ def _noop_progress(event: str, fields: dict[str, Any]) -> None:
 
 
 class PaperFetcher:
-    """Resolve and download in the fixed OA -> Sci-Hub -> browser order."""
+    """Resolve and download through legal open-access sources in fixed order."""
 
     def __init__(
         self,
         resolvers: OpenAccessResolvers,
-        scihub: SciHubResolver,
         artifacts: ArtifactStore,
         *,
-        scihub_enabled: bool = True,
         progress: Progress = _noop_progress,
     ) -> None:
         self.resolvers = resolvers
-        self.scihub = scihub
         self.artifacts = artifacts
-        self.scihub_enabled = scihub_enabled
         self.progress = progress
 
     def _emit(self, event: str, **fields: Any) -> None:
-        self.progress(event, fields)
+        self.progress(event, sanitize_data(fields))
 
     def fetch(
         self,
@@ -75,7 +72,7 @@ class PaperFetcher:
             if candidate is None:
                 self._emit("source_miss", doi=doi, source=source)
                 return None
-            self._emit("source_hit", doi=doi, source=source, pdf_url=candidate.url)
+            self._emit("source_hit", doi=doi, source=source, pdf_url=sanitize_url(candidate.url))
             if dry_run:
                 return self._success(
                     doi,
@@ -91,12 +88,16 @@ class PaperFetcher:
                     {
                         "source": source,
                         "stage": "download",
-                        "url": candidate.url,
+                        "url": sanitize_url(candidate.url),
                         "error": exc.as_dict(),
                     }
                 )
                 self._emit("download_error", doi=doi, source=source, code=exc.code)
-                if exc.code == "pdf_validator_unavailable":
+                if exc.code in {
+                    "manifest_write_error",
+                    "output_dir_error",
+                    "pdf_validator_unavailable",
+                }:
                     return self._failure(doi, sources_tried, metadata, exc)
                 return None
             self._emit("download_ok", doi=doi, source=source, file=artifact["file"])
@@ -126,16 +127,6 @@ class PaperFetcher:
         if result:
             return result
 
-        if self.scihub_enabled:
-            result = resolve_and_attempt(
-                "scihub",
-                lambda: self.scihub.resolve(doi, timeout=timeout),
-            )
-            if result:
-                return result
-        else:
-            self._emit("source_skip", doi=doi, source="scihub", reason="PAPER_FETCH_NO_SCIHUB set")
-
         retryable = any(
             bool((attempt.get("error") or {}).get("retryable")) for attempt in attempts
         )
@@ -160,9 +151,20 @@ class PaperFetcher:
             key: value for key, value in artifact.items() if key != "committed_manifest"
         }
         source = committed_manifest.get("source") or candidate.source
-        source_url = committed_manifest.get("source_url") or candidate.url
+        source_url = committed_manifest.get("source_url") or sanitize_url(candidate.url)
         source_detail = committed_manifest.get("source_detail") or candidate.detail or None
-        return {
+        access_fields = {
+            key: committed_manifest.get(key, getattr(candidate, key))
+            for key in (
+                "access_basis",
+                "license_status",
+                "license",
+                "license_url",
+                "host_type",
+                "article_version",
+            )
+        }
+        return sanitize_data({
             "doi": doi,
             "success": True,
             "source": source,
@@ -170,8 +172,10 @@ class PaperFetcher:
             "source_detail": source_detail,
             "meta": metadata.as_dict(),
             "sources_tried": list(sources_tried),
+            **access_fields,
+            "retrieved_at": committed_manifest.get("retrieved_at"),
             **clean_artifact,
-        }
+        })
 
     @staticmethod
     def _failure(
@@ -189,6 +193,7 @@ class PaperFetcher:
             "source_url": None,
             "file": None,
             "manifest": None,
+            "size": None,
             "sha256": None,
             "meta": metadata.as_dict(),
             "sources_tried": list(sources_tried),
@@ -200,4 +205,4 @@ class PaperFetcher:
                 "title": metadata.title,
                 "reason": "Automated sources were exhausted; continue with the exact-download browser handoff.",
             }
-        return result
+        return sanitize_data(result)

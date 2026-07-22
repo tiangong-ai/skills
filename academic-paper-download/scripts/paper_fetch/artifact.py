@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from .errors import PaperFetchError
-from .http import HttpClient
+from .http import PaperTransport
 from .models import Candidate, PaperMetadata
 from .normalize import normalize_doi
+from .sanitize import sanitize_data
 
 
 MANIFEST_SCHEMA = "academic-paper-download.artifact.v2"
@@ -87,7 +88,7 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            json.dump(sanitize_data(payload), handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -115,7 +116,7 @@ def filename_for(metadata: PaperMetadata, doi: str) -> str:
 
 def _matching_manifest(path: Path, doi: str) -> dict[str, Any] | None:
     sidecar = manifest_path(path)
-    if not path.is_file() or not sidecar.is_file():
+    if path.is_symlink() or sidecar.is_symlink() or not path.is_file() or not sidecar.is_file():
         return None
     try:
         manifest = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -139,7 +140,7 @@ def verify_existing(path: Path, doi: str) -> dict[str, Any] | None:
 def choose_available_path(directory: Path, filename: str) -> Path:
     candidate = directory / filename
     counter = 2
-    while candidate.exists() or manifest_path(candidate).exists():
+    while candidate.exists() or candidate.is_symlink() or manifest_path(candidate).exists():
         candidate = directory / f"{Path(filename).stem}-{counter}.pdf"
         counter += 1
     return candidate
@@ -156,7 +157,8 @@ def build_manifest(
     access_mode: str,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    retrieved_at = datetime.now(timezone.utc).isoformat()
+    return sanitize_data({
         "schema_version": MANIFEST_SCHEMA,
         "doi": normalize_doi(doi),
         "title": metadata.title,
@@ -166,26 +168,58 @@ def build_manifest(
         "source": candidate.source,
         "source_url": candidate.url,
         "source_detail": candidate.detail or None,
+        "access_basis": candidate.access_basis,
+        "license_status": candidate.license_status,
+        "license": candidate.license,
+        "license_url": candidate.license_url,
+        "host_type": candidate.host_type,
+        "article_version": candidate.article_version,
         "access_mode": access_mode,
-        "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        "retrieved_at": retrieved_at,
+        "downloaded_at": retrieved_at,
         "file": str(path),
         "size": size,
         "sha256": digest,
         **(extra or {}),
-    }
+    })
 
 
 class ArtifactStore:
     def __init__(
         self,
         output_dir: Path,
-        http: HttpClient,
+        transport: PaperTransport,
         *,
         max_bytes: int = DEFAULT_MAX_BYTES,
     ) -> None:
-        self.output_dir = output_dir.expanduser().resolve()
-        self.http = http
+        self.output_dir = output_dir.expanduser().absolute()
+        self.transport = transport
         self.max_bytes = max_bytes
+
+    def _ensure_output_directory(self) -> None:
+        if self.output_dir.is_symlink():
+            raise PaperFetchError(
+                "output_dir_error",
+                "Output directory must not be a symbolic link",
+                retryable=False,
+                output_dir=str(self.output_dir),
+            )
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise PaperFetchError(
+                "output_dir_error",
+                f"Could not create output directory: {exc}",
+                retryable=False,
+                output_dir=str(self.output_dir),
+            ) from exc
+        if not self.output_dir.is_dir():
+            raise PaperFetchError(
+                "output_dir_error",
+                "Output path is not a directory",
+                retryable=False,
+                output_dir=str(self.output_dir),
+            )
 
     def save(
         self,
@@ -195,7 +229,7 @@ class ArtifactStore:
         *,
         timeout: float,
     ) -> dict[str, Any]:
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_output_directory()
         filename = filename_for(metadata, doi)
         preferred = self.output_dir / filename
         existing = verify_existing(preferred, doi)
@@ -218,7 +252,7 @@ class ArtifactStore:
         os.close(descriptor)
         temporary = Path(temporary_name)
         try:
-            self.http.download_to(
+            self.transport.download_to(
                 candidate.url,
                 temporary,
                 timeout=timeout,

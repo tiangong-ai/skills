@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -8,8 +9,27 @@ from typing import Any
 class Candidate:
     source: str
     url: str
+    access_basis: str = "unknown"
+    license_status: str = "unknown"
+    license: str = "unknown"
+    license_url: str = "unknown"
+    host_type: str = "unknown"
+    article_version: str = "unknown"
     detail: dict[str, Any] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True)
+class FetchRequest:
+    output_dir: str | Path
+    doi: str | None = None
+    title: str | None = None
+    author: str | None = None
+    year: int | str | None = None
+    timeout: float = 30.0
+    dry_run: bool = False
+    unpaywall_email: str = ""
+    semantic_scholar_api_key: str = ""
 
 
 @dataclass

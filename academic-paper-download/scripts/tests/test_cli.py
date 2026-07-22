@@ -57,7 +57,7 @@ class CliTests(unittest.TestCase):
     def test_stream_pretty_combination_is_rejected(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            code = cli.main(["10.1234/example", "--stream", "--pretty"])
+            code = cli.main(["10.1234/example", "--out", "/tmp/papers", "--stream", "--pretty"])
         self.assertEqual(code, 3)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "validation_error")
 
@@ -70,17 +70,30 @@ class CliTests(unittest.TestCase):
             }
         )
         output = io.StringIO()
-        with mock.patch("paper_fetch.cli.HttpClient", return_value=http), contextlib.redirect_stdout(output):
-            code = cli.main(["--title", "Attention Is All You Need"])
+        with tempfile.TemporaryDirectory() as temporary, mock.patch(
+            "paper_fetch.cli.HttpClient", return_value=http
+        ), contextlib.redirect_stdout(output):
+            code = cli.main(["--title", "Attention Is All You Need", "--out", temporary])
         self.assertEqual(code, 4)
-        self.assertEqual(json.loads(output.getvalue())["error"]["code"], "title_resolution_transport")
+        result = json.loads(output.getvalue())["data"]["results"][0]
+        self.assertEqual(result["error"]["code"], "title_resolution_transport")
+        self.assertTrue(result["error"]["retryable"])
 
     def test_title_qualifiers_require_title(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            code = cli.main(["10.1234/example", "--year", "2024"])
+            code = cli.main(["10.1234/example", "--year", "2024", "--out", "/tmp/papers"])
         self.assertEqual(code, 3)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "validation_error")
+
+    def test_missing_out_is_clear_validation_error(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = cli.main(["10.1234/example"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 3)
+        self.assertEqual(payload["error"]["code"], "validation_error")
+        self.assertIn("--out", payload["error"]["message"])
 
 
 if __name__ == "__main__":

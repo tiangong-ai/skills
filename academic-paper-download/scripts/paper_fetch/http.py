@@ -6,13 +6,49 @@ import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .errors import PaperFetchError
+from .sanitize import sanitize_text, sanitize_url
 from .security import Resolver, SafeRedirectHandler, validate_public_url
 
 
+@runtime_checkable
+class PaperTransport(Protocol):
+    """Injectable transport used by every resolver and artifact download."""
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        max_bytes: int = 5 * 1024 * 1024,
+    ) -> dict[str, Any]: ...
+
+    def get_text(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        headers: dict[str, str] | None = None,
+        max_bytes: int = 5 * 1024 * 1024,
+    ) -> str: ...
+
+    def download_to(
+        self,
+        url: str,
+        destination: Path,
+        *,
+        timeout: float,
+        max_bytes: int,
+        headers: dict[str, str] | None = None,
+    ) -> int: ...
+
+
 class HttpClient:
+    """Default urllib implementation of :class:`PaperTransport`."""
+
     def __init__(
         self,
         *,
@@ -43,19 +79,21 @@ class HttpClient:
             raise
         except urllib.error.HTTPError as exc:
             retryable = exc.code not in {400, 404, 410}
+            safe_url = sanitize_url(url)
             raise PaperFetchError(
                 "http_error",
-                f"HTTP {exc.code} while fetching {url}",
+                f"HTTP {exc.code} while fetching {safe_url}",
                 retryable=retryable,
                 http_status=exc.code,
-                url=url,
+                url=safe_url,
             ) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            safe_url = sanitize_url(url)
             raise PaperFetchError(
                 "network_error",
-                f"Network error while fetching {url}: {exc}",
+                f"Network error while fetching {safe_url}: {sanitize_text(str(exc))}",
                 retryable=True,
-                url=url,
+                url=safe_url,
             ) from exc
 
     def get_json(

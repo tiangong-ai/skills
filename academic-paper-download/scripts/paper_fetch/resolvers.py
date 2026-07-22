@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .errors import PaperFetchError
-from .http import HttpClient
+from .http import PaperTransport
 from .models import Candidate, ChannelResolution, PaperMetadata
 from .normalize import normalize_title, title_similarity
 
@@ -80,12 +80,12 @@ class TitleResolution:
 class OpenAccessResolvers:
     def __init__(
         self,
-        http: HttpClient,
+        transport: PaperTransport,
         *,
         unpaywall_email: str = "",
         semantic_scholar_api_key: str = "",
     ) -> None:
-        self.http = http
+        self.transport = transport
         self.unpaywall_email = unpaywall_email.strip()
         self.semantic_scholar_api_key = semantic_scholar_api_key.strip()
 
@@ -97,12 +97,38 @@ class OpenAccessResolvers:
             return ChannelResolution()
         query = urllib.parse.urlencode({"email": self.unpaywall_email})
         url = f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='')}?{query}"
-        data = self.http.get_json(url, timeout=timeout)
+        data = self.transport.get_json(url, timeout=timeout)
         authors = data.get("z_authors") or []
         location = data.get("best_oa_location") or {}
         pdf_url = location.get("url_for_pdf")
+        license_value = location.get("license") or "unknown"
+        license_url = location.get("license_url") or "unknown"
         return ChannelResolution(
-            candidate=Candidate("unpaywall", pdf_url) if pdf_url else None,
+            candidate=(
+                Candidate(
+                    "unpaywall",
+                    pdf_url,
+                    access_basis="open_access",
+                    license_status=(
+                        "declared" if license_value != "unknown" or license_url != "unknown" else "unknown"
+                    ),
+                    license=str(license_value),
+                    license_url=str(license_url),
+                    host_type=str(location.get("host_type") or "unknown"),
+                    article_version=str(location.get("version") or "unknown"),
+                    detail={
+                        key: value
+                        for key, value in {
+                            "is_oa": data.get("is_oa"),
+                            "oa_status": data.get("oa_status"),
+                            "location_url": location.get("url"),
+                        }.items()
+                        if value is not None
+                    },
+                )
+                if pdf_url
+                else None
+            ),
             metadata=PaperMetadata(
                 title=data.get("title"),
                 year=data.get("year"),
@@ -112,16 +138,36 @@ class OpenAccessResolvers:
         )
 
     def semantic_scholar(self, doi: str, *, timeout: float) -> ChannelResolution:
-        fields = "title,year,authors,openAccessPdf,externalIds,venue"
+        fields = "title,year,authors,openAccessPdf,isOpenAccess,externalIds,venue"
         url = (
             "https://api.semanticscholar.org/graph/v1/paper/DOI:"
             f"{urllib.parse.quote(doi, safe='')}?fields={fields}"
         )
-        data = self.http.get_json(url, timeout=timeout, headers=self._s2_headers())
+        data = self.transport.get_json(url, timeout=timeout, headers=self._s2_headers())
         authors = data.get("authors") or []
-        pdf_url = (data.get("openAccessPdf") or {}).get("url")
+        oa_pdf = data.get("openAccessPdf") or {}
+        pdf_url = oa_pdf.get("url")
+        license_value = oa_pdf.get("license") or "unknown"
         return ChannelResolution(
-            candidate=Candidate("semantic_scholar", pdf_url) if pdf_url else None,
+            candidate=(
+                Candidate(
+                    "semantic_scholar",
+                    pdf_url,
+                    access_basis="open_access",
+                    license_status="declared" if license_value != "unknown" else "unknown",
+                    license=str(license_value),
+                    detail={
+                        key: value
+                        for key, value in {
+                            "is_open_access": data.get("isOpenAccess"),
+                            "oa_status": oa_pdf.get("status"),
+                        }.items()
+                        if value is not None
+                    },
+                )
+                if pdf_url
+                else None
+            ),
             metadata=PaperMetadata(
                 title=data.get("title"),
                 year=data.get("year"),
@@ -149,9 +195,10 @@ class OpenAccessResolvers:
             return ChannelResolution()
         bare_id = arxiv_id.rsplit("v", 1)[0] if arxiv_id.rsplit("v", 1)[-1].isdigit() else arxiv_id
         metadata = PaperMetadata()
+        license_url = "unknown"
         try:
             api_url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode({"id_list": bare_id})
-            xml = self.http.get_text(api_url, timeout=timeout)
+            xml = self.transport.get_text(api_url, timeout=timeout)
             root = ET.fromstring(xml)
             namespace = {"atom": "http://www.w3.org/2005/Atom"}
             entry = root.find("atom:entry", namespace)
@@ -163,10 +210,22 @@ class OpenAccessResolvers:
                     year=int(published[:4]) if published[:4].isdigit() else None,
                     author=entry.findtext("atom:author/atom:name", default=None, namespaces=namespace),
                 )
+                for link in entry.findall("atom:link", namespace):
+                    if (link.get("rel") or "").casefold() == "license" and link.get("href"):
+                        license_url = str(link.get("href"))
+                        break
         except (PaperFetchError, ET.ParseError):
             pass
         return ChannelResolution(
-            candidate=Candidate("arxiv", f"https://arxiv.org/pdf/{arxiv_id}.pdf"),
+            candidate=Candidate(
+                "arxiv",
+                f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+                access_basis="open_access",
+                license_status="declared" if license_url != "unknown" else "unknown",
+                license_url=license_url,
+                host_type="repository",
+                article_version="unknown",
+            ),
             metadata=metadata,
             external_ids={"ArXiv": arxiv_id},
         )
@@ -193,7 +252,7 @@ class OpenAccessResolvers:
         candidates: list[dict[str, Any]] = []
         resolution_errors: list[dict[str, Any]] = []
         try:
-            data = self.http.get_json(crossref_url, timeout=timeout)
+            data = self.transport.get_json(crossref_url, timeout=timeout)
             for item in ((data.get("message") or {}).get("items") or [])[:5]:
                 metadata = _crossref_metadata(item)
                 candidate = {
@@ -211,7 +270,7 @@ class OpenAccessResolvers:
             {"query": query, "fields": "title,authors,year,venue,externalIds"}
         )
         try:
-            data = self.http.get_json(s2_url, timeout=timeout, headers=self._s2_headers())
+            data = self.transport.get_json(s2_url, timeout=timeout, headers=self._s2_headers())
         except PaperFetchError as exc:
             resolution_errors.append({"resolver": "semantic_scholar", "error": exc.as_dict()})
             data = {}

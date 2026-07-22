@@ -1,44 +1,47 @@
 ---
 name: academic-paper-download
-description: "Resolve and reliably download academic-paper PDFs from a DOI, exact title, or publisher URL. Use when a user wants a local paper PDF, including cases that may require an existing Chrome login or institutional browser session. Tries Unpaywall, Semantic Scholar open-access PDFs, arXiv, then Sci-Hub; loads the browser handoff only after automatic sources are exhausted or when the input is a publisher URL requiring interactive access."
+description: "Fetch and atomically save verified academic-paper PDFs from legal open-access sources using a DOI or exact title, with access/license provenance and an adjacent hash manifest. Use for automatic OA retrieval or for a publisher URL that must first be resolved to a DOI and may then require a user-authorized browser handoff; supports an injectable transport for embedding in research systems."
 ---
 
 # Academic Paper Download
 
-Produce a verified PDF plus an adjacent DOI/source/hash manifest. Preserve the
-fixed source order and never report a file as successful merely because it
-exists.
+Produce a structurally verified PDF and adjacent provenance manifest. Require an
+explicit final output directory and keep automatic resolution in this order:
+Unpaywall, Semantic Scholar OA, arXiv, then browser handoff.
 
 ## Workflow
 
-1. Collect one DOI, exact title, or publisher URL. For a title, also collect
-   author and year when available so duplicate titles can be disambiguated.
-   Use the user's requested output directory; otherwise keep the default
-   `~/Downloads` destination.
-2. Read [references/env.md](references/env.md) only when environment or source
-   settings need to change.
-3. For a DOI or title, run the downloader. Keep this source order:
-   Unpaywall, Semantic Scholar OA, arXiv, then Sci-Hub.
-4. Report success only when the result contains a validated file, SHA-256, and
-   manifest path. A verified existing file may return `skipped: true`.
-5. If the input is a publisher URL requiring interactive access, or a failed
-   result contains `browser_handoff`, read
-   [references/browser-handoff.md](references/browser-handoff.md) and follow it.
-   When login, SSO, CAPTCHA, VPN, browser setup, or a security decision needs
-   the user, execute that reference's required dialog-first protocol before
-   pausing; never silently continue or make the native dialog optional.
+1. For a DOI or exact title, select the caller's final output directory. Never
+   guess a research directory. Add author/year when they help disambiguate a
+   title.
+2. For a publisher URL, first resolve or confirm its DOI. Pass only that DOI to
+   `fetch.py`; the CLI does not accept publisher URLs as inputs.
+3. Run the downloader and accept success only when the result contains a
+   verified file, SHA-256, size, and adjacent manifest.
+4. If automatic OA sources are exhausted, or a publisher page requires login,
+   institution access, or interaction, read
+   [references/browser-handoff.md](references/browser-handoff.md). Do not bypass
+   CAPTCHA, paywalls, security warnings, or authentication.
+5. Read [references/integration.md](references/integration.md) when embedding
+   the library or injecting a provenance-recording transport. Read
+   [references/env.md](references/env.md) for runtime configuration.
 
-## Download
+## CLI
 
-For a DOI:
+Install the pinned dependency before use; scripts never install packages:
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 scripts/fetch.py '10.1038/s41586-020-2649-2' \
+```
+
+Fetch by DOI:
+
+```bash
+python3 scripts/fetch.py '10.48550/arXiv.1706.03762' \
   --out ./papers --format json --pretty
 ```
 
-For an exact title:
+Fetch by exact title:
 
 ```bash
 python3 scripts/fetch.py \
@@ -47,29 +50,20 @@ python3 scripts/fetch.py \
   --out ./papers --format json --pretty
 ```
 
-If multiple distinct DOIs still match, stop on `title_ambiguous` and present
-the returned candidates. Never choose the first candidate merely because its
-normalized title is identical.
-
-Use `--dry-run` to preview the first resolved candidate. Use `schema` to inspect
-the machine contract:
-
-```bash
-python3 scripts/fetch.py schema --pretty
-```
+Use `schema` to inspect the unchanged machine contract version. A verified
+existing artifact may return `skipped: true`.
 
 ## Result Rules
 
-- Treat exit code `0` as complete, `1` as unresolved, `3` as invalid input or
-  unsafe idempotency reuse, and `4` as retryable transport failure.
-- Require `pypdf` structural parsing, at least one readable page, and a final
-  `%%EOF` marker before committing a PDF or manifest.
-- Accept a skip only when the adjacent manifest DOI matches and its SHA-256
-  matches the current file bytes.
-- Never claim success from HTML, an incomplete file, or a browser download that
-  was selected only because it was newest.
-- Do not combine `--stream` and `--pretty`; stream output must remain NDJSON.
-- Respect publisher terms, institutional authorization, and applicable law.
+- Treat exit code `0` as complete, `1` as unresolved, `3` as invalid input,
+  and `4` as retryable transport failure.
+- Require `pypdf` parsing, at least one page, a final `%%EOF`, matching size,
+  and SHA-256 before committing the PDF and manifest.
+- Never infer redistribution permission from successful access. Preserve
+  `access_basis`, `license_status`, and source-declared license fields.
+- Never select the newest file in Downloads or accept HTML, truncated PDFs,
+  symbolic links, partial downloads, credentials, cookies, passwords, or
+  session tokens.
 
 ## Provenance
 

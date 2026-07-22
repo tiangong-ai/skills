@@ -1,18 +1,60 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import RoutingHttp
+from helpers import PDF_BYTES, RoutingHttp
+from paper_fetch import FetchRequest, fetch_paper
 from paper_fetch.errors import PaperFetchError
 from paper_fetch.resolvers import OpenAccessResolvers
 
 
 class TitleResolverTests(unittest.TestCase):
+    def test_title_resolution_and_download_use_injected_transport(self):
+        pdf_url = "https://oa.example/title.pdf"
+        transport = RoutingHttp(
+            json_routes={
+                "api.crossref.org/works": {
+                    "message": {
+                        "items": [
+                            {
+                                "DOI": "10.1234/example",
+                                "title": ["Attention Is All You Need"],
+                                "author": [{"family": "Vaswani"}],
+                                "issued": {"date-parts": [[2017]]},
+                            }
+                        ]
+                    }
+                },
+                "paper/search/match": {"data": []},
+                "graph/v1/paper/DOI": {
+                    "title": "Attention Is All You Need",
+                    "authors": [{"name": "Vaswani"}],
+                    "year": 2017,
+                    "venue": "NeurIPS",
+                    "isOpenAccess": True,
+                    "openAccessPdf": {"url": pdf_url, "status": "GREEN"},
+                    "externalIds": {},
+                },
+            },
+            download_payloads={pdf_url: PDF_BYTES},
+        )
+        with tempfile.TemporaryDirectory() as output:
+            result = fetch_paper(
+                FetchRequest(title="Attention Is All You Need", output_dir=output),
+                transport=transport,
+            )
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            [method for method, _ in transport.calls],
+            ["json", "json", "json", "download"],
+        )
+
     def test_crossref_exact_title_is_accepted(self):
         http = RoutingHttp(
             json_routes={

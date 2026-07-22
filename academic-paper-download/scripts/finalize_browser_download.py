@@ -27,13 +27,14 @@ from paper_fetch.artifact import (
 from paper_fetch.errors import PaperFetchError
 from paper_fetch.models import Candidate, PaperMetadata
 from paper_fetch.normalize import normalize_doi
+from paper_fetch.sanitize import sanitize_data
 
 
 PARTIAL_SUFFIXES = (".crdownload", ".part", ".download", ".tmp")
 
 
 def emit(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(sanitize_data(payload), ensure_ascii=False, indent=2))
 
 
 def fail(code: str, message: str, exit_code: int, **details: Any) -> int:
@@ -189,6 +190,22 @@ def _atomic_copy(source: Path, destination: Path, max_bytes: int) -> tuple[int, 
 
 
 def finalize(args: argparse.Namespace) -> int:
+    if not getattr(args, "output_dir", None):
+        return fail(
+            "validation_error",
+            "--output-dir is required for the final research destination",
+            3,
+        )
+    raw_output_dir = Path(args.output_dir).expanduser().absolute()
+    if raw_output_dir.is_symlink():
+        return fail("output_dir_error", "Output directory must not be a symbolic link", 4, output_dir=str(raw_output_dir))
+    output_dir = raw_output_dir
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return fail("output_dir_error", str(exc), 4, output_dir=str(output_dir))
+    if not output_dir.is_dir():
+        return fail("output_dir_error", "Output path is not a directory", 4, output_dir=str(output_dir))
     snapshot_path = Path(args.snapshot).expanduser().resolve()
     try:
         state = load_snapshot(snapshot_path)
@@ -275,30 +292,24 @@ def finalize(args: argparse.Namespace) -> int:
     copied = False
     duplicate = False
     destination = source
-    if args.output_dir:
-        output_dir = Path(args.output_dir).expanduser().resolve()
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            return fail("output_dir_error", str(exc), 4, output_dir=str(output_dir))
-        if output_dir == source.parent:
-            destination = source
+    if output_dir == source.parent:
+        destination = source
+    else:
+        preferred = output_dir / final_filename
+        existing = verify_existing(preferred, doi)
+        if existing and existing.get("sha256") == digest:
+            destination = preferred
+            duplicate = True
         else:
-            preferred = output_dir / final_filename
-            existing = verify_existing(preferred, doi)
-            if existing and existing.get("sha256") == digest:
-                destination = preferred
-                duplicate = True
-            else:
-                destination = choose_available_path(output_dir, final_filename)
-                try:
-                    copied_size, copied_digest = _atomic_copy(source, destination, args.max_bytes)
-                except (OSError, PaperFetchError) as exc:
-                    return fail("copy_failed", str(exc), 4, source=str(source), destination=str(destination))
-                if (copied_size, copied_digest) != (size, digest):
-                    destination.unlink(missing_ok=True)
-                    return fail("copy_verification_failed", "Copied PDF does not match the browser download", 4)
-                copied = True
+            destination = choose_available_path(output_dir, final_filename)
+            try:
+                copied_size, copied_digest = _atomic_copy(source, destination, args.max_bytes)
+            except (OSError, PaperFetchError) as exc:
+                return fail("copy_failed", str(exc), 4, source=str(source), destination=str(destination))
+            if (copied_size, copied_digest) != (size, digest):
+                destination.unlink(missing_ok=True)
+                return fail("copy_verification_failed", "Copied PDF does not match the browser download", 4)
+            copied = True
 
     if duplicate:
         existing_manifest = verify_existing(destination, doi)
@@ -313,8 +324,14 @@ def finalize(args: argparse.Namespace) -> int:
         return 0
 
     candidate = Candidate(
-        "publisher_browser",
+        "browser_handoff",
         args.source_url or f"https://doi.org/{doi}",
+        access_basis=getattr(args, "access_basis", None) or "user_authorized_browser",
+        license_status=getattr(args, "license_status", None) or "unknown",
+        license=getattr(args, "license", None) or "unknown",
+        license_url=getattr(args, "license_url", None) or "unknown",
+        host_type=getattr(args, "host_type", None) or "unknown",
+        article_version=getattr(args, "article_version", None) or "unknown",
         detail={"download_id": args.download_id} if args.download_id else {},
     )
     manifest = build_manifest(
@@ -362,7 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument("--snapshot", required=True)
     finalize_parser.add_argument("--downloads-dir")
     finalize_parser.add_argument("--expected-filename")
-    finalize_parser.add_argument("--output-dir")
+    finalize_parser.add_argument("--output-dir", required=True)
     finalize_parser.add_argument("--doi", required=True)
     finalize_parser.add_argument("--title")
     finalize_parser.add_argument("--author")
@@ -370,6 +387,20 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument("--journal")
     finalize_parser.add_argument("--source-url")
     finalize_parser.add_argument("--download-id")
+    finalize_parser.add_argument(
+        "--access-basis",
+        choices=["open_access", "user_authorized_browser", "unknown"],
+        default="user_authorized_browser",
+    )
+    finalize_parser.add_argument(
+        "--license-status",
+        choices=["verified", "declared", "unknown"],
+        default="unknown",
+    )
+    finalize_parser.add_argument("--license")
+    finalize_parser.add_argument("--license-url")
+    finalize_parser.add_argument("--host-type")
+    finalize_parser.add_argument("--article-version")
     finalize_parser.add_argument("--filename")
     finalize_parser.add_argument("--timeout", type=float, default=180.0)
     finalize_parser.add_argument("--poll-interval", type=float, default=1.0)

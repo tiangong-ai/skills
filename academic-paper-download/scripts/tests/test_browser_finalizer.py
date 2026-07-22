@@ -23,6 +23,7 @@ class BrowserFinalizerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.downloads = Path(self.temporary.name)
+        self.output = self.downloads / "final"
         self.snapshot_path = self.downloads / "snapshot.json"
 
     def _snapshot(self, expected: str = "Expected.pdf") -> None:
@@ -35,7 +36,7 @@ class BrowserFinalizerTests(unittest.TestCase):
             "snapshot": str(self.snapshot_path),
             "downloads_dir": str(self.downloads),
             "expected_filename": "Expected.pdf",
-            "output_dir": None,
+            "output_dir": str(self.output),
             "doi": "10.1234/example",
             "title": "Expected paper",
             "author": "Alice Example",
@@ -48,6 +49,12 @@ class BrowserFinalizerTests(unittest.TestCase):
             "poll_interval": 0.001,
             "stable_seconds": 0,
             "max_bytes": 1024,
+            "access_basis": "user_authorized_browser",
+            "license_status": "unknown",
+            "license": None,
+            "license_url": None,
+            "host_type": None,
+            "article_version": None,
         }
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -69,6 +76,13 @@ class BrowserFinalizerTests(unittest.TestCase):
         self.assertEqual(Path(payload["data"]["file"]).read_bytes(), PDF_BYTES + b"expected")
         self.assertEqual(unrelated.read_bytes(), PDF_BYTES + b"unrelated")
         self.assertEqual(payload["data"]["source_detail"]["download_id"], "download-123")
+        self.assertEqual(payload["data"]["access_basis"], "user_authorized_browser")
+        self.assertEqual(payload["data"]["license_status"], "unknown")
+        manifest = json.loads(Path(payload["manifest"]).read_text(encoding="utf-8"))
+        final_path = Path(payload["data"]["file"])
+        self.assertEqual(payload["data"]["size"], final_path.stat().st_size)
+        self.assertEqual(payload["data"]["size"], manifest["size"])
+        self.assertEqual(payload["data"]["sha256"], manifest["sha256"])
 
     def test_snapshot_rejects_reserved_expected_path(self):
         (self.downloads / "Expected.pdf").write_bytes(PDF_BYTES)
@@ -138,6 +152,15 @@ class BrowserFinalizerTests(unittest.TestCase):
             code = browser.finalize(self._args(output_dir=str(blocked)))
         self.assertEqual(code, 4)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "output_dir_error")
+
+    def test_finalize_requires_explicit_output_directory(self):
+        self._snapshot()
+        (self.downloads / "Expected.pdf").write_bytes(PDF_BYTES)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = browser.finalize(self._args(output_dir=None))
+        self.assertEqual(code, 3)
+        self.assertEqual(json.loads(output.getvalue())["error"]["code"], "validation_error")
 
 
 if __name__ == "__main__":

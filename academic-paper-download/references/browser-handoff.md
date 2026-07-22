@@ -1,81 +1,69 @@
 # Exact Browser Download Handoff
 
-Read this reference only when automatic sources are exhausted or the user
-supplies a publisher URL that requires the current browser session.
+Use this workflow only after resolving or confirming a DOI and when automatic
+OA retrieval is exhausted or the publisher requires the user's current browser
+session. Do not pass a publisher URL to `fetch.py`.
 
-## Browser Rules
+## Safety and Binding
 
-Use the available Chrome-control skill and follow its current runtime
-documentation. Do not hard-code browser API method names. Preserve the user's
-logged-in session, do not inspect cookies or passwords, and keep unrelated tabs
-open.
+Preserve the user's logged-in session without reading, exporting, or requesting
+cookies, passwords, API keys, or session tokens. Never bypass CAPTCHA, paywalls,
+browser security warnings, or authentication. Keep unrelated tabs open.
 
-Identify the download with one of these mechanisms, in priority order:
-
-1. Use the browser download ID/GUID and resolve it to the exact final path.
-2. Set a collision-free filename in the native Save dialog before saving.
-
-Never scan Downloads and select the newest PDF. If neither a download ID nor an
-exact filename is available, stop and request the minimum user action instead
-of guessing.
+Bind the download by browser download ID/GUID when available, otherwise by a
+collision-free exact filename planned before download. Never scan Downloads or
+select its newest PDF. Stop if neither exact binding is possible.
 
 ## Exact Filename Workflow
 
-1. Plan a unique filename before clicking the download control:
+1. Plan a staging filename in the browser Downloads directory:
 
 ```bash
 python3 scripts/finalize_browser_download.py plan-save \
-  --author 'First Author; Second Author' \
-  --year '2024' \
-  --title 'Concise paper title' \
-  --doi '10.1038/example'
+  --downloads-dir "$HOME/Downloads" \
+  --author 'First Author' --year '2024' \
+  --title 'Concise paper title' --doi '10.1038/example'
 ```
 
-2. Snapshot that exact filename before the download begins:
+2. Snapshot that exact path before starting the browser download:
 
 ```bash
 python3 scripts/finalize_browser_download.py snapshot \
   --downloads-dir "$HOME/Downloads" \
   --expected-filename 'FirstAuthor_2024_Concise_paper_title.pdf' \
-   --output /tmp/academic-paper-download.snapshot.json
+  --output /tmp/academic-paper-download.snapshot.json
 ```
 
-The snapshot binds finalization to this resolved Downloads directory, exact
-basename, and creation time. Do not substitute another downloads directory or
-use a symbolic link for the expected file.
+3. Start the authorized browser download and retain its ID when exposed.
 
-3. Start the browser download. If a native Save dialog appears, set the exact
-   planned filename and keep the location in Downloads. If the browser API
-   supplies a download ID, retain it for provenance and use its resolved final
-   basename as `--expected-filename`.
-
-4. Finalize only that expected file:
+4. Finalize only the snapshot-bound file into an explicit final directory:
 
 ```bash
 python3 scripts/finalize_browser_download.py finalize \
   --snapshot /tmp/academic-paper-download.snapshot.json \
   --expected-filename 'FirstAuthor_2024_Concise_paper_title.pdf' \
   --filename 'FirstAuthor_2024_Concise_paper_title.pdf' \
+  --output-dir ./papers \
   --doi '10.1038/example' \
   --title 'Concise paper title' \
   --source-url 'https://publisher.example/article'
 ```
 
-Add `--download-id ID` when the browser exposes one. Add `--output-dir` only
-when the user explicitly requested another destination. The finalizer waits for
-the exact snapshot-bound path, rejects pre-snapshot files, symbolic links, and
-partial downloads, structurally validates the PDF with `pypdf`, computes
-SHA-256, copies atomically when needed, and writes the manifest last as the
-commit record.
+Add `--download-id ID` when available. Browser Downloads is only exact-bound
+staging; `finalize` always requires `--output-dir`. By default its manifest uses
+`access_basis=user_authorized_browser` and `license_status=unknown`. Supply
+`--license-status`, `--license`, `--license-url`, `--host-type`, or
+`--article-version` only when the caller has explicitly verified those facts.
 
-## Human Action: Required Dialog First
+The finalizer rejects pre-snapshot files, symbolic links, partial downloads,
+HTML, truncated PDFs, and invalid output directories. It parses at least one
+page, checks `%%EOF`, copies atomically, verifies size/SHA-256, and commits the
+manifest last.
 
-When login, SSO, CAPTCHA, browser setup, VPN connection, or a security decision
-requires the user, stop automatic retries immediately. Never request a
-password, cookie, CAPTCHA answer, or other secret in chat.
+## Human Action
 
-On macOS, you MUST first attempt the native dialog with the exact action the
-user needs to take:
+When login, SSO, CAPTCHA, VPN, browser setup, or a security decision requires
+the user, stop retries. On macOS first attempt:
 
 ```bash
 python3 scripts/notify_human.py \
@@ -84,21 +72,7 @@ python3 scripts/notify_human.py \
   --button 'OK'
 ```
 
-Parse the command's JSON and require all of these signals before treating the
-dialog as shown: exit code `0`, `ok: true`, `data.shown: true`, and
-`data.chat_fallback_required: false`. Do not skip the command merely because
-the agent can already send a chat message.
-
-If the command is unavailable, exits nonzero, emits invalid JSON, or does not
-prove `data.shown: true`, immediately give the same actionable instruction in
-chat. A failure payload sets `data.chat_fallback_required: true` and includes
-`data.chat_fallback_message`; use that message when present.
-
-Whether the dialog succeeds or chat fallback is used, do not continue browser
-automation until the user reports that the action is complete. Then verify
-that the blocker is actually gone before continuing. Never solve or bypass a
-CAPTCHA, paywall, browser security interstitial, or authentication challenge.
-
-After the manifest and final filesystem verification succeed, close only tabs
-opened or claimed solely for this download, using the browser API documented at
-runtime.
+Treat the dialog as shown only with exit code `0`, `ok: true`,
+`data.shown: true`, and `data.chat_fallback_required: false`; otherwise present
+the same minimum action in chat. Wait for the user to report completion, then
+verify the blocker is gone before continuing.
