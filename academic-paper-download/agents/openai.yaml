@@ -1,0 +1,4 @@
+interface:
+  display_name: "Academic Paper Download"
+  short_description: "Reliably download and verify academic PDFs"
+  default_prompt: "Use $academic-paper-download to resolve, download, verify, and save an academic PDF with its provenance manifest."
