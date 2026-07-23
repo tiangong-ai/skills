@@ -18,6 +18,7 @@ from helpers import PDF_BYTES, RoutingHttp
 from paper_fetch import FetchRequest, fetch_paper
 from paper_fetch import cli
 from paper_fetch.errors import PaperFetchError
+from paper_fetch.sanitize import sanitize_data, sanitize_text, sanitize_url
 
 
 class SanitizationTests(unittest.TestCase):
@@ -84,6 +85,25 @@ class SanitizationTests(unittest.TestCase):
         self.assertNotIn(api_key, combined)
         self.assertNotIn(bearer, combined)
         self.assertIn("REDACTED", combined)
+
+    def test_browser_credentials_cookies_sessions_and_fragments_are_redacted(self):
+        secrets = ["user-secret", "password-secret", "cookie-secret", "session-secret", "license-secret"]
+        payload = {
+            "url": sanitize_url(
+                "https://user-secret:password-secret@example.test/file.pdf"
+                "?token=session-secret#session_id=cookie-secret"
+            ),
+            "Authorization": "Bearer session-secret",
+            "Cookie": "session=cookie-secret",
+            "license_key": "license-secret",
+            "message": sanitize_text(
+                "proxy_password=password-secret Authorization: Bearer session-secret"
+            ),
+        }
+        rendered = json.dumps(sanitize_data(payload))
+        for secret in secrets:
+            self.assertNotIn(secret, rendered)
+        self.assertIn("REDACTED", rendered)
 
     def test_removed_source_name_is_absent_from_skill_files(self):
         forbidden = "sci" + "hub"

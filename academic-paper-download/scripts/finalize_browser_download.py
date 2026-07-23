@@ -297,7 +297,11 @@ def finalize(args: argparse.Namespace) -> int:
     else:
         preferred = output_dir / final_filename
         existing = verify_existing(preferred, doi)
-        if existing and existing.get("sha256") == digest:
+        if (
+            existing
+            and existing.get("sha256") == digest
+            and getattr(args, "browser_backend", None) != "cloakbrowser"
+        ):
             destination = preferred
             duplicate = True
         else:
@@ -323,6 +327,18 @@ def finalize(args: argparse.Namespace) -> int:
         )
         return 0
 
+    source_detail = {
+        key: value
+        for key, value in {
+            "browser_backend": getattr(args, "browser_backend", None),
+            "download_id": getattr(args, "download_id", None),
+            "download_url": getattr(args, "download_url", None),
+            "suggested_filename": getattr(args, "suggested_filename", None),
+            "cloakbrowser_version": getattr(args, "cloakbrowser_version", None),
+            "browser_version": getattr(args, "browser_version", None),
+        }.items()
+        if value not in (None, "")
+    }
     candidate = Candidate(
         "browser_handoff",
         args.source_url or f"https://doi.org/{doi}",
@@ -332,7 +348,7 @@ def finalize(args: argparse.Namespace) -> int:
         license_url=getattr(args, "license_url", None) or "unknown",
         host_type=getattr(args, "host_type", None) or "unknown",
         article_version=getattr(args, "article_version", None) or "unknown",
-        detail={"download_id": args.download_id} if args.download_id else {},
+        detail=source_detail,
     )
     manifest = build_manifest(
         doi=doi,
@@ -341,7 +357,7 @@ def finalize(args: argparse.Namespace) -> int:
         path=destination,
         size=size,
         digest=digest,
-        access_mode="current-browser-session",
+        access_mode=getattr(args, "access_mode", None) or "current-browser-session",
         extra={
             "browser_original_file": str(browser_original_file),
             "browser_source_file": str(source),
@@ -387,6 +403,16 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument("--journal")
     finalize_parser.add_argument("--source-url")
     finalize_parser.add_argument("--download-id")
+    finalize_parser.add_argument("--download-url")
+    finalize_parser.add_argument("--suggested-filename")
+    finalize_parser.add_argument("--cloakbrowser-version")
+    finalize_parser.add_argument("--browser-version")
+    finalize_parser.add_argument("--browser-backend", choices=["chrome", "cloakbrowser"])
+    finalize_parser.add_argument(
+        "--access-mode",
+        choices=["current-browser-session", "dedicated-browser-profile"],
+        default="current-browser-session",
+    )
     finalize_parser.add_argument(
         "--access-basis",
         choices=["open_access", "user_authorized_browser", "unknown"],

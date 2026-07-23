@@ -1,6 +1,6 @@
 ---
 name: academic-paper-download
-description: "Fetch and atomically save verified academic-paper PDFs from legal open-access sources using a DOI or exact title, with access/license provenance and an adjacent hash manifest. Use for automatic OA retrieval or for a publisher URL that must first be resolved to a DOI and may then require a user-authorized browser handoff; supports an injectable transport for embedding in research systems."
+description: "Fetch and atomically save verified academic-paper PDFs from legal open-access sources using a DOI or exact title, with access/license provenance and an adjacent hash manifest. Use for automatic OA retrieval or for a publisher URL that must first be resolved to a DOI and may then require an explicitly selected Chrome or optional CloakBrowser user-authorized browser handoff; supports an injectable transport for embedding in research systems."
 ---
 
 # Academic Paper Download
@@ -19,10 +19,15 @@ Unpaywall, Semantic Scholar OA, arXiv, then browser handoff.
 3. Run the downloader and accept success only when the result contains a
    verified file, SHA-256, size, and adjacent manifest.
 4. If automatic OA sources are exhausted, or a publisher page requires login,
-   institution access, or interaction, read
-   [references/browser-handoff.md](references/browser-handoff.md). Do not bypass
-   CAPTCHA, paywalls, security warnings, or authentication.
-5. Read [references/integration.md](references/integration.md) when embedding
+   institution access, or interaction, explicitly choose a browser backend and
+   read [references/browser-handoff.md](references/browser-handoff.md). Prefer
+   the current Chrome session when it already has authorized institutional
+   access. Never silently switch backends after login failure.
+5. When the user explicitly selects CloakBrowser, also read
+   [references/cloakbrowser-handoff.md](references/cloakbrowser-handoff.md).
+   Keep it outside `PaperTransport`; do not use its stealth or humanize features
+   to solve CAPTCHA, Turnstile, paywalls, security warnings, or authentication.
+6. Read [references/integration.md](references/integration.md) when embedding
    the library or injecting a provenance-recording transport. Read
    [references/env.md](references/env.md) for runtime configuration.
 
@@ -33,6 +38,10 @@ Install the pinned dependency before use; scripts never install packages:
 ```bash
 python3 -m pip install -r requirements.txt
 ```
+
+Install `requirements-cloakbrowser.txt` only in an isolated environment when
+that optional backend is explicitly selected. Its browser binary is a separate,
+preflight-verified installation; the handoff script never downloads it.
 
 Fetch by DOI:
 
