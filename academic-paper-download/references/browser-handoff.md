@@ -4,6 +4,23 @@ Use this workflow only after resolving or confirming a DOI and when automatic
 OA retrieval is exhausted or the publisher requires the user's current browser
 session. Do not pass a publisher URL to `fetch.py`.
 
+## Choose the Backend Explicitly
+
+- Choose `chrome` when the user's current Chrome already has an authorized
+  institution session. This is the preferred recommendation in that case.
+- Choose `cloakbrowser` only when the user requests the optional isolated
+  executor and can use a dedicated persistent profile. Read
+  [cloakbrowser-handoff.md](cloakbrowser-handoff.md) before running it.
+- Never switch from Chrome to CloakBrowser because a login, SSO, MFA,
+  entitlement, or subscription attempt failed. Stop, report the failure, and
+  ask the user to choose the next backend explicitly.
+
+CloakBrowser is only a browser-handoff backend. It is not a `PaperTransport`
+and does not replace Crossref, Unpaywall, Semantic Scholar, arXiv, or their
+ordinary HTTP requests.
+
+## Chrome Workflow
+
 ## Safety and Binding
 
 Preserve the user's logged-in session without reading, exporting, or requesting

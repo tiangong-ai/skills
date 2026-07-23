@@ -8,19 +8,38 @@ from typing import Any
 
 REDACTED = "[REDACTED]"
 SENSITIVE_NAMES = {
+    "access_token",
+    "auth",
     "email",
     "mailto",
     "api_key",
-    "key",
-    "token",
     "authorization",
+    "cookie",
+    "credential",
+    "key",
+    "license_key",
+    "password",
+    "proxy_password",
+    "refresh_token",
+    "secret",
+    "session",
+    "session_id",
+    "session_token",
+    "set_cookie",
+    "signature",
+    "sig",
+    "token",
     "x-api-key",
 }
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.-])")
 _URL = re.compile(r"https?://[^\s<>\"']+")
 _ASSIGNMENT = re.compile(
-    r"(?i)\b(email|mailto|api[_-]?key|key|token|authorization|x-api-key)\s*([:=])\s*([^\s,;&]+)"
+    r"(?i)\b(access[_-]?token|auth|authorization|cookie|credential|email|mailto|"
+    r"api[_-]?key|key|license[_-]?key|password|proxy[_-]?password|refresh[_-]?token|"
+    r"secret|session(?:[_-]?(?:id|token))?|set[_-]?cookie|signature|sig|token|x-api-key)"
+    r"\s*([:=])\s*([^\s,;&]+)"
 )
+_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 
 
 def _sensitive_name(value: object) -> bool:
@@ -47,12 +66,24 @@ def sanitize_url(url: str) -> str:
             ],
             doseq=True,
         )
-        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
+        fragment_items = urllib.parse.parse_qsl(parsed.fragment, keep_blank_values=True)
+        if fragment_items:
+            fragment = urllib.parse.urlencode(
+                [
+                    (key, REDACTED if _sensitive_name(key) else value)
+                    for key, value in fragment_items
+                ],
+                doseq=True,
+            )
+        else:
+            fragment = sanitize_text_without_urls(parsed.fragment)
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, query, fragment))
     except (TypeError, ValueError):
         return sanitize_text_without_urls(str(url))
 
 
 def sanitize_text_without_urls(value: str) -> str:
+    value = _BEARER.sub(f"Bearer {REDACTED}", value)
     value = _ASSIGNMENT.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", value)
     return _EMAIL.sub(REDACTED, value)
 

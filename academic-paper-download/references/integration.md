@@ -38,3 +38,12 @@ Transport implementations should raise `PaperFetchError(code, message,
 retryable=...)` for classified failures and must write downloads only to the
 provided temporary `destination`. They must not log sensitive header values or
 unsanitized URL query credentials.
+
+## Browser Handoff Boundary
+
+Do not implement Chrome or CloakBrowser as `PaperTransport`. The optional
+CloakBrowser executor has a separate injectable `BrowserAdapter` for fake-based
+tests and publisher-page interaction. It captures one Playwright-compatible
+Download object, saves it to a preplanned unique staging path, and then invokes
+`finalize_browser_download.py`; it does not participate in OA resolution or
+metadata HTTP traffic.
