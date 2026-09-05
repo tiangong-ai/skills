@@ -11,8 +11,10 @@ import {
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REQUIREMENT_SCHEMA_VERSION =
+const REQUIREMENT_SCHEMA_VERSION_V1 =
   "tiangong.data.skill-capability-requirement.v1";
+const REQUIREMENT_SCHEMA_VERSION_V2 =
+  "tiangong.data.skill-capability-requirement.v2";
 const PROVENANCE_SCHEMA_VERSION =
   "tiangong.data.skill-migration-provenance.v1";
 const DESCRIBE_SCHEMA_VERSION = "tiangong.data.describe.v1";
@@ -26,7 +28,11 @@ const REQUIREMENT_FIELDS = new Set([
   "capabilityContractVersion",
   "operations",
 ]);
-const REQUIREMENT_OPERATION_FIELDS = new Set(["contractVersion"]);
+const REQUIREMENT_OPERATION_FIELDS_V1 = new Set(["contractVersion"]);
+const REQUIREMENT_OPERATION_FIELDS_V2 = new Set([
+  "contractVersion",
+  "requiredFeatures",
+]);
 const PROVENANCE_FIELDS = new Set([
   "schemaVersion",
   "generatedWithCliVersion",
@@ -102,6 +108,25 @@ function contractVersion(value, label) {
   return version;
 }
 
+function featureList(value, label) {
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(`${label} must be a non-empty feature array.`);
+  }
+  const features = value.map((feature, index) =>
+    requireString(feature, `${label}[${index}]`),
+  );
+  if (
+    features.some(
+      (feature) => !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(feature),
+    ) ||
+    new Set(features).size !== features.length ||
+    [...features].sort().some((feature, index) => feature !== features[index])
+  ) {
+    fail(`${label} must contain sorted unique feature IDs.`);
+  }
+  return features;
+}
+
 function semverContractVersion(value, label) {
   return String(parseSemver(value, label)[0]);
 }
@@ -171,9 +196,12 @@ export function validateDataSkillRequirement(requirement) {
     REQUIREMENT_FIELDS,
     "requirement",
   );
-  if (value.schemaVersion !== REQUIREMENT_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== REQUIREMENT_SCHEMA_VERSION_V1 &&
+    value.schemaVersion !== REQUIREMENT_SCHEMA_VERSION_V2
+  ) {
     fail(
-      `requirement schemaVersion must be ${REQUIREMENT_SCHEMA_VERSION}, got ${String(value.schemaVersion)}.`,
+      `requirement schemaVersion must be ${REQUIREMENT_SCHEMA_VERSION_V1} or ${REQUIREMENT_SCHEMA_VERSION_V2}, got ${String(value.schemaVersion)}.`,
     );
   }
   requireString(value.skillName, "skillName");
@@ -186,14 +214,24 @@ export function validateDataSkillRequirement(requirement) {
   if (Object.keys(operations).length === 0) {
     fail("requirement operations must not be empty.");
   }
+  let hasRequiredFeatures = false;
   for (const [operationId, operation] of Object.entries(operations)) {
     requireString(operationId, "operationId");
     const item = assertClosedObject(
       operation,
-      REQUIREMENT_OPERATION_FIELDS,
+      value.schemaVersion === REQUIREMENT_SCHEMA_VERSION_V2
+        ? REQUIREMENT_OPERATION_FIELDS_V2
+        : REQUIREMENT_OPERATION_FIELDS_V1,
       `requirement operation ${operationId}`,
     );
     contractVersion(item.contractVersion, `${operationId}.contractVersion`);
+    if (item.requiredFeatures !== undefined) {
+      featureList(item.requiredFeatures, `${operationId}.requiredFeatures`);
+      hasRequiredFeatures = true;
+    }
+  }
+  if (value.schemaVersion === REQUIREMENT_SCHEMA_VERSION_V2 && !hasRequiredFeatures) {
+    fail("A v2 requirement must declare at least one required feature.");
   }
   return value;
 }
@@ -202,22 +240,52 @@ export function buildDataSkillRequirement({
   skillName,
   describe,
   operationIds,
+  requiredFeatures = {},
 }) {
   requireString(skillName, "skillName");
   const manifest = manifestFromDescribe(describe);
+  const selected = selectedOperations(manifest, operationIds);
+  const selectedIds = new Set(selected.map((operation) => operation.operationId));
+  for (const operationId of Object.keys(requiredFeatures)) {
+    if (!selectedIds.has(operationId)) {
+      fail(`Required features reference unselected operationId ${operationId}.`);
+    }
+  }
+  let usesFeatures = false;
   const operations = Object.fromEntries(
-    selectedOperations(manifest, operationIds).map((operation) => [
-      operation.operationId,
-      {
-        contractVersion: semverContractVersion(
-          operation.operationVersion,
-          `${operation.operationId}.operationVersion`,
-        ),
-      },
-    ]),
+    selected.map((operation) => {
+      const features = requiredFeatures[operation.operationId];
+      const normalizedFeatures =
+        features === undefined
+          ? []
+          : [...featureList([...features].sort(), `${operation.operationId}.requiredFeatures`)];
+      const publishedFeatures = new Set(operation.features ?? []);
+      for (const feature of normalizedFeatures) {
+        if (!publishedFeatures.has(feature)) {
+          fail(
+            `${operation.operationId} does not publish required feature ${feature}.`,
+          );
+        }
+      }
+      usesFeatures ||= normalizedFeatures.length > 0;
+      return [
+        operation.operationId,
+        {
+          contractVersion: semverContractVersion(
+            operation.operationVersion,
+            `${operation.operationId}.operationVersion`,
+          ),
+          ...(normalizedFeatures.length === 0
+            ? {}
+            : { requiredFeatures: normalizedFeatures }),
+        },
+      ];
+    }),
   );
   return {
-    schemaVersion: REQUIREMENT_SCHEMA_VERSION,
+    schemaVersion: usesFeatures
+      ? REQUIREMENT_SCHEMA_VERSION_V2
+      : REQUIREMENT_SCHEMA_VERSION_V1,
     skillName,
     capabilityId: requireString(manifest.capabilityId, "capabilityId"),
     capabilityContractVersion: semverContractVersion(
@@ -261,6 +329,15 @@ export function verifyDataSkillRequirement({ requirement, describe }) {
     if (actualOperationContract !== operationRequirement.contractVersion) {
       fail(
         `${operationId} contract drift: expected major ${operationRequirement.contractVersion}, got ${actualOperationContract}.`,
+      );
+    }
+    const publishedFeatures = new Set(operation.features ?? []);
+    const missingFeatures = (operationRequirement.requiredFeatures ?? []).filter(
+      (feature) => !publishedFeatures.has(feature),
+    );
+    if (missingFeatures.length > 0) {
+      fail(
+        `${operationId} feature drift: missing ${missingFeatures.join(", ")}.`,
       );
     }
   }
@@ -512,12 +589,36 @@ function generateCommand(options) {
     skillName: readSkillName(skillPath),
     describe,
     operationIds,
+    requiredFeatures: parseRequiredFeatures(options["required-features"]),
   });
   const outputPath =
     options.output ??
     resolve(skillPath, "references", "tiangong-data-requirement.json");
   writeJsonAtomically(outputPath, requirement);
   process.stdout.write(`${resolve(outputPath)}\n`);
+}
+
+function parseRequiredFeatures(value) {
+  if (value === undefined) return {};
+  const result = {};
+  for (const entry of requireString(value, "--required-features").split(";")) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0 || separator === entry.length - 1) {
+      fail(
+        "--required-features must use operation=feature[,feature][;operation=feature].",
+      );
+    }
+    const operationId = entry.slice(0, separator).trim();
+    if (result[operationId]) {
+      fail(`Duplicate required feature operationId ${operationId}.`);
+    }
+    result[operationId] = entry
+      .slice(separator + 1)
+      .split(",")
+      .map((feature) => feature.trim())
+      .filter(Boolean);
+  }
+  return result;
 }
 
 function verifyCommand(options) {

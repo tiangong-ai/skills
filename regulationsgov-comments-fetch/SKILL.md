@@ -19,7 +19,12 @@ conversion, pagination, limits, validation, partial results, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
-4. Ensure `REGGOV_API_KEY` is present in the CLI process environment, then run
+4. Inspect `manifest.availability` and `discovery.availability`. This capability
+   is currently `suspended` after its production live gate returned HTTP 503.
+   Stop while it remains suspended; a key, retry, direct provider call, or
+   standalone Skill invocation does not make it executable.
+5. After a future CLI release reports it as available, ensure `REGGOV_API_KEY`
+   is present in the CLI process environment, then run
    the default static doctor. Never place the key in argv, request JSON, a
    Skill-local file, logs, or output.
 
@@ -30,8 +35,9 @@ tiangong-ai data doctor regulations-gov.comments --json
 
 Use current Discovery Metadata from `data describe` to confirm source
 ownership, coverage, agency-dependent field visibility, limits, selection
-hints, `provides`, and `doesNotProvide`. A blocked static doctor means the
-logical credential is unavailable; stop instead of bypassing the CLI.
+hints, `provides`, and `doesNotProvide`. A blocked static doctor can report a
+suspended capability or a missing logical credential; stop and preserve its
+machine-readable reason instead of bypassing the CLI.
 
 ## Choose and bound the search
 

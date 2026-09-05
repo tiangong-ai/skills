@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "tiangong.data.skill-capability-requirement.v1",
+  "schemaVersion": "tiangong.data.skill-capability-requirement.v2",
   "skillName": "youtube-comments-fetch",
   "capabilityId": "youtube.public-content",
   "capabilityContractVersion": "1",
   "operations": {
     "fetch-comments": {
-      "contractVersion": "1"
+      "contractVersion": "1",
+      "requiredFeatures": ["youtube.reply-strategy"]
     }
   }
 }

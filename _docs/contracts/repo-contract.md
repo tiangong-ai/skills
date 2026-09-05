@@ -17,8 +17,8 @@ checkPaths:
   - Dockerfile.clean-test
   - scripts/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-03
-lastReviewedCommit: 246f93abffc19ff7efa6aad37f9cf2515b4fc82b
+lastReviewedAt: 2026-09-05
+lastReviewedCommit: 24c5695ca3129bbe021e4b80d830742841e9011e
 ---
 
 # Skills Repository Contract
@@ -38,7 +38,7 @@ marketplace grouping metadata.
 - Runtime credentials and user-private data do not belong in skill assets,
   references, or scripts.
 - Atomic data Skills own trigger semantics, source guidance, limitations, and
-  a stable capability/operation contract-major requirement. Tiangong CLI owns connector execution,
+  a stable capability/operation contract-major requirement and any operation features the Skill depends on. Tiangong CLI owns connector execution,
   machine schemas, HTTP/authentication, retries, errors, and core receipts.
   The caller or workspace runtime lock selects the exact package and integrity.
   The qualifying CLI version and exact manifest/Schema digests live in one

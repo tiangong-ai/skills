@@ -17,8 +17,8 @@ checkPaths:
   - "*-search/**"
   - "*-download/**"
   - tiangong-auto-research/**
-lastReviewedAt: 2026-09-01
-lastReviewedCommit: 4e22640981bca2c037dae31f47666400afefab5c
+lastReviewedAt: 2026-09-05
+lastReviewedCommit: 24c5695ca3129bbe021e4b80d830742841e9011e
 ---
 
 # 原子数据 Skill 目标架构
@@ -50,7 +50,7 @@ CLI 仓库中的 `docs/agents/data-runtime-architecture.md` 是命令、manifest
 | 用户意图、任务选择、结果使用边界     | Skills        | 写入 `SKILL.md`，为 agent 提供语义入口       |
 | 数据源客观说明、覆盖范围、许可、限制 | CLI           | 由 Discovery Metadata 统一发布，Skill 不复制 |
 | capability/operation 的客观说明      | CLI           | 由 catalog/describe 发布三层发现语义         |
-| capability/operation 兼容要求        | Skills        | 保存稳定、机器可检验的 contract major        |
+| capability/operation 兼容要求        | Skills        | 保存稳定、机器可检验的 contract major 与必要 feature |
 | exact CLI package/integrity          | 调用方/Workspace | 由 runtime lock 统一负责，不分散进 Skill   |
 | connector、Schema、错误码、回执      | CLI           | Skills 不复制定义                            |
 | 受控下载与本地 artifact transaction  | CLI           | Skill 只选择显式目录并解释结果边界           |
@@ -100,13 +100,15 @@ CLI Discovery Metadata 发布。Skill 只增加自然语言意图路由和上层
 - requirement schema 版本与 `skillName`；
 - `capabilityId` 和兼容的 capability contract major；
 - 每个允许 operation 的 `operationId` 与兼容 contract major。
+- 当 Skill 依赖某项同 major 内新增的行为时，声明该 operation 的
+  `requiredFeatures`；不依赖额外行为的 requirement 继续使用 v1。
 
 requirement 不包含 CLI package version、manifest digest 或输入/输出 Schema digest，
 因此无关模块变更、普通修复和兼容扩展不会触发 21 个 Skill 锁步更新。调用方负责选择
 实际 CLI；managed Auto Research 必须使用 workspace `runtime-lock.json`，独立 Skill
 则使用调用方已经解析的稳定 CLI。两种路径都先用同一运行时的 `data describe` 检查
 requirement，并从返回值取得本次 `DataRunRequest` 所需的精确 capability/operation
-版本。contract major 变化或 operation 消失才要求更新 Skill。
+版本。contract major 变化、operation 消失或所需 feature 不再发布才要求更新 Skill。
 
 删除旧 provider runtime 仍需一次精确迁移资格证据。它集中保存在仓库级
 `scripts/data-skill-migration-provenance.json`，记录本次验收使用的 CLI 版本、manifest
@@ -139,6 +141,11 @@ Auto Research 已接入同一 CLI 内部数据服务：native discover packet �
 相同核心结果/回执；Research 只额外负责 runtime/manifest binding、owner-only credential
 map、预算、来源/证据准入、永久 evidence/artifact、journal、handoff 和 review。这些状态
 不得回流到薄 Skill；新增 connector/operation 也不要求新增 Auto Research provider 代码。
+大结果的完整 core result 始终进入不可变 evidence store；Agent context 只做有界投影，并
+通过 receipt-bound opaque cursor 从同一对象续读，不重复访问 provider。Auto Research 必须
+分别解释 provider coverage、operation/runtime limit coverage 与 context view coverage：前两者
+决定数据本身是否存在缺口，后者只决定 Agent 当前看到了多少。需要逐行审阅时续读至游标
+为空；允许摘要或自适应停止时必须披露已呈现/总量比例。
 
 ## 原子性与独立性
 
@@ -177,7 +184,7 @@ map、预算、来源/证据准入、永久 evidence/artifact、journal、handof
 一次原子 Skill 迁移完成必须同时满足：
 
 - CLI 中已有已发布、TypeScript 7 实现的 capability/operation 及闭合测试；
-- Skill 只保留意图入口、上层使用边界和可检验 contract-major requirement；
+- Skill 只保留意图入口、上层使用边界和可检验 contract-major/required-feature requirement；
 - 客观来源/覆盖/限制通过 CLI Discovery Metadata 获取，不在 Skill 重复维护；
 - 无 Python/旧 harness/OpenClaw 执行依赖，无重复机器 Schema；
 - requirement/provenance、skill-creator、安装 smoke 和 docpact 门禁通过；

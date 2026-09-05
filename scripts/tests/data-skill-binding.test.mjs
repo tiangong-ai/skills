@@ -144,6 +144,7 @@ const PILOT_SKILLS = [
     operations: [
       {
         operationId: "fetch-hourly",
+        requiredFeatures: ["open-meteo.series-all-null"],
         inputKeys: [
           "cellSelection",
           "domain",
@@ -161,6 +162,7 @@ const PILOT_SKILLS = [
     operations: [
       {
         operationId: "fetch-daily",
+        requiredFeatures: ["open-meteo.series-all-null"],
         inputKeys: [
           "cellSelection",
           "dailyVariables",
@@ -178,6 +180,7 @@ const PILOT_SKILLS = [
     operations: [
       {
         operationId: "fetch",
+        requiredFeatures: ["open-meteo.series-all-null"],
         inputKeys: [
           "cellSelection",
           "dailyVariables",
@@ -304,13 +307,14 @@ const PILOT_SKILLS = [
     operations: [
       {
         operationId: "fetch-comments",
+        requiredFeatures: ["youtube.reply-strategy"],
         inputKeys: [
           "endDateTime",
-          "includeReplies",
           "maxReplyPagesPerThread",
           "maxThreadPagesPerVideo",
           "order",
           "pageSize",
+          "replyStrategy",
           "startDateTime",
           "timeField",
           "videoIds",
@@ -377,6 +381,7 @@ function describeFixture() {
             digest: "b".repeat(64),
           },
           limits: {},
+          features: ["example.stable-search"],
         },
       ],
       manifestDigest: "c".repeat(64),
@@ -428,6 +433,44 @@ test("accepts package, discovery, and compatible execution changes", () => {
 
   assert.doesNotThrow(() =>
     verifyDataSkillRequirement({ requirement, describe }),
+  );
+});
+
+test("binds optional operation features and rejects a same-major CLI that lacks them", () => {
+  const requirement = buildDataSkillRequirement({
+    skillName: "example-record-search",
+    describe: describeFixture(),
+    operationIds: ["search"],
+    requiredFeatures: {
+      search: ["example.stable-search"],
+    },
+  });
+
+  assert.deepEqual(requirement, {
+    schemaVersion: "tiangong.data.skill-capability-requirement.v2",
+    skillName: "example-record-search",
+    capabilityId: "example.records",
+    capabilityContractVersion: "1",
+    operations: {
+      search: {
+        contractVersion: "2",
+        requiredFeatures: ["example.stable-search"],
+      },
+    },
+  });
+  assert.doesNotThrow(() =>
+    verifyDataSkillRequirement({ requirement, describe: describeFixture() }),
+  );
+
+  const sameMajorWithoutFeature = describeFixture();
+  sameMajorWithoutFeature.manifest.operations[0].features = [];
+  assert.throws(
+    () =>
+      verifyDataSkillRequirement({
+        requirement,
+        describe: sameMajorWithoutFeature,
+      }),
+    /search feature drift.*example\.stable-search/,
   );
 });
 
@@ -607,6 +650,13 @@ test("pilot data skills are thin, package-independent semantic entrypoints", () 
         example.operationVersion,
         `${requirementOperation.contractVersion}.0.0`,
       );
+      assert.deepEqual(
+        requirementOperation.requiredFeatures ?? [],
+        expectedOperation.requiredFeatures ?? [],
+      );
+      for (const feature of expectedOperation.requiredFeatures ?? []) {
+        assert.match(skill, new RegExp(feature.replaceAll(".", "\\.")));
+      }
       assert.deepEqual(
         Object.keys(example.input).sort(),
         expectedOperation.inputKeys,

@@ -17,8 +17,8 @@ checkPaths:
   - scripts/**
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-03
-lastReviewedCommit: 246f93abffc19ff7efa6aad37f9cf2515b4fc82b
+lastReviewedAt: 2026-09-05
+lastReviewedCommit: 24c5695ca3129bbe021e4b80d830742841e9011e
 ---
 
 # Skills Development Runbook
@@ -69,8 +69,8 @@ blocked local request with provider credentials removed. It must not contact a
 provider.
 
 Use `scripts/data-skill-binding.mjs generate` and `verify` for stable per-Skill
-requirements. These checks compare capability and operation contract majors and
-do not compare package versions or digests. Use `generate-provenance` and
+requirements. These checks compare capability and operation contract majors plus
+declared `requiredFeatures`; they do not compare package versions or digests. Use `generate-provenance` and
 `verify-provenance` only to qualify the exact CLI release used by this migration;
 the resulting repository artifact is not installed with each Skill.
 

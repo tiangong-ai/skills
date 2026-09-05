@@ -38,8 +38,8 @@ FIRMS Active Fire, OpenAQ Air Quality, Regulations.gov Comments,
 Regulations.gov Comment Details, Regulations.gov Attachments, USBR Project Records, USBR RISE, USGS Water IV, three Open-Meteo sources, and
 GDELT DOC, Events, GKG, and Mentions, plus Bluesky Cascades, YouTube Video
 Search, and YouTube Comments—are thin semantic Skills over the Tiangong CLI
-TypeScript 7 data runtime. Each candidate records only its stable capability and
-operation contract-major requirements in
+TypeScript 7 data runtime. Each candidate records its stable capability and
+operation contract-major requirements plus any operation feature it actually depends on in
 `references/tiangong-data-requirement.json`; the caller or workspace runtime
 lock chooses the actual CLI build. The agent uses that same resolved CLI for
 `data describe` and `data run`. These Skills contain no second provider
@@ -242,6 +242,11 @@ TypeScript runtime through its Research evidence command. The Skill does not
 duplicate provider adapters or keep a fixed connector list; Research adds only
 budget, owner-only credential, immutable receipt/ledger, artifact, and review
 bindings around the unchanged core result.
+When that result is larger than one Agent context, Auto Research keeps the full
+immutable evidence and exposes receipt-bound continuation cursors. Exhaustive
+row review follows those local pages to completion; summary work may stop early
+only with the presented fraction disclosed. Provider gaps, operation limits,
+and Agent-context projection remain separate signals.
 `tiangong-auto-research-workbuddy` is only a sandboxed-IDE adapter. It routes
 back to the canonical orchestrator and its signed reviewer-bridge reference;
 it does not define a second research workflow.

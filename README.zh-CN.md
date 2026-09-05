@@ -38,7 +38,7 @@ USBR Project Records、USBR RISE、USGS Water IV、三个 Open-Meteo 来源，�
 加上 Bluesky Cascades、YouTube Video Search 与 YouTube Comments，共二十一个 Skill 已
 收敛为 Tiangong CLI TypeScript 7 数据运行时之上的薄语义候选。每个候选只在
 `references/tiangong-data-requirement.json` 中记录稳定的 capability/operation
-contract major 要求；实际 CLI build 由调用方或 workspace runtime lock 选择。Agent
+contract major 要求，以及该 Skill 确实依赖的 operation feature；实际 CLI build 由调用方或 workspace runtime lock 选择。Agent
 使用同一已解析 CLI 运行 `data describe` 与 `data run`。这些 Skills 不再保留第二份
 provider connector 运行时，也不保存各自的 package lock。
 
@@ -214,6 +214,9 @@ data catalog，Auto Research 通过 Research evidence 命令进程内调用同�
 runtime。Skill 不复制 provider adapter，也不维护固定 connector 清单；Research 只在
 不改变核心结果的前提下增加预算、owner-only credential、不可变 receipt/ledger、artifact
 和 review 绑定。
+当结果大于一次 Agent context 时，Auto Research 仍完整保存不可变证据，并提供与 receipt
+绑定的续读游标。需要逐行完整审阅时必须读到游标为空；摘要任务可以提前停止，但必须披露
+已呈现比例。provider 缺口、operation 限制和 Agent context 投影始终分开表达。
 `tiangong-auto-research-workbuddy` 只负责沙箱 IDE 路由，会回到 canonical
 orchestrator 及其签名 reviewer bridge 流程，不维护第二套研究协议。
 创建 PPT 时首选 PPT Master；Anthropic PPTX 仍是兼容的按场景选项，需要时可在

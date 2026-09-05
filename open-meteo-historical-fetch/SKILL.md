@@ -17,7 +17,8 @@ receipts.
    compatible capability and operation contract majors; it does not select a
    package build.
 3. Run `data describe` with that same CLI. Continue only when the capability
-   ID and required contract majors match, and copy the exact current
+   ID, required contract majors, and the
+   `open-meteo.series-all-null` operation feature match; then copy the exact current
    capability/operation versions from that response into the run request.
 4. Run the default static doctor. Do not add `--live` unless the user explicitly
    asks for a provider probe.
@@ -99,6 +100,10 @@ result to another workflow.
   coordinates plus elevation.
 - Retain nulls as unavailable model values. Never convert them to zero or
   interpolate them without an explicit downstream method.
+- Distinguish `series-missing` from `series-all-null`: missing means the
+  provider did not return a requested series, while all-null means it returned
+  a structurally valid, aligned series with no usable numeric values. Preserve
+  an all-null series and report the machine-readable issue code.
 - Treat `partial` as incomplete coordinate, section, timestamp, variable, or
   unit coverage and report the affected paths with the usable series.
 - In GMT mode, require exactly 24 strictly ascending hourly timestamps and one

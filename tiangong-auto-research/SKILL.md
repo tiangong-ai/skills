@@ -181,7 +181,25 @@ required credentials must block before any source download.
   `runDataCapability` command. That command promotes the shared TypeScript
   runtime result into Research evidence. Never use standalone `data run` for a
   project, copy provider logic into this Skill, or assume a fixed capability
-  list.
+  list. Suspended capabilities are not projected into this packet, even though
+  standalone catalog and describe output keep them discoverable for diagnosis.
+
+  `runDataCapability.executionKind=workspace-cli-relative-argv` means every
+  packet command is relative to the workspace runtime lock; always
+  prefix its resolver-relative `argv`, `readArgv`, or `describeArgv` arguments with
+  `node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace --`; never
+  execute a packet token as a PATH-resolved global `tiangong-ai` binary.
+
+  Review the returned `providerCoverage`, `limitCoverage`, and `contextView`
+  independently. Provider gaps, intentional operation bounds, and the smaller
+  Agent-facing projection are not interchangeable. When
+  `contextView.nextCursor` is present and the question requires exhaustive
+  row-level review, invoke the packet's exact `runDataCapability.readArgv` with
+  the returned receipt and cursor until `nextCursor is null`. This reads the
+  immutable local evidence and does not consume another provider call. For a
+  summary or adaptive task, stopping earlier is allowed only when the presented
+  fraction is recorded as a limitation; never imply that every returned row was
+  reviewed.
 
 Use the same runtime lock for contract inspection and execution:
 
@@ -319,7 +337,9 @@ exact next stage, perform the returned prompt in this current app/session, and
 submit its JSON through the CLI. Discovery evidence must be fetched through the
 packet's broker command or its native `runDataCapability` command for a selected
 structured source. Use the dynamic data catalog and the locked `data describe`
-instead of memorizing operations. Record discovery assessments incrementally instead of
+instead of memorizing operations. Follow `runDataCapability.readArgv` whenever
+the first data view has a cursor and exhaustive row-level review is required;
+otherwise disclose the exact presented fraction. Record discovery assessments incrementally instead of
 returning all source metadata in the final stage output. Record native
 Web/Browser activity, formalize useful leads through the broker, and bind every
 network download to its exact download event before artifact registration.

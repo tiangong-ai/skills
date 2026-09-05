@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { verifyDataSkillRequirement } from "../data-skill-binding.mjs";
+
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -87,18 +89,21 @@ const PILOTS = [
     capability: "regulations-gov.attachments",
     operations: ["download"],
     requiredCredential: true,
+    suspended: true,
   },
   {
     skill: "regulationsgov-comment-detail-fetch",
     capability: "regulations-gov.comments",
     operations: ["fetch-details"],
     requiredCredential: true,
+    suspended: true,
   },
   {
     skill: "regulationsgov-comments-fetch",
     capability: "regulations-gov.comments",
     operations: ["search"],
     requiredCredential: true,
+    suspended: true,
   },
   {
     skill: "usbr-project-records-fetch",
@@ -159,7 +164,7 @@ function readInstalledRequirement(consumer, pilot) {
 }
 
 test(
-  "copy and symlink installs keep requirements separate from the exact smoke CLI",
+  "copy and symlink installs verify requirements against the exact smoke CLI",
   { skip: !RUN_INSTALL_SMOKE },
   () => {
     assert.match(CLI_VERSION ?? "", /^\d+\.\d+\.\d+$/);
@@ -255,8 +260,13 @@ test(
             { cwd: consumer, env: environment },
           );
           assert.equal(describe.status, 0, describe.stderr);
-          const manifest = JSON.parse(describe.stdout).manifest;
+          const describeEnvelope = JSON.parse(describe.stdout);
+          const manifest = describeEnvelope.manifest;
           assert.equal(manifest.capabilityId, pilot.capability);
+          verifyDataSkillRequirement({
+            requirement: readInstalledRequirement(consumer, pilot),
+            describe: describeEnvelope,
+          });
 
           const doctor = run(
             "npx",
@@ -272,6 +282,9 @@ test(
             JSON.parse(doctor.stdout).status,
             pilot.requiredCredential ? "blocked" : "ready",
           );
+          if (pilot.suspended) {
+            assert.equal(manifest.availability?.status, "suspended");
+          }
 
           for (const operationId of pilot.operations) {
             const operation = manifest.operations.find(
@@ -306,7 +319,10 @@ test(
             assert.notEqual(blocked.status, 0);
             const blockedResult = JSON.parse(blocked.stdout);
             assert.equal(blockedResult.status, "blocked");
-            assert.equal(blockedResult.errors[0]?.code, "invalid-request");
+            assert.equal(
+              blockedResult.errors[0]?.code,
+              pilot.suspended ? "capability-unavailable" : "invalid-request",
+            );
           }
         }
       }

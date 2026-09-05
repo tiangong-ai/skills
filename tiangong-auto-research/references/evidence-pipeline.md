@@ -75,6 +75,17 @@ atomic operation; use its summary, `provides`, `doesNotProvide`, and selection
 hints to choose a source, then inspect only the selected operation through the
 same workspace runtime lock used by the packet:
 
+Only capabilities whose catalog availability is `available` are projected;
+suspended capabilities are not projected into Auto Research. The standalone
+catalog retains them so operators can inspect the suspension reason and resume
+criteria without offering them to the Agent as executable evidence sources.
+
+The packet declares
+`runDataCapability.executionKind=workspace-cli-relative-argv`; always
+prefix its resolver-relative `argv`, `readArgv`, and `describeArgv` with the locked
+`node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace --` command.
+Do not execute their first token as a PATH-resolved global CLI.
+
 ```bash
 node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- \
   data describe <capability-id> --json
@@ -103,6 +114,28 @@ a blocked result is journaled but never admitted as evidence. Never call
 standalone `data run` inside a project, because that intentionally creates no
 Research receipt or ledger state. New registry operations appear without a
 corresponding edit to this Skill.
+
+Interpret the returned communication as three independent dimensions:
+
+- `providerCoverage` reports whether the provider supplied the requested
+  source ranges and identifies upstream gaps.
+- `limitCoverage` reports whether explicit operation/runtime bounds stopped the
+  run. A bounded result may still have complete provider coverage within that
+  declared request.
+- `contextView` reports only how much of the already persisted result is in the
+  current Agent view. Projection is not acquisition loss.
+
+If `contextView.nextCursor` is non-null, the packet's
+`runDataCapability.readArgv` reads the next bounded page from the same immutable
+evidence object. Substitute only the returned receipt ID and opaque cursor;
+never decode, increment, or reuse a cursor for another receipt. Continue until
+`nextCursor is null` before claiming exhaustive row-level review. This local
+read does not consume another provider call or create a second evidence
+occurrence. When a summary, sample, or adaptive decision genuinely needs no
+further page, record the exact presented fraction and the unreviewed remainder
+as a limitation. Never convert an Agent context projection into a provider
+`partial`, and never convert a provider or limit gap into mere context
+truncation.
 
 ## 3. Keep one immutable evidence ledger
 

@@ -17,8 +17,8 @@ checkPaths:
   - "*-search/**"
   - "*-download/**"
   - tiangong-auto-research/**
-lastReviewedAt: 2026-09-01
-lastReviewedCommit: 4e22640981bca2c037dae31f47666400afefab5c
+lastReviewedAt: 2026-09-05
+lastReviewedCommit: 24c5695ca3129bbe021e4b80d830742841e9011e
 ---
 
 # 原子数据 Skill 迁移实施计划
@@ -213,6 +213,10 @@ Open-Meteo Historical Weather 复核确认了固定源的最多 10 个坐标、3
   registry 投影、进程内 data execution、core receipt parity、Research receipt/ledger/
   budget/credential/artifact 绑定和 native packet 入口均有单独 clean-room TDD；这份证据
   仍与此前 21 个原子 Skill 的迁移完成证据分离。
+- 后续可靠性补强把 provider 缺口、显式运行限制和 Agent context 投影拆成独立维度；完整
+  core result 仍一次持久化，Auto Research 通过 receipt-bound cursor 本地续读，不重复消耗
+  provider request。YouTube comments 显式区分 `top-level-only` 与 `all-visible`，并报告
+  request budget、已完整展开 thread 与未展开 thread ID。Regulations.gov 本轮暂缓且不改动。
 - 当前只有本地分支提交；在维护者统一审阅并明确确认前，不推送实现分支、不创建 PR。
 
 ## 与 CLI 的同步顺序
@@ -510,7 +514,8 @@ node --test scripts/tests/data-skill-install-smoke.test.mjs
 结构化阻断请求，不访问 AirNow、Bluesky、EPA EIS、FederalRegister.gov、GDELT、NASA
 FIRMS、OpenAQ、Open-Meteo、Regulations.gov、USBR、USGS WaterServices 或 YouTube。
 
-稳定 requirement 只在 Skill 所需的 capability/operation contract major 改变时生成；
+稳定 requirement 只在 Skill 所需的 capability/operation contract major 或
+`requiredFeatures` 改变时生成；
 普通 CLI patch/minor 发布无需改写 21 个文件：
 
 ```bash
@@ -521,6 +526,17 @@ node scripts/data-skill-binding.mjs generate \
   --cli-version X.Y.Z
 node scripts/data-skill-binding.mjs verify \
   --requirement airnow-hourly-obs-fetch/references/tiangong-data-requirement.json \
+  --cli-version X.Y.Z
+```
+
+若 Skill 依赖同一 contract major 中的特定行为，用分号分隔 operation、逗号分隔 feature：
+
+```bash
+node scripts/data-skill-binding.mjs generate \
+  --skill youtube-comments-fetch \
+  --capability youtube.public-content \
+  --operations fetch-comments \
+  --required-features fetch-comments=youtube.reply-strategy \
   --cli-version X.Y.Z
 ```
 

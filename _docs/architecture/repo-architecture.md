@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-03
-lastReviewedCommit: 246f93abffc19ff7efa6aad37f9cf2515b4fc82b
+lastReviewedAt: 2026-09-05
+lastReviewedCommit: 24c5695ca3129bbe021e4b80d830742841e9011e
 ---
 
 # Skills Repository Architecture
@@ -132,7 +132,7 @@ The architecture and staged inventory are documented in
 
 An atomic data Skill is a thin semantic entrypoint over a compatible published
 Tiangong CLI capability. It keeps source guidance, limitations, agent
-instructions, and a machine-checkable contract-major requirement. The caller or
+instructions, and a machine-checkable contract-major/required-feature requirement. The caller or
 workspace runtime lock owns the exact package; connector logic, schemas,
 credentials, retries, and core receipts live only in the CLI's
 TypeScript 7 runtime. Auto Research reuses its workspace-locked runtime and adds

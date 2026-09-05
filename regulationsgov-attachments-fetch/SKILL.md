@@ -20,6 +20,10 @@ downloads, transactional file writes, partial results, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
+4. Inspect `manifest.availability` and `discovery.availability`. This capability
+   is currently `suspended` because its prerequisite Regulations.gov live gate
+   returned HTTP 503. Stop while it remains suspended; do not create an
+   artifact run, retry directly, or assume a configured API key restores it.
 
 ```bash
 tiangong-ai data describe regulations-gov.attachments --json

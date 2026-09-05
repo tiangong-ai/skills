@@ -124,6 +124,17 @@ limits calls/bytes/items/tokens, persists content-addressed raw evidence, and
 records sanitized events. Standalone web/search/database tools cannot replace
 required broker receipts.
 
+For structured data, inspect `providerCoverage`, `limitCoverage`, and
+`contextView` separately. If `contextView.nextCursor` is present, use the exact
+`runDataCapability.readArgv` from the packet with the returned receipt ID and
+opaque cursor. Continue until `nextCursor is null` when a claim depends on
+reviewing every returned row. Each continuation reads the same immutable local
+evidence and does not consume another provider call. If the task only needs a
+summary or an adaptive sample, it may stop earlier, but the stage assessment
+must state the presented fraction and remaining unreviewed rows. A projected
+context is not a provider gap; a provider gap or operation limit must remain
+visible even after every persisted row has been read.
+
 Native Web or Browser work must first use the packet's `recordActivity` argv.
 Its search/navigation input is sanitized and persisted only by SHA-256; counts,
 challenge class, status, and linked candidate IDs remain auditable. Register
