@@ -1,13 +1,14 @@
 ---
 name: academic-paper-download
-description: "Fetch and atomically save verified academic-paper PDFs from legal open-access sources using a DOI or exact title, with access/license provenance and an adjacent hash manifest. Use for automatic OA retrieval or for a publisher URL that must first be resolved to a DOI and may then require an explicitly selected Chrome or optional CloakBrowser user-authorized browser handoff; supports an injectable transport for embedding in research systems."
+description: "Fetch and atomically save structurally and identity-verified academic-paper PDFs from legal open-access sources using a DOI or exact title, with access/license provenance and an adjacent hash manifest. Use for automatic OA retrieval or for a publisher URL that must first be resolved to a DOI and may then require an explicitly selected Chrome or optional CloakBrowser user-authorized browser handoff; supports an injectable transport for embedding in research systems."
 ---
 
 # Academic Paper Download
 
-Produce a structurally verified PDF and adjacent provenance manifest. Require an
-explicit final output directory and keep automatic resolution in this order:
-Unpaywall, Semantic Scholar OA, arXiv, then browser handoff.
+Produce a structurally verified, identity-bound PDF and adjacent provenance
+manifest. Require an explicit final output directory and keep automatic
+resolution in this order: Unpaywall, Semantic Scholar OA, arXiv, then browser
+handoff.
 
 ## Workflow
 
@@ -17,7 +18,7 @@ Unpaywall, Semantic Scholar OA, arXiv, then browser handoff.
 2. For a publisher URL, first resolve or confirm its DOI. Pass only that DOI to
    `fetch.py`; the CLI does not accept publisher URLs as inputs.
 3. Run the downloader and accept success only when the result contains a
-   verified file, SHA-256, size, and adjacent manifest.
+   verified file, SHA-256, size, `identity_status: matched`, and adjacent manifest.
 4. If automatic OA sources are exhausted, or a publisher page requires login,
    institution access, or interaction, explicitly choose a browser backend and
    read [references/browser-handoff.md](references/browser-handoff.md). Prefer
@@ -73,8 +74,9 @@ python3 "$SKILL_DIR/scripts/runtime.py" fetch \
   --out ./papers --format json --pretty
 ```
 
-Use `fetch schema` to inspect the unchanged machine contract version. A
-verified existing artifact may return `skipped: true`. Read
+Use `fetch schema` to inspect the machine contract version. Only an artifact
+whose current manifest records matched identity evidence may return
+`skipped: true`. Read
 [references/env.md](references/env.md) when embedding the library or diagnosing
 Python/runtime compatibility.
 
@@ -84,6 +86,13 @@ Python/runtime compatibility.
   and `4` as retryable transport failure.
 - Require `pypdf` parsing, at least one page, a final `%%EOF`, matching size,
   and SHA-256 before committing the PDF and manifest.
+- Before commit, require the requested DOI in document identity metadata or a
+  primary first-page DOI position. If no primary DOI is available, require a
+  strong title match and treat available author/year disagreement as a mismatch.
+  A title found only in first-page text also needs matching author or year evidence.
+- Do not treat arbitrary reference-list DOIs as the paper's primary DOI. A
+  scanned/no-text PDF without defensible embedded metadata is unresolved and
+  requires manual verification; it is not a successful artifact.
 - Never infer redistribution permission from successful access. Preserve
   `access_basis`, `license_status`, and source-declared license fields.
 - Never select the newest file in Downloads or accept HTML, truncated PDFs,

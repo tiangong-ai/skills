@@ -9,7 +9,7 @@ from .artifact import atomic_write_json, verify_existing
 from .errors import PaperFetchError
 
 
-SCHEMA = "academic-paper-download.idempotency.v2"
+SCHEMA = "academic-paper-download.idempotency.v3"
 
 
 def request_fingerprint(payload: dict[str, Any]) -> str:

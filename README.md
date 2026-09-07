@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-03
-lastReviewedCommit: 246f93abffc19ff7efa6aad37f9cf2515b4fc82b
+lastReviewedAt: 2026-09-07
+lastReviewedCommit: a8e0698e2345e2685d75960bdf972067ecd3b6f2
 ---
 
 # Tiangong AI Skills

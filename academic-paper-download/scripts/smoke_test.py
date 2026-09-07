@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a network-free structural PDF smoke test inside the locked runtime."""
+"""Run a network-free structural and identity PDF smoke inside the locked runtime."""
 
 from __future__ import annotations
 
@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     socket.socket = _OfflineSocket
     pypdf = importlib.import_module("pypdf")
     artifact = importlib.import_module("paper_fetch.artifact")
+    identity_validator = importlib.import_module("paper_fetch.identity")
+    models = importlib.import_module("paper_fetch.models")
     expected = os.environ.get("ACADEMIC_PAPER_DOWNLOAD_EXPECTED_PYPDF", "")
     installed = importlib.metadata.version("pypdf")
     if installed != expected:
@@ -52,9 +54,26 @@ def main(argv: list[str] | None = None) -> int:
         pdf = Path(temporary) / "smoke.pdf"
         writer = pypdf.PdfWriter()
         writer.add_blank_page(width=72, height=72)
+        writer.add_metadata(
+            {
+                "/DOI": "10.1234/smoke",
+                "/Title": "Academic Paper Download Smoke",
+                "/Author": "Tiangong AI",
+                "/Year": "2026",
+            }
+        )
         with pdf.open("wb") as handle:
             writer.write(handle)
         size, digest = artifact.validate_pdf(pdf)
+        identity = identity_validator.validate_pdf_identity(
+            pdf,
+            "10.1234/smoke",
+            models.PaperMetadata(
+                title="Academic Paper Download Smoke",
+                author="Tiangong AI",
+                year=2026,
+            ),
+        )
 
     payload = {
         "ok": True,
@@ -67,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             "pdf_pages": 1,
             "pdf_size": size,
             "sha256": digest,
+            "identity_status": identity["status"],
         },
     }
     if args.json:

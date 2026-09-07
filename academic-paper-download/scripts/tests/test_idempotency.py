@@ -8,7 +8,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import PDF_BYTES, RoutingHttp
+from helpers import RoutingHttp, make_pdf_bytes
 from paper_fetch.artifact import ArtifactStore
 from paper_fetch.errors import PaperFetchError
 from paper_fetch.idempotency import IdempotencyStore, request_fingerprint
@@ -23,7 +23,16 @@ class IdempotencyTests(unittest.TestCase):
         self.url = "https://oa.example/paper.pdf"
         artifact = ArtifactStore(
             self.directory,
-            RoutingHttp(download_payloads={self.url: PDF_BYTES}),
+            RoutingHttp(
+                download_payloads={
+                    self.url: make_pdf_bytes(
+                        doi="10.1234/one",
+                        title="Paper",
+                        author="Author",
+                        year=2024,
+                    )
+                }
+            ),
         ).save(
             "10.1234/one",
             Candidate("unpaywall", self.url),

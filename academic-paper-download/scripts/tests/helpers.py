@@ -6,19 +6,84 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from paper_fetch.errors import PaperFetchError
 
 
-def make_pdf_bytes() -> bytes:
+def _pdf_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _write_page_text(writer: PdfWriter, page: Any, lines: tuple[str, ...]) -> None:
+    if not lines:
+        return
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    page[NameObject("/Resources")] = DictionaryObject(
+        {
+            NameObject("/Font"): DictionaryObject(
+                {NameObject("/F1"): writer._add_object(font)}
+            )
+        }
+    )
+    commands = ["BT /F1 12 Tf 14 TL 72 720 Td"]
+    for index, line in enumerate(lines):
+        commands.append(f"({_pdf_text(line)}) Tj")
+        if index < len(lines) - 1:
+            commands.append("T*")
+    commands.append("ET")
+    contents = DecodedStreamObject()
+    contents.set_data(" ".join(commands).encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(contents)
+
+
+def make_pdf_bytes(
+    *,
+    doi: str | None = "10.1234/example",
+    title: str | None = "Example paper",
+    author: str | None = "Alice Example",
+    year: int | str | None = 2024,
+    subject: str | None = None,
+    first_page_lines: tuple[str, ...] = (),
+    additional_pages: tuple[tuple[str, ...], ...] = (),
+    include_document_metadata: bool = True,
+) -> bytes:
     buffer = io.BytesIO()
     writer = PdfWriter()
-    writer.add_blank_page(width=612, height=792)
+    page = writer.add_blank_page(width=612, height=792)
+    if include_document_metadata:
+        metadata = {
+            key: str(value)
+            for key, value in {
+                "/DOI": doi,
+                "/Title": title,
+                "/Author": author,
+                "/Year": year,
+                "/Subject": subject,
+            }.items()
+            if value not in (None, "")
+        }
+        if metadata:
+            writer.add_metadata(metadata)
+    _write_page_text(writer, page, first_page_lines)
+    for lines in additional_pages:
+        _write_page_text(writer, writer.add_blank_page(width=612, height=792), lines)
     writer.write(buffer)
     return buffer.getvalue()
 
 
-PDF_BYTES = make_pdf_bytes()
+PDF_BYTES = make_pdf_bytes(
+    doi="10.1234/example",
+    title="Example paper",
+    author="Alice Example",
+    year=2024,
+)
 
 
 class RoutingHttp:

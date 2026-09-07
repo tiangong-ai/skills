@@ -10,12 +10,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import PDF_BYTES
+from helpers import PDF_BYTES, make_pdf_bytes
 import finalize_browser_download as browser
+from paper_fetch.errors import PaperFetchError
 
 
 class BrowserFinalizerTests(unittest.TestCase):
@@ -138,6 +140,93 @@ class BrowserFinalizerTests(unittest.TestCase):
             code = browser.finalize(self._args())
         self.assertEqual(code, 3)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "unsafe_download_path")
+
+    def test_identity_mismatch_is_not_finalized(self):
+        self._snapshot()
+        source = self.downloads / "Expected.pdf"
+        source.write_bytes(
+            make_pdf_bytes(
+                doi="10.9999/wrong",
+                title="Wrong paper",
+                author="Mallory",
+                year=2020,
+            )
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = browser.finalize(self._args())
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "pdf_identity_mismatch")
+        self.assertTrue(source.is_file())
+        self.assertEqual(list(self.output.glob("*.pdf")), [])
+        self.assertEqual(list(self.output.glob("*.json")), [])
+
+    def test_identity_unresolved_is_not_finalized(self):
+        self._snapshot()
+        source = self.downloads / "Expected.pdf"
+        source.write_bytes(
+            make_pdf_bytes(
+                doi=None,
+                title=None,
+                author=None,
+                year=None,
+                include_document_metadata=False,
+            )
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = browser.finalize(self._args())
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "pdf_identity_unresolved")
+        self.assertTrue(source.is_file())
+        self.assertEqual(list(self.output.glob("*.pdf")), [])
+        self.assertEqual(list(self.output.glob("*.json")), [])
+
+    def test_identity_validator_unavailable_is_runtime_failure(self):
+        self._snapshot()
+        (self.downloads / "Expected.pdf").write_bytes(PDF_BYTES)
+        output = io.StringIO()
+        with mock.patch(
+            "finalize_browser_download.validate_pdf_identity",
+            side_effect=PaperFetchError(
+                "pdf_validator_unavailable",
+                "identity validator unavailable",
+            ),
+        ), contextlib.redirect_stdout(output):
+            code = browser.finalize(self._args())
+        self.assertEqual(code, 4)
+        self.assertEqual(
+            json.loads(output.getvalue())["error"]["code"],
+            "pdf_validator_unavailable",
+        )
+
+    def test_legacy_destination_is_not_replayed_as_verified_duplicate(self):
+        self._snapshot()
+        source = self.downloads / "Expected.pdf"
+        source.write_bytes(PDF_BYTES)
+        first_output = io.StringIO()
+        with contextlib.redirect_stdout(first_output):
+            self.assertEqual(browser.finalize(self._args()), 0)
+        first = json.loads(first_output.getvalue())
+        sidecar = Path(first["manifest"])
+        legacy = json.loads(sidecar.read_text(encoding="utf-8"))
+        legacy["schema_version"] = "academic-paper-download.artifact.v2"
+        legacy.pop("identity_status", None)
+        legacy.pop("identity", None)
+        sidecar.write_text(json.dumps(legacy), encoding="utf-8")
+
+        source.unlink()
+        self._snapshot()
+        source.write_bytes(PDF_BYTES)
+        second_output = io.StringIO()
+        with contextlib.redirect_stdout(second_output):
+            self.assertEqual(browser.finalize(self._args()), 0)
+        second = json.loads(second_output.getvalue())
+        self.assertFalse(second["data"]["duplicate"])
+        self.assertEqual(second["data"]["identity_status"], "matched")
+        self.assertNotEqual(second["data"]["file"], first["data"]["file"])
 
     def test_invalid_doi_is_validation_exit(self):
         self._snapshot()
