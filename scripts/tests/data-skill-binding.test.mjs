@@ -328,6 +328,7 @@ const PILOT_SKILLS = [
     operations: [
       {
         operationId: "search-videos",
+        describeOperationIndex: 1,
         inputKeys: [
           "maxSearchPages",
           "minimumCommentCount",
@@ -566,7 +567,9 @@ test("rejects undeclared requirement fields", () => {
 });
 
 test("pilot data skills are thin, package-independent semantic entrypoints", () => {
-  for (const pilot of PILOT_SKILLS) {
+  // Post-migration extensions do not change the 21-Skill EcoCouncil source inventory.
+  const extensions = [{ name: "gdelt-web-ngrams-search", capabilityId: "gdelt.web-ngrams", operations: [{ operationId: "search", inputKeys: ["fileTimestamp", "match", "phrases"] }] }];
+  for (const pilot of [...PILOT_SKILLS, ...extensions]) {
     const root = resolve(REPOSITORY_ROOT, pilot.name);
     const requirementPath = resolve(
       root,
@@ -623,9 +626,10 @@ test("pilot data skills are thin, package-independent semantic entrypoints", () 
         `${requirement.capabilityContractVersion}.0.0`,
       );
       Object.entries(requirement.operations).forEach(
-        ([, operation], index) => {
+        ([operationId, operation], index) => {
+          const describeIndex = pilot.operations.find((item) => item.operationId === operationId)?.describeOperationIndex ?? index;
           normalized = normalized.replaceAll(
-            `<describe.manifest.operations[${index}].operationVersion>`,
+            `<describe.manifest.operations[${describeIndex}].operationVersion>`,
             `${operation.contractVersion}.0.0`,
           );
         },
@@ -684,9 +688,9 @@ test("pilot data skills are thin, package-independent semantic entrypoints", () 
     ),
   );
   validateMigrationProvenance(provenance);
-  assert.equal(provenance.skills.length, PILOT_SKILLS.length);
+  assert.equal(provenance.skills.length, PILOT_SKILLS.length + extensions.length);
   assert.deepEqual(
     provenance.skills.map((entry) => entry.skillName),
-    PILOT_SKILLS.map((pilot) => pilot.name).sort(),
+    [...PILOT_SKILLS, ...extensions].map((pilot) => pilot.name).sort(),
   );
 });

@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-07
-lastReviewedCommit: a8e0698e2345e2685d75960bdf972067ecd3b6f2
+lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
 # Skills Repository Architecture
@@ -139,11 +139,12 @@ TypeScript 7 runtime. Auto Research reuses its workspace-locked runtime and adds
 its own evidence admission and persistence instead of executing a second Skill
 script.
 
-Twenty-one local candidate Skills now use this shape: AirNow, Federal Register,
+Twenty-one EcoCouncil migration Skills plus the post-migration GDELT Web NGrams
+extension now use this shape: AirNow, Federal Register,
 USGS Water IV, three Open-Meteo sources, NASA FIRMS, OpenAQ, EPA EIS, USBR RISE,
 USBR Project Records, three Regulations.gov semantic entrypoints, separate
 GDELT DOC, Events, GKG, and Mentions entrypoints, Bluesky Cascades, and separate
-YouTube video-search/comment entrypoints. Regulations.gov search and detail
+YouTube video-search/comment entrypoints, and GDELT Web NGrams. Regulations.gov search and detail
 bind different operations of one capability, while attachments uses its own
 capability; the two YouTube Skills likewise bind different operations of one
 capability; the GDELT Skills bind four independent capabilities with one
@@ -157,7 +158,10 @@ release. Ordinary compatible CLI releases do not rewrite every Skill. RSS/full-t
 Figshare, academic-paper, Tiangong/KB, and private-email
 candidates have completed their boundary audit and retain their specialized
 runtimes rather than losing core content, artifact, product, research, or
-account-security semantics.
+account-security semantics. The current candidate keeps GDELT DOC and both USBR
+capabilities discoverable but suspended alongside Regulations.gov; Auto Research
+dynamically excludes them, while AirNow remains available through the regional
+endpoint of the same official S3 bucket.
 
 ## Integration Points
 

@@ -18,10 +18,20 @@ checkPaths:
   - "*-download/**"
   - tiangong-auto-research/**
 lastReviewedAt: 2026-09-07
-lastReviewedCommit: a8e0698e2345e2685d75960bdf972067ecd3b6f2
+lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
 # 原子数据 Skill 目标架构
+
+## 迁移后扩展：GDELT Web NGrams
+
+`gdelt-web-ngrams-search` 是独立薄语义 Skill，绑定 `gdelt.web-ngrams/search`。
+其唯一 TS7 执行器在 CLI；无需修改 Auto Research orchestrator 或复制一套 adapter。
+DOC 不可用时，Agent 只有在 literal phrase 检索符合任务时才显式选择此路径。
+它不提供 DOC query/timeline 等价性；GKG、Events、Mentions 继续按语义独立选择。
+一次操作只覆盖一个明确分钟文件对，范围枚举和缺口说明由调用方负责，禁止将抽样分钟
+表述为完整日期。此项不改变原 EcoCouncil 21 个 source-fetch 的来源清单；当前候选
+兼容性 provenance 则覆盖这 21 项与新增项，共 22 个 Skill。
 
 ## 决策
 
@@ -45,18 +55,18 @@ CLI 仓库中的 `docs/agents/data-runtime-architecture.md` 是命令、manifest
 
 ## 所有权
 
-| 内容                                 | 所有者        | Skills 侧规则                                |
-| ------------------------------------ | ------------- | -------------------------------------------- |
-| 用户意图、任务选择、结果使用边界     | Skills        | 写入 `SKILL.md`，为 agent 提供语义入口       |
-| 数据源客观说明、覆盖范围、许可、限制 | CLI           | 由 Discovery Metadata 统一发布，Skill 不复制 |
-| capability/operation 的客观说明      | CLI           | 由 catalog/describe 发布三层发现语义         |
-| capability/operation 兼容要求        | Skills        | 保存稳定、机器可检验的 contract major 与必要 feature |
-| exact CLI package/integrity          | 调用方/Workspace | 由 runtime lock 统一负责，不分散进 Skill   |
-| connector、Schema、错误码、回执      | CLI           | Skills 不复制定义                            |
-| 受控下载与本地 artifact transaction  | CLI           | Skill 只选择显式目录并解释结果边界           |
-| HTTP、认证、分页、限流、缓存         | CLI           | Skill 不再直接执行网络业务代码               |
-| 多源选择、证据准入、研究持久化       | Auto Research | 不下沉到原子 Skill                           |
-| 旧 Python/OpenClaw 实现              | 只读迁移输入  | 正式路径不得依赖                             |
+| 内容                                 | 所有者           | Skills 侧规则                                        |
+| ------------------------------------ | ---------------- | ---------------------------------------------------- |
+| 用户意图、任务选择、结果使用边界     | Skills           | 写入 `SKILL.md`，为 agent 提供语义入口               |
+| 数据源客观说明、覆盖范围、许可、限制 | CLI              | 由 Discovery Metadata 统一发布，Skill 不复制         |
+| capability/operation 的客观说明      | CLI              | 由 catalog/describe 发布三层发现语义                 |
+| capability/operation 兼容要求        | Skills           | 保存稳定、机器可检验的 contract major 与必要 feature |
+| exact CLI package/integrity          | 调用方/Workspace | 由 runtime lock 统一负责，不分散进 Skill             |
+| connector、Schema、错误码、回执      | CLI              | Skills 不复制定义                                    |
+| 受控下载与本地 artifact transaction  | CLI              | Skill 只选择显式目录并解释结果边界                   |
+| HTTP、认证、分页、限流、缓存         | CLI              | Skill 不再直接执行网络业务代码                       |
+| 多源选择、证据准入、研究持久化       | Auto Research    | 不下沉到原子 Skill                                   |
+| 旧 Python/OpenClaw 实现              | 只读迁移输入     | 正式路径不得依赖                                     |
 
 CLI 是先确认、先实现、先发布的基座。Skills 计划可以与 CLI 计划同步评审，但生产 Skill
 不能先合并一份指向尚不存在命令或未发布 contract 的 requirement。
@@ -136,7 +146,9 @@ tiangong-ai data run <capability-id> <operation-id> --input <path|-> [--artifact
 Research 或显式上层调用者完成。
 
 Auto Research 已接入同一 CLI 内部数据服务：native discover packet 从 registry 动态投影
-`data:<capability-id>:<operation-id>`，当前十九个 connector 产生二十三个 operation，
+`data:<capability-id>:<operation-id>`，当前二十个 connector 产生二十四个 operation；其中
+五个 suspended capability 的七个 operation 不进入 Research，实际可执行投影为十五个
+capability、十七个 operation，
 不在 orchestrator 中维护静态 provider 表。原子 Skill、独立 data 调用与 Research 共享
 相同核心结果/回执；Research 只额外负责 runtime/manifest binding、owner-only credential
 map、预算、来源/证据准入、永久 evidence/artifact、journal、handoff 和 review。这些状态
@@ -199,3 +211,9 @@ search-videos 与 fetch-comments，四个 GDELT 入口分别绑定独立 capabil
 回退路径验证后才达到生产完成。RSS/fulltext、Figshare、论文下载、Tiangong/KB 与邮箱
 候选的边界审计也已完成：它们保留专用内容、artifact、Research、产品或私有账户实现，
 不作为尚未完成的 data runtime 迁移项。
+
+薄 Skill 存在不等于当前 provider 可执行。0.0.61 候选中 GDELT DOC、USBR RISE 与
+USBR Project Records 因 live gate 失败随 Regulations.gov 一起保持 suspended；它们仍可
+describe，但 data run 和 Auto Research 选择会在网络前阻断。AirNow 的官方对象未变，
+仅从失败的 CloudFront 路径切换到 `files.airnowtech.org` bucket 的区域化 S3 endpoint，
+并已取得真实非空完整结果。

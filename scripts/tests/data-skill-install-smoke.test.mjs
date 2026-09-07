@@ -58,6 +58,11 @@ const PILOTS = [
     operations: ["fetch"],
   },
   {
+    skill: "gdelt-web-ngrams-search",
+    capability: "gdelt.web-ngrams",
+    operations: ["search"],
+  },
+  {
     skill: "nasa-firms-fire-fetch",
     capability: "nasa-firms.active-fire",
     operations: ["fetch-area"],

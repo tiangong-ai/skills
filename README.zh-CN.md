@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-07
-lastReviewedCommit: a8e0698e2345e2685d75960bdf972067ecd3b6f2
+lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
 # 天工 AI Skills
@@ -55,6 +55,17 @@ manifest/Schema digest 只集中保存在
 `_docs/runbooks/atomic-data-skill-migration.md`。已经审计的 RSS/fulltext、Figshare 下载、
 论文下载、Tiangong/KB 和私有邮箱候选继续保持其内容、artifact、Research、产品或安全
 边界，不会为了数量对等而缩减为无状态 data connector。
+
+另新增本地候选 `gdelt-web-ngrams-search`，属于迁移后的功能扩展，不是第 22 个
+EcoCouncil 源 Skill。它调用 CLI 的单分钟 NGrams/TOC 文件检索；不自动替换 DOC
+查询、不模拟 DOC 时间线，也不自动联查三表。使用前须由同一 resolved CLI 的
+`data describe gdelt.web-ngrams` 确认实际能力；这不表示功能已经发布。
+
+当前 0.0.61 候选 catalog 将 `gdelt.doc-search`、`usbr.project-records` 与
+`usbr.rise` 保留为可发现但暂停执行，原因是 production live gate 未通过；Auto Research
+不会投影这些 operation。对应薄 Skill 与稳定 requirement 继续保留，供诊断和后续重新
+放行。AirNow 仍为 available：公开 CloudFront 路径不可达后，connector 改为从同一个
+官方 `files.airnowtech.org` bucket 的区域化 S3 endpoint 读取对象。
 
 ## 安装 CLI
 

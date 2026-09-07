@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-07
-lastReviewedCommit: a8e0698e2345e2685d75960bdf972067ecd3b6f2
+lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
 # Tiangong AI Skills
@@ -63,6 +63,21 @@ release gates. The audited
 RSS/full-text, Figshare-download, academic-paper, Tiangong/KB, and private-email
 candidates retain their existing content, artifact, product, research, or
 security boundaries instead of being narrowed into stateless data connectors.
+
+The additional local candidate `gdelt-web-ngrams-search` is a post-migration
+extension, not a twenty-second EcoCouncil source Skill. It selects literal
+phrase-to-article discovery through the CLI's paired-minute NGrams/TOC operation.
+It does not silently replace DOC queries, reproduce DOC timelines, or join the
+three GDELT tables. Require `data describe gdelt.web-ngrams` from the same resolved
+CLI before using it; this does not assert that the extension is already published.
+
+The current 0.0.61 candidate catalog keeps `gdelt.doc-search`,
+`usbr.project-records`, and `usbr.rise` discoverable but suspended after their
+production live gates failed; Auto Research therefore does not offer those
+operations for execution. Their thin Skills and stable requirements remain for
+diagnosis and later requalification. AirNow remains available: its connector
+now reads the same official `files.airnowtech.org` objects through the bucket's
+regional S3 endpoint after the public CloudFront route became unreachable.
 
 ## Install the CLI
 

@@ -34,6 +34,7 @@
                 "./gdelt-events-fetch",
                 "./gdelt-gkg-fetch",
                 "./gdelt-mentions-fetch",
+                "./gdelt-web-ngrams-search",
                 "./regulationsgov-comments-fetch",
                 "./regulationsgov-comment-detail-fetch",
                 "./youtube-video-search",
