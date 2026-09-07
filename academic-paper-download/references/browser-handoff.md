@@ -74,8 +74,11 @@ staging; `finalize` always requires `--output-dir`. By default its manifest uses
 
 The finalizer rejects pre-snapshot files, symbolic links, partial downloads,
 HTML, truncated PDFs, and invalid output directories. It parses at least one
-page, checks `%%EOF`, copies atomically, verifies size/SHA-256, and commits the
-manifest last.
+page, checks `%%EOF`, verifies scholarly identity from bounded metadata and
+first-page evidence, copies atomically, verifies size/SHA-256, and commits the
+manifest last. Identity mismatch or unresolved identity exits without moving
+the exact browser download into the final output or writing a success manifest.
+The original browser download remains available for explicit manual review.
 
 ## Human Action
 

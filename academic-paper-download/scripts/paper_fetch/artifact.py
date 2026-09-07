@@ -13,12 +13,13 @@ from typing import Any
 
 from .errors import PaperFetchError
 from .http import PaperTransport
+from .identity import validate_pdf_identity
 from .models import Candidate, PaperMetadata
 from .normalize import normalize_doi
 from .sanitize import sanitize_data
 
 
-MANIFEST_SCHEMA = "academic-paper-download.artifact.v2"
+MANIFEST_SCHEMA = "academic-paper-download.artifact.v3"
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024
 
 
@@ -124,6 +125,18 @@ def _matching_manifest(path: Path, doi: str) -> dict[str, Any] | None:
             return None
         if normalize_doi(str(manifest.get("doi", ""))) != normalize_doi(doi):
             return None
+        identity = manifest.get("identity")
+        if (
+            manifest.get("identity_status") != "matched"
+            or not isinstance(identity, dict)
+            or identity.get("status") != "matched"
+        ):
+            return None
+        identity_requested = identity.get("requested")
+        if not isinstance(identity_requested, dict):
+            return None
+        if normalize_doi(str(identity_requested.get("doi", ""))) != normalize_doi(doi):
+            return None
         if int(manifest.get("size", -1)) != path.stat().st_size:
             return None
         if manifest.get("sha256") != sha256_file(path):
@@ -155,6 +168,7 @@ def build_manifest(
     size: int,
     digest: str,
     access_mode: str,
+    identity: dict[str, Any],
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     retrieved_at = datetime.now(timezone.utc).isoformat()
@@ -180,6 +194,8 @@ def build_manifest(
         "file": str(path),
         "size": size,
         "sha256": digest,
+        "identity_status": identity["status"],
+        "identity": identity,
         **(extra or {}),
     })
 
@@ -241,6 +257,8 @@ class ArtifactStore:
                 "sha256": existing["sha256"],
                 "skipped": True,
                 "verified_existing": True,
+                "identity_status": existing["identity_status"],
+                "identity": existing["identity"],
                 "committed_manifest": existing,
             }
         destination = choose_available_path(self.output_dir, filename)
@@ -260,6 +278,7 @@ class ArtifactStore:
                 headers=candidate.headers or None,
             )
             size, digest = validate_pdf(temporary, self.max_bytes)
+            identity = validate_pdf_identity(temporary, doi, metadata)
             manifest = build_manifest(
                 doi=doi,
                 candidate=candidate,
@@ -268,6 +287,7 @@ class ArtifactStore:
                 size=size,
                 digest=digest,
                 access_mode="http",
+                identity=identity,
             )
             os.replace(temporary, destination)
             try:
@@ -286,6 +306,8 @@ class ArtifactStore:
                 "sha256": digest,
                 "skipped": False,
                 "verified_existing": False,
+                "identity_status": manifest["identity_status"],
+                "identity": manifest["identity"],
                 "committed_manifest": manifest,
             }
         finally:

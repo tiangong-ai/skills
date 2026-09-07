@@ -1,4 +1,4 @@
 interface:
   display_name: "Academic Paper Download"
-  short_description: "Fetch verified OA or browser-authorized paper PDFs"
-  default_prompt: "Use $academic-paper-download to fetch a paper through legal OA sources, then use my explicitly selected Chrome or CloakBrowser handoff only if needed."
+  short_description: "Fetch identity-verified OA or browser-authorized paper PDFs"
+  default_prompt: "Use $academic-paper-download to fetch and identity-verify a paper through legal OA sources, then use my explicitly selected Chrome or CloakBrowser handoff only if needed."

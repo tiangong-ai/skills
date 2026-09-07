@@ -25,6 +25,7 @@ from paper_fetch.artifact import (
     verify_existing,
 )
 from paper_fetch.errors import PaperFetchError
+from paper_fetch.identity import validate_pdf_identity
 from paper_fetch.models import Candidate, PaperMetadata
 from paper_fetch.normalize import normalize_doi
 from paper_fetch.sanitize import sanitize_data
@@ -265,6 +266,11 @@ def finalize(args: argparse.Namespace) -> int:
         return fail(exc.code, exc.message, 4, **exc.details)
 
     metadata = PaperMetadata(title=args.title, author=args.author, year=args.year, journal=args.journal)
+    try:
+        identity = validate_pdf_identity(source, doi, metadata)
+    except PaperFetchError as exc:
+        exit_code = 4 if exc.code == "pdf_validator_unavailable" else 1
+        return fail(exc.code, exc.message, exit_code, **exc.details)
     if args.filename:
         try:
             final_filename = _safe_pdf_filename(args.filename)
@@ -358,6 +364,7 @@ def finalize(args: argparse.Namespace) -> int:
         size=size,
         digest=digest,
         access_mode=getattr(args, "access_mode", None) or "current-browser-session",
+        identity=identity,
         extra={
             "browser_original_file": str(browser_original_file),
             "browser_source_file": str(source),

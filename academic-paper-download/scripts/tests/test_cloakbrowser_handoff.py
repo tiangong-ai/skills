@@ -273,6 +273,20 @@ class CloakBrowserHandoffTests(unittest.TestCase):
         self.assertEqual(list(self.output.glob("*.pdf")), [])
         self.assertEqual(list(self.output.glob("*.json")), [])
 
+    def test_identity_unresolved_does_not_commit_browser_artifact(self) -> None:
+        blank = make_pdf_bytes(
+            doi=None,
+            title=None,
+            author=None,
+            year=None,
+            include_document_metadata=False,
+        )
+        with self.assertRaises(PaperFetchError) as raised:
+            execute_handoff(self.config(), adapter=FakeAdapter(FakeSession(payload=blank)))
+        self.assertEqual(raised.exception.code, "pdf_identity_unresolved")
+        self.assertEqual(list(self.output.glob("*.pdf")), [])
+        self.assertEqual(list(self.output.glob("*.json")), [])
+
     def test_invalid_pdf_still_fails_pypdf_eof_and_size_pipeline(self) -> None:
         for payload in (b"<html>login</html>", b"%PDF-1.7\ntruncated", b""):
             with self.subTest(payload=payload[:12]):

@@ -105,8 +105,10 @@ filename, and event ID. It never scans Downloads or selects the newest PDF.
 
 The presence of the staged file is not success. The executor passes that exact
 path to `finalize_browser_download.py`, which retains the existing pypdf, EOF,
-size, SHA-256, atomic-copy, and manifest-last checks. Failed or canceled
-downloads do not commit a manifest.
+size, SHA-256, atomic-copy, and manifest-last checks and now requires the same
+bounded scholarly identity match as automatic retrieval and Chrome handoff.
+Failed, canceled, mismatched, or identity-unresolved downloads do not commit a
+manifest.
 
 ## Human Action and Stop Rules
 
@@ -142,6 +144,10 @@ Configuration errors are structured and actionable:
   security controls.
 - `human_action_required`: complete or assess the displayed challenge; no
   automatic retry or bypass occurred.
+- `pdf_identity_mismatch`: the exact downloaded PDF conflicts with the
+  requested DOI/title identity; inspect it manually rather than committing it.
+- `pdf_identity_unresolved`: bounded metadata/first-page checks cannot establish
+  identity, including scanned/no-text PDFs without usable embedded metadata.
 
 All errors and events pass through the existing sanitization layer. Never place
 profile paths, cookies, Authorization headers, proxy passwords, license keys, or

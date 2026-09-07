@@ -18,6 +18,18 @@ from paper_fetch.errors import PaperFetchError
 
 
 class CliTests(unittest.TestCase):
+    def test_schema_declares_identity_validation_before_commit(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["schema"]), 0)
+        schema = json.loads(output.getvalue())["data"]
+        self.assertEqual(schema["schema_version"], "3.0.0")
+        self.assertLess(
+            schema["artifact_pipeline"].index("pdf_identity_validation"),
+            schema["artifact_pipeline"].index("atomic_rename"),
+        )
+        self.assertEqual(schema["identity_policy"]["required_status"], "matched")
+
     def test_success_and_idempotent_replay_use_verified_artifact(self):
         with tempfile.TemporaryDirectory() as temporary:
             url = "https://oa.example/s2.pdf"

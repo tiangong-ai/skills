@@ -106,6 +106,7 @@ class InstalledSkillSmokeTests(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     self.assertFalse(payload["data"]["network_used"])
                     self.assertEqual(payload["data"]["pdf_pages"], 1)
+                    self.assertEqual(payload["data"]["identity_status"], "matched")
 
 
 if __name__ == "__main__":

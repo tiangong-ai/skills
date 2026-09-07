@@ -13,6 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 from helpers import RoutingHttp, make_pdf_bytes
 from paper_fetch.artifact import ArtifactStore, manifest_path
 from paper_fetch.errors import PaperFetchError
+from paper_fetch.identity import MAX_FIRST_PAGE_CONTENT_BYTES, MAX_FIRST_PAGE_ENCODED_BYTES
 from paper_fetch.models import Candidate, PaperMetadata
 
 
@@ -106,6 +107,25 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(list(self.directory.glob("*.json")), [])
         self.assertEqual(list(self.directory.glob("*.part")), [])
 
+    def test_document_doi_url_ignores_tracking_query_and_fragment(self):
+        payload = make_pdf_bytes(
+            doi="https://doi.org/10.1234/one?utm_source=repository#landing",
+            title="Requested Paper",
+            author="Alice",
+            year=2024,
+        )
+        result = ArtifactStore(
+            self.directory,
+            RoutingHttp(download_payloads={self.url: payload}),
+        ).save(
+            "10.1234/one",
+            Candidate("unpaywall", self.url),
+            PaperMetadata(title="Requested Paper", author="Alice", year=2024),
+            timeout=1,
+        )
+        self.assertEqual(result["identity_status"], "matched")
+        self.assertEqual(result["identity"]["method"], "doi_document_metadata")
+
     def test_first_page_requested_doi_wins_over_reference_doi_noise(self):
         payload = make_pdf_bytes(
             doi=None,
@@ -115,7 +135,7 @@ class ArtifactTests(unittest.TestCase):
             include_document_metadata=False,
             first_page_lines=(
                 "Requested Paper",
-                "doi:10.1234/one",
+                "Journal header https://doi.org/10.1234/one",
                 "Background cites doi:10.9999/reference",
             ),
         )
@@ -127,7 +147,7 @@ class ArtifactTests(unittest.TestCase):
         manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["identity_status"], "matched")
         self.assertEqual(manifest["identity"]["method"], "doi_first_page")
-        self.assertEqual(
+        self.assertCountEqual(
             manifest["identity"]["observed"]["first_page_dois"],
             ["10.1234/one", "10.9999/reference"],
         )
@@ -150,6 +170,155 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(manifest["identity"]["checks"]["author"]["status"], "matched")
         self.assertEqual(manifest["identity"]["checks"]["year"]["status"], "matched")
 
+    def test_doi_less_accepted_manuscript_title_and_author_variants_match(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title="A Study of Carbon Footprints: Accepted Manuscript",
+            author="A. Example",
+            year=2024,
+        )
+        metadata = PaperMetadata(
+            title="A Study of Carbon Footprints",
+            author="Alice Example",
+            year=2024,
+        )
+        result = ArtifactStore(
+            self.directory,
+            RoutingHttp(download_payloads={self.url: payload}),
+        ).save("10.1234/one", Candidate("unpaywall", self.url), metadata, timeout=1)
+        self.assertEqual(result["identity_status"], "matched")
+        self.assertEqual(result["identity"]["method"], "title_document_metadata")
+        self.assertEqual(result["identity"]["checks"]["author"]["status"], "matched")
+
+    def test_context_metadata_doi_is_not_promoted_to_primary_identity(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title="Requested Paper",
+            author="Alice Example",
+            year=2024,
+            subject="doi:10.9999/cited-reference",
+        )
+        result = ArtifactStore(
+            self.directory,
+            RoutingHttp(download_payloads={self.url: payload}),
+        ).save(
+            "10.1234/one",
+            Candidate("unpaywall", self.url),
+            PaperMetadata(title="Requested Paper", author="Alice Example", year=2024),
+            timeout=1,
+        )
+        self.assertEqual(result["identity_status"], "matched")
+        self.assertEqual(result["identity"]["method"], "title_document_metadata")
+        self.assertEqual(result["identity"]["observed"]["document_dois"], [])
+        self.assertEqual(
+            result["identity"]["observed"]["metadata_context_dois"],
+            ["10.9999/cited-reference"],
+        )
+
+    def test_context_metadata_requested_doi_does_not_identify_wrong_pdf(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title="Completely different paper",
+            author="Mallory",
+            year=2020,
+            subject="doi:10.1234/one",
+        )
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(
+                self.directory,
+                RoutingHttp(download_payloads={self.url: payload}),
+            ).save("10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1)
+        self.assertEqual(raised.exception.code, "pdf_identity_mismatch")
+
+    def test_first_page_requested_doi_can_resolve_preprint_metadata_conflict(self):
+        payload = make_pdf_bytes(
+            doi="10.48550/arxiv.2401.00001",
+            title="Requested Paper",
+            author="Alice Example",
+            year=2024,
+            first_page_lines=(
+                "Requested Paper",
+                "Journal header https://doi.org/10.1234/one",
+            ),
+        )
+        result = ArtifactStore(
+            self.directory,
+            RoutingHttp(download_payloads={self.url: payload}),
+        ).save(
+            "10.1234/one",
+            Candidate("unpaywall", self.url),
+            PaperMetadata(title="Requested Paper", author="Alice Example", year=2024),
+            timeout=1,
+        )
+        self.assertEqual(result["identity_status"], "matched")
+        self.assertEqual(result["identity"]["method"], "doi_first_page")
+        self.assertIn(
+            "document_doi_conflicts_with_first_page",
+            result["identity"]["limitations"],
+        )
+
+    def test_reference_doi_noise_does_not_override_first_page_title_match(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title=None,
+            author=None,
+            year=None,
+            include_document_metadata=False,
+            first_page_lines=(
+                "Requested Paper",
+                "Alice Example",
+                "2024",
+                "Background cites doi:10.9999/reference",
+            ),
+        )
+        metadata = PaperMetadata(title="Requested Paper", author="Alice Example", year=2024)
+        result = ArtifactStore(
+            self.directory,
+            RoutingHttp(download_payloads={self.url: payload}),
+        ).save("10.1234/one", Candidate("unpaywall", self.url), metadata, timeout=1)
+        manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["identity_status"], "matched")
+        self.assertEqual(manifest["identity"]["method"], "title_first_page")
+        self.assertEqual(
+            manifest["identity"]["observed"]["first_page_dois"],
+            ["10.9999/reference"],
+        )
+        self.assertIn("non_primary_dois_ignored", manifest["identity"]["limitations"])
+
+    def test_doi_less_title_mismatch_is_rejected(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title="Completely different paper",
+            author="Mallory",
+            year=2020,
+        )
+        metadata = PaperMetadata(title="Requested Paper", author="Alice Example", year=2024)
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(
+                self.directory,
+                RoutingHttp(download_payloads={self.url: payload}),
+            ).save("10.1234/one", Candidate("unpaywall", self.url), metadata, timeout=1)
+        self.assertEqual(raised.exception.code, "pdf_identity_mismatch")
+        self.assertEqual(list(self.directory.glob("*.pdf")), [])
+
+    def test_requested_doi_in_later_references_does_not_identify_wrong_paper(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title="Completely different paper",
+            author="Mallory",
+            year=2020,
+            first_page_lines=("Completely different paper", "Mallory", "2020"),
+            additional_pages=(("References", "doi:10.1234/one"),),
+        )
+        metadata = PaperMetadata(title="Requested Paper", author="Alice Example", year=2024)
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(
+                self.directory,
+                RoutingHttp(download_payloads={self.url: payload}),
+            ).save("10.1234/one", Candidate("unpaywall", self.url), metadata, timeout=1)
+        self.assertEqual(raised.exception.code, "pdf_identity_mismatch")
+        self.assertEqual(list(self.directory.glob("*.pdf")), [])
+
     def test_pdf_without_identity_evidence_is_unresolved_and_not_committed(self):
         blank = make_pdf_bytes(
             doi=None,
@@ -168,6 +337,75 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(list(self.directory.glob("*.json")), [])
         self.assertEqual(list(self.directory.glob("*.part")), [])
 
+    def test_oversized_first_page_content_fails_closed_before_text_extraction(self):
+        class OversizedContents:
+            @staticmethod
+            def get_data():
+                return b"x" * (MAX_FIRST_PAGE_CONTENT_BYTES + 1)
+
+        blank = make_pdf_bytes(
+            doi=None,
+            title=None,
+            author=None,
+            year=None,
+            include_document_metadata=False,
+        )
+        http = RoutingHttp(download_payloads={self.url: blank})
+        with mock.patch(
+            "pypdf._page.PageObject.get_contents",
+            return_value=OversizedContents(),
+        ), self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(self.directory, http).save(
+                "10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1
+            )
+        self.assertEqual(raised.exception.code, "pdf_identity_unresolved")
+        self.assertIn(
+            "first_page_content_limit_exceeded",
+            raised.exception.details["identity"]["limitations"],
+        )
+        self.assertEqual(list(self.directory.glob("*.pdf")), [])
+
+    def test_oversized_encoded_first_page_is_rejected_before_decompression(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title=None,
+            author=None,
+            year=None,
+            include_document_metadata=False,
+            first_page_lines=("x" * (MAX_FIRST_PAGE_ENCODED_BYTES + 1),),
+        )
+        http = RoutingHttp(download_payloads={self.url: payload})
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(self.directory, http).save(
+                "10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1
+            )
+        self.assertEqual(raised.exception.code, "pdf_identity_unresolved")
+        self.assertIn(
+            "first_page_encoded_content_limit_exceeded",
+            raised.exception.details["identity"]["limitations"],
+        )
+
+    def test_first_page_title_without_author_or_year_support_is_unresolved(self):
+        payload = make_pdf_bytes(
+            doi=None,
+            title=None,
+            author=None,
+            year=None,
+            include_document_metadata=False,
+            first_page_lines=("Requested Paper",),
+        )
+        with self.assertRaises(PaperFetchError) as raised:
+            ArtifactStore(
+                self.directory,
+                RoutingHttp(download_payloads={self.url: payload}),
+            ).save(
+                "10.1234/one",
+                Candidate("unpaywall", self.url),
+                PaperMetadata(title="Requested Paper"),
+                timeout=1,
+            )
+        self.assertEqual(raised.exception.code, "pdf_identity_unresolved")
+
     def test_legacy_manifest_is_not_replayed_as_identity_verified(self):
         http = RoutingHttp(download_payloads={self.url: self.pdf_bytes})
         store = ArtifactStore(self.directory, http)
@@ -179,9 +417,12 @@ class ArtifactTests(unittest.TestCase):
         legacy.pop("identity", None)
         sidecar.write_text(json.dumps(legacy), encoding="utf-8")
         second = store.save("10.1234/one", Candidate("unpaywall", self.url), self.metadata, timeout=1)
-        self.assertFalse(second["skipped"])
-        self.assertNotEqual(first["file"], second["file"])
-        self.assertEqual(sum(method == "download" for method, _ in http.calls), 2)
+        self.assertEqual(second["identity_status"], "matched")
+        self.assertEqual(second["committed_manifest"]["identity_status"], "matched")
+        self.assertNotEqual(
+            second["committed_manifest"]["schema_version"],
+            "academic-paper-download.artifact.v2",
+        )
 
     def test_html_response_never_commits(self):
         http = RoutingHttp(download_payloads={self.url: b"<html>login</html>"})

@@ -130,9 +130,25 @@ class PaperFetcher:
         retryable = any(
             bool((attempt.get("error") or {}).get("retryable")) for attempt in attempts
         )
+        attempt_codes = [
+            str((attempt.get("error") or {}).get("code") or "") for attempt in attempts
+        ]
+        identity_codes = {"pdf_identity_mismatch", "pdf_identity_unresolved"}
+        only_identity_failures = bool(attempt_codes) and all(
+            code in identity_codes for code in attempt_codes
+        )
+        if only_identity_failures and "pdf_identity_mismatch" in attempt_codes:
+            error_code = "pdf_identity_mismatch"
+            error_message = "Every downloaded PDF candidate mismatched the requested paper identity"
+        elif only_identity_failures:
+            error_code = "pdf_identity_unresolved"
+            error_message = "No downloaded PDF candidate had sufficient identity evidence"
+        else:
+            error_code = "download_unresolved" if attempts else "not_found"
+            error_message = "No configured source produced a verified PDF"
         error = PaperFetchError(
-            "download_unresolved" if attempts else "not_found",
-            "No configured source produced a verified PDF",
+            error_code,
+            error_message,
             retryable=retryable,
             attempts=attempts,
         )

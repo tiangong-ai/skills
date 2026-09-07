@@ -20,7 +20,7 @@ from .sanitize import sanitize_data
 
 
 CLI_VERSION = "1.0.0"
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "3.0.0"
 EXIT_SUCCESS = 0
 EXIT_UNRESOLVED = 1
 EXIT_VALIDATION = 3
@@ -37,9 +37,19 @@ def schema() -> dict[str, Any]:
             "temporary_file",
             "pdf_structure_validation",
             "sha256",
+            "pdf_identity_validation",
             "atomic_rename",
             "manifest_commit",
         ],
+        "identity_policy": {
+            "required_status": "matched",
+            "doi_sources": ["document_metadata", "primary_first_page"],
+            "fallback": {
+                "document_metadata_title": "strong_match",
+                "first_page_title": "strong_match_plus_author_or_year",
+            },
+            "unresolved": "fail_before_commit",
+        },
         "dependencies": {"pypdf": "==6.14.2"},
         "environment": {
             "UNPAYWALL_EMAIL": "Enable Unpaywall with its required contact email.",

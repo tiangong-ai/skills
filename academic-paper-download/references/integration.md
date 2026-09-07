@@ -42,6 +42,25 @@ retryable=...)` for classified failures and must write downloads only to the
 provided temporary `destination`. They must not log sensitive header values or
 unsanitized URL query credentials.
 
+## Identity Contract
+
+Automatic and browser commits share the same fail-closed identity validator.
+Successful results and manifests use schema v3 and include
+`identity_status: matched` plus bounded `identity` evidence. Document DOI fields
+and primary first-page DOI positions take precedence. When neither supplies a
+DOI, a strong title match may succeed unless available author or year evidence
+conflicts; a title found only in first-page text also requires positive author
+or year support. Subject, keywords, descriptions, and other DOI strings remain
+recorded as non-primary observations and do not by themselves identify or
+reject a paper.
+
+`pdf_identity_mismatch` means the available primary identity evidence conflicts
+with the requested paper. `pdf_identity_unresolved` means metadata and bounded
+first-page text were insufficient. Neither error commits a PDF or success
+manifest. The validator performs no OCR and never stores extracted page text.
+Legacy v2 manifests have no identity evidence and are ineligible for verified
+replay.
+
 ## Browser Handoff Boundary
 
 Do not implement Chrome or CloakBrowser as `PaperTransport`. The optional
@@ -49,4 +68,5 @@ CloakBrowser executor has a separate injectable `BrowserAdapter` for fake-based
 tests and publisher-page interaction. It captures one Playwright-compatible
 Download object, saves it to a preplanned unique staging path, and then invokes
 `finalize_browser_download.py`; it does not participate in OA resolution or
-metadata HTTP traffic.
+metadata HTTP traffic. The finalizer identity-checks that exact staged file
+before renaming, copying, or writing its manifest.

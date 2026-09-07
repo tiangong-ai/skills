@@ -195,6 +195,55 @@ class DownloadChannelTests(unittest.TestCase):
         )
         self.assertEqual(len(list(Path(result["file"]).parent.glob("*.pdf"))), 1)
 
+    def test_only_identity_mismatches_return_a_distinct_failure(self):
+        url = "https://oa.example/wrong.pdf"
+        transport = RoutingHttp(
+            json_routes={
+                "api.semanticscholar.org/graph/v1/paper/DOI": s2_payload(pdf=url),
+            },
+            download_payloads={
+                url: make_pdf_bytes(
+                    doi="10.9999/wrong",
+                    title="Wrong paper",
+                    author="Mallory",
+                    year=2020,
+                )
+            },
+        )
+        result, _ = self.run_fetch(transport)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"]["code"], "pdf_identity_mismatch")
+        self.assertEqual(
+            result["error"]["attempts"][0]["error"]["code"],
+            "pdf_identity_mismatch",
+        )
+        self.assertIsNone(result["file"])
+        self.assertIsNone(result["manifest"])
+
+    def test_only_unresolved_identities_return_a_distinct_failure(self):
+        url = "https://oa.example/unresolved.pdf"
+        transport = RoutingHttp(
+            json_routes={
+                "api.semanticscholar.org/graph/v1/paper/DOI": s2_payload(pdf=url),
+            },
+            download_payloads={
+                url: make_pdf_bytes(
+                    doi=None,
+                    title=None,
+                    author=None,
+                    year=None,
+                    include_document_metadata=False,
+                )
+            },
+        )
+        result, _ = self.run_fetch(transport)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"]["code"], "pdf_identity_unresolved")
+        self.assertEqual(
+            result["error"]["attempts"][0]["error"]["code"],
+            "pdf_identity_unresolved",
+        )
+
     def test_retryable_transport_failure_stays_structured(self):
         failure = PaperFetchError(
             "network_error",
