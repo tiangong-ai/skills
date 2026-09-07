@@ -14,7 +14,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import PDF_BYTES
+from helpers import PDF_BYTES, make_pdf_bytes
 import finalize_browser_download as browser
 
 
@@ -138,6 +138,27 @@ class BrowserFinalizerTests(unittest.TestCase):
             code = browser.finalize(self._args())
         self.assertEqual(code, 3)
         self.assertEqual(json.loads(output.getvalue())["error"]["code"], "unsafe_download_path")
+
+    def test_identity_mismatch_is_not_finalized(self):
+        self._snapshot()
+        source = self.downloads / "Expected.pdf"
+        source.write_bytes(
+            make_pdf_bytes(
+                doi="10.9999/wrong",
+                title="Wrong paper",
+                author="Mallory",
+                year=2020,
+            )
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = browser.finalize(self._args())
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "pdf_identity_mismatch")
+        self.assertTrue(source.is_file())
+        self.assertEqual(list(self.output.glob("*.pdf")), [])
+        self.assertEqual(list(self.output.glob("*.json")), [])
 
     def test_invalid_doi_is_validation_exit(self):
         self._snapshot()

@@ -9,7 +9,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import PDF_BYTES, RoutingHttp, arxiv_atom
+from helpers import PDF_BYTES, RoutingHttp, arxiv_atom, make_pdf_bytes
 from paper_fetch import FetchRequest, fetch_paper
 from paper_fetch.artifact import ArtifactStore, manifest_path
 from paper_fetch.errors import PaperFetchError
@@ -162,6 +162,38 @@ class DownloadChannelTests(unittest.TestCase):
         self.assertIn("browser_handoff", result)
         downloaded = [url for method, url in calls if method == "download"]
         self.assertEqual(downloaded, [unpaywall_url, s2_url, arxiv_url])
+
+    def test_identity_mismatch_falls_through_to_next_oa_source(self):
+        wrong_url = "https://oa.example/wrong-citing-paper.pdf"
+        correct_url = "https://oa.example/correct-paper.pdf"
+        transport = RoutingHttp(
+            json_routes={
+                "api.unpaywall.org": {
+                    "title": "Example paper",
+                    "year": 2024,
+                    "z_authors": [{"family": "Example"}],
+                    "best_oa_location": {"url_for_pdf": wrong_url},
+                },
+                "api.semanticscholar.org/graph/v1/paper/DOI": s2_payload(pdf=correct_url),
+            },
+            download_payloads={
+                wrong_url: make_pdf_bytes(
+                    doi="10.9999/wrong",
+                    title="Paper that cites the requested work",
+                    author="Mallory",
+                    year=2020,
+                ),
+                correct_url: PDF_BYTES,
+            },
+        )
+        result, calls = self.run_fetch(transport, email="researcher@example.edu")
+        self.assertTrue(result["success"])
+        self.assertEqual(result["source"], "semantic_scholar")
+        self.assertEqual(
+            [url for method, url in calls if method == "download"],
+            [wrong_url, correct_url],
+        )
+        self.assertEqual(len(list(Path(result["file"]).parent.glob("*.pdf"))), 1)
 
     def test_retryable_transport_failure_stays_structured(self):
         failure = PaperFetchError(

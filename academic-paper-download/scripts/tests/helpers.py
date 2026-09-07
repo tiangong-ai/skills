@@ -6,14 +6,64 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from paper_fetch.errors import PaperFetchError
 
 
-def make_pdf_bytes() -> bytes:
+def _pdf_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def make_pdf_bytes(
+    *,
+    doi: str | None = "10.1234/example",
+    title: str | None = "Example paper",
+    author: str | None = "Alice Example",
+    year: int | str | None = 2024,
+    first_page_lines: tuple[str, ...] = (),
+    include_document_metadata: bool = True,
+) -> bytes:
     buffer = io.BytesIO()
     writer = PdfWriter()
-    writer.add_blank_page(width=612, height=792)
+    page = writer.add_blank_page(width=612, height=792)
+    if include_document_metadata:
+        metadata = {
+            key: str(value)
+            for key, value in {
+                "/DOI": doi,
+                "/Title": title,
+                "/Author": author,
+                "/Year": year,
+            }.items()
+            if value not in (None, "")
+        }
+        if metadata:
+            writer.add_metadata(metadata)
+    if first_page_lines:
+        font = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+            }
+        )
+        page[NameObject("/Resources")] = DictionaryObject(
+            {
+                NameObject("/Font"): DictionaryObject(
+                    {NameObject("/F1"): writer._add_object(font)}
+                )
+            }
+        )
+        commands = ["BT /F1 12 Tf 14 TL 72 720 Td"]
+        for index, line in enumerate(first_page_lines):
+            commands.append(f"({_pdf_text(line)}) Tj")
+            if index < len(first_page_lines) - 1:
+                commands.append("T*")
+        commands.append("ET")
+        contents = DecodedStreamObject()
+        contents.set_data(" ".join(commands).encode("latin-1"))
+        page[NameObject("/Contents")] = writer._add_object(contents)
     writer.write(buffer)
     return buffer.getvalue()
 

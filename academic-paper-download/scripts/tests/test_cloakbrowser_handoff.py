@@ -13,7 +13,7 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from helpers import PDF_BYTES
+from helpers import PDF_BYTES, make_pdf_bytes
 import cloakbrowser_handoff as cli
 from paper_fetch.artifact import manifest_path, sha256_file
 from paper_fetch.cloakbrowser_handoff import (
@@ -259,6 +259,19 @@ class CloakBrowserHandoffTests(unittest.TestCase):
             execute_handoff(self.config(), adapter=FakeAdapter(browser))
         self.assertEqual(list(self.output.glob("*.json")), [])
         self.assertEqual(list(self.output.glob("*.pdf")), [])
+
+    def test_identity_mismatch_does_not_commit_browser_artifact(self) -> None:
+        wrong = make_pdf_bytes(
+            doi="10.9999/wrong",
+            title="Wrong paper",
+            author="Mallory",
+            year=2020,
+        )
+        with self.assertRaises(PaperFetchError) as raised:
+            execute_handoff(self.config(), adapter=FakeAdapter(FakeSession(payload=wrong)))
+        self.assertEqual(raised.exception.code, "pdf_identity_mismatch")
+        self.assertEqual(list(self.output.glob("*.pdf")), [])
+        self.assertEqual(list(self.output.glob("*.json")), [])
 
     def test_invalid_pdf_still_fails_pypdf_eof_and_size_pipeline(self) -> None:
         for payload in (b"<html>login</html>", b"%PDF-1.7\ntruncated", b""):
