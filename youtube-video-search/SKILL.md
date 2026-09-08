@@ -19,6 +19,8 @@ filtering, limits, validation, partial results, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
+   Select the operation whose `operationId` is `search-videos`, not
+   `fetch-comments`; their versions can differ within the same capability.
 4. Ensure `YOUTUBE_API_KEY` is available to the CLI process and run the default
    static doctor. Never place the key in argv, request JSON, Skill files, logs,
    or output.
@@ -66,7 +68,7 @@ against `data describe`.
   "capabilityId": "youtube.public-content",
   "capabilityVersion": "<describe.manifest.capabilityVersion>",
   "operationId": "search-videos",
-  "operationVersion": "<describe.manifest.operations[0].operationVersion>",
+  "operationVersion": "<describe.manifest.operations[1].operationVersion>",
   "input": {
     "query": "climate policy",
     "publishedAfter": "2026-03-01T00:00:00Z",

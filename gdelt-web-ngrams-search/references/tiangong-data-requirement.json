@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "tiangong.data.skill-capability-requirement.v1",
+  "skillName": "gdelt-web-ngrams-search",
+  "capabilityId": "gdelt.web-ngrams",
+  "capabilityContractVersion": "1",
+  "operations": {
+    "search": { "contractVersion": "1" }
+  }
+}

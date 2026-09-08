@@ -1,0 +1,4 @@
+interface:
+  display_name: "GDELT Web NGrams Search"
+  short_description: "Find news links in paired GDELT minute files"
+  default_prompt: "Use $gdelt-web-ngrams-search to find article links in one specified UTC minute."

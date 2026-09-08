@@ -18,6 +18,11 @@ input/output schemas, HTTP behavior, limits, validation, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
+4. Immediately inspect `manifest.availability` and `discovery.availability`.
+   If either does not report `available`, stop before constructing a request
+   and report its exact `reasonCode`, description, and resume criteria. Do not
+   bypass suspension with a direct provider request. Route to GDELT Web NGrams
+   only when the caller accepts its different literal phrase-search semantics.
 
 ```bash
 tiangong-ai data describe gdelt.doc-search --json
@@ -77,6 +82,10 @@ result to another workflow.
 
 ## Result boundaries
 
+- Persistent DOC throttling is unavailable retrieval, not zero coverage. When
+  literal topic discovery fits the task, consider the separately described
+  `gdelt-web-ngrams-search` Skill as an explicit change of retrieval method.
+  It does not support DOC operators or reproduce DOC aggregate timelines.
 - Treat article-list results as source metadata and links, not downloaded
   article bodies, verified claims, or independent evidence units.
 - Treat timelines, tone, language, and source-country outputs as automated
@@ -90,7 +99,9 @@ result to another workflow.
 - Surface `partial`, truncation warnings, and empty results. Never reinterpret
   them as complete absence of coverage.
 - Use a dedicated GDELT Events, GKG, or Mentions Skill when structured feed rows
-  are required; this Skill must not invoke or combine them automatically.
+  are required: GKG supplies document annotations, Events supplies coded events,
+  and Mentions links events to documents. This Skill must not invoke or combine
+  them automatically, and their statistics are not interchangeable with DOC.
 - Cross-source comparison, full-text acquisition, persistence, polling, and
   research evidence admission belong to the caller or Auto Research.
 
