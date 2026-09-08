@@ -19,6 +19,10 @@ results, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
+4. Immediately inspect `manifest.availability` and `discovery.availability`.
+   If either does not report `available`, stop before constructing a request
+   and report its exact `reasonCode`, description, and resume criteria. Do not
+   bypass suspension with a direct legacy API, EDR beta, page fetch, or proxy.
 
 ```bash
 tiangong-ai data describe usbr.rise --json

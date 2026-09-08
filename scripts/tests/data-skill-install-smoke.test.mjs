@@ -41,6 +41,7 @@ const PILOTS = [
     skill: "gdelt-doc-search",
     capability: "gdelt.doc-search",
     operations: ["search"],
+    suspended: true,
   },
   {
     skill: "gdelt-events-fetch",
@@ -114,11 +115,13 @@ const PILOTS = [
     skill: "usbr-project-records-fetch",
     capability: "usbr.project-records",
     operations: ["fetch"],
+    suspended: true,
   },
   {
     skill: "usbr-rise-fetch",
     capability: "usbr.rise",
     operations: ["discover-items", "fetch-results"],
+    suspended: true,
   },
   {
     skill: "usgs-water-iv-fetch",
@@ -239,7 +242,10 @@ test(
           assert.equal(existsSync(resolve(installed, "assets")), false);
           const requirement = readInstalledRequirement(consumer, pilot);
           assert.equal(requirement.capabilityId, pilot.capability);
-          assert.deepEqual(Object.keys(requirement.operations), pilot.operations);
+          assert.deepEqual(
+            Object.keys(requirement.operations),
+            pilot.operations,
+          );
           assert.equal("generatedWithCliVersion" in requirement, false);
         }
 
@@ -256,7 +262,10 @@ test(
           env: environment,
         });
         assert.equal(catalog.status, 0, catalog.stderr);
-        assert.equal(JSON.parse(catalog.stdout).capabilities.length >= 19, true);
+        assert.equal(
+          JSON.parse(catalog.stdout).capabilities.length >= 19,
+          true,
+        );
 
         for (const pilot of PILOTS) {
           const describe = run(
@@ -278,17 +287,25 @@ test(
             [...cli, "data", "doctor", pilot.capability, "--json"],
             { cwd: consumer, env: environment },
           );
-          assert.equal(
-            doctor.status,
-            pilot.requiredCredential ? 3 : 0,
-            doctor.stderr,
+          const doctorBlocked = Boolean(
+            pilot.suspended || pilot.requiredCredential,
           );
+          assert.equal(doctor.status, doctorBlocked ? 3 : 0, doctor.stderr);
+          const doctorEnvelope = JSON.parse(doctor.stdout);
           assert.equal(
-            JSON.parse(doctor.stdout).status,
-            pilot.requiredCredential ? "blocked" : "ready",
+            doctorEnvelope.status,
+            doctorBlocked ? "blocked" : "ready",
           );
           if (pilot.suspended) {
             assert.equal(manifest.availability?.status, "suspended");
+            const availabilityCheck = doctorEnvelope.checks.find(
+              (check) => check.checkId === "availability",
+            );
+            assert.equal(availabilityCheck?.status, "fail");
+            assert.equal(
+              availabilityCheck?.details?.reasonCode,
+              manifest.availability.reasonCode,
+            );
           }
 
           for (const operationId of pilot.operations) {

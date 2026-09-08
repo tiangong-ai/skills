@@ -19,6 +19,10 @@ limits, retries, link normalization, partial results, and receipts.
 3. Run `data describe` with that same CLI. Continue only when the capability
    ID and required contract majors match, and copy the exact current
    capability/operation versions from that response into the run request.
+4. Immediately inspect `manifest.availability` and `discovery.availability`.
+   If either does not report `available`, stop before constructing a request
+   and report its exact `reasonCode`, description, and resume criteria. Do not
+   bypass suspension with a direct page fetch or another USBR endpoint.
 
 ```bash
 tiangong-ai data describe usbr.project-records --json

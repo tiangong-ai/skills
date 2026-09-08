@@ -17,26 +17,23 @@ checkPaths:
   - "*-search/**"
   - "*-download/**"
   - tiangong-auto-research/**
-lastReviewedAt: 2026-09-07
+lastReviewedAt: 2026-09-08
 lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
 # 原子数据 Skill 迁移实施计划
 
-## 当前基线
+## 当前状态和约束
 
-- 计划基线：`origin/main` at
-  `4104e527facd09ecc242dad7a1e9645adf9d21f0`。
-- 计划分支：`codex/atomic-data-plan`，使用独立干净 worktree。
 - EcoCouncil 迁移源固定为 `https://github.com/fpddmw/EcoCouncil.git` 的已提交
   `main@ac19289b4876d8a90595a0270721ef3f5ee7ced8`；其 21 个
   `skills/source-fetch` Skill 是迁移范围的权威清单。
-- EcoCouncil 工作树当前分支 `codex/pluggable-harness-migration` 的未提交改动被明确
-  归档为废弃实验，不属于迁移输入。该工作树混合 council runtime、报告链、数据路线
-  纪律和部分 fetch 脚本试验；不得从中复制、择取实现或用其修正 `ac19289` 的源语义。
-- 原 Skills checkout、现有 `codex/atomic-environment-data-skills` worktree 及 CLI 的
-  未提交变更都保持不动，不 stash/reset/rebase/clean。
-- 首批实现继续使用该独立 worktree；兼容 CLI 包、requirement/provenance 和全部门禁通过后才提交 PR。
+- 其他 EcoCouncil 未提交实验继续视为归档历史，不属于迁移输入，也不得用来改写上述
+  固定提交的源语义。
+- 21 项迁移与后续 GDELT Web NGrams 扩展已进入候选实现；CLI 候选、稳定 requirement、
+  repository provenance、copy/symlink install smoke 和治理门禁共同决定是否可交付。
+- 当前实施不再受历史计划 checkout、一次性停止点或已完成审批节点约束；仍须保留用户
+  无关修改，并保持 CLI 先于依赖它的 Skills 合并与发布。
 
 ## 2026-08-31 迁移源审计更正
 
@@ -591,8 +588,8 @@ workspace build 继续由各自的 runtime lock 和 integrity 负责。
   指向 branch 或本地 checkout。
 - 不清理旧仓库、旧 worktree 或用户未提交内容；归档/删除需要另一次明确授权。
 
-## 准备完成定义
+## 当前交付定义
 
-准备完成是指：最新主分支、干净 worktree、两仓权威计划、候选清单、首批范围、TS7
-依赖、PR 顺序、验证和回退门槛均已持久化并通过治理检查。准备完成后停止，等待下一次
-实现授权。
+迁移交付要求两仓权威边界、EcoCouncil 固定来源、完整候选清单、TS7 CLI 依赖、稳定
+requirement、exact provenance、copy/symlink install smoke、PR 顺序、资格验证与回退门槛
+均已持久化并通过治理检查。历史准备阶段的分支位置或暂停指令不参与当前完成判断。

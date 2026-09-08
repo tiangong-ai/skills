@@ -13,7 +13,7 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-07
+lastReviewedAt: 2026-09-08
 lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 

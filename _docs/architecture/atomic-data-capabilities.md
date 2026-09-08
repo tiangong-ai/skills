@@ -17,7 +17,7 @@ checkPaths:
   - "*-search/**"
   - "*-download/**"
   - tiangong-auto-research/**
-lastReviewedAt: 2026-09-07
+lastReviewedAt: 2026-09-08
 lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
@@ -206,7 +206,7 @@ map、预算、来源/证据准入、永久 evidence/artifact、journal、handof
 入口中，comments 与 comment detail 共享 `regulations-gov.comments` capability 并分别只绑定
 search 与 fetch-details；attachments 独立绑定声明 artifact output 的
 `regulations-gov.attachments/download`。两个 YouTube 入口共享一个 capability 并分别绑定
-search-videos 与 fetch-comments，四个 GDELT 入口分别绑定独立 capability。本地候选分支可先
+search-videos 与 fetch-comments，五个 GDELT 入口分别绑定独立 capability。本地候选分支可先
 完成薄化和测试，但只有在对应 CLI 正式版本发布、仓库级 migration provenance 复验、隔离安装 smoke 和
 回退路径验证后才达到生产完成。RSS/fulltext、Figshare、论文下载、Tiangong/KB 与邮箱
 候选的边界审计也已完成：它们保留专用内容、artifact、Research、产品或私有账户实现，

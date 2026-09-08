@@ -13,7 +13,7 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-07
+lastReviewedAt: 2026-09-08
 lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
 ---
 
@@ -147,7 +147,7 @@ GDELT DOC, Events, GKG, and Mentions entrypoints, Bluesky Cascades, and separate
 YouTube video-search/comment entrypoints, and GDELT Web NGrams. Regulations.gov search and detail
 bind different operations of one capability, while attachments uses its own
 capability; the two YouTube Skills likewise bind different operations of one
-capability; the GDELT Skills bind four independent capabilities with one
+capability; the GDELT Skills bind five independent capabilities with one
 operation each. Each directory has only
 `SKILL.md`, generated agent metadata, and a package-independent capability
 requirement; its
