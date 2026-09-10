@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-10
-lastReviewedCommit: 741ae757974bd22b576b95de203dbe89d492ce20
+lastReviewedCommit: a3608db
 ---
 
 # 天工 AI Skills
