@@ -413,4 +413,40 @@ try {
   await rm(recipeFixture, { recursive: true, force: true });
 }
 
+// Exercise the installed upgrade example with an old locked resolver and a
+// separately selected candidate. Capture-only launchers prohibit network work.
+const upgradeFixture = await mkdtemp(join(tmpdir(), "research-upgrade-recipe-"));
+try {
+  const installed = join(upgradeFixture, "installed-skill");
+  await cp(join(skillsRoot, "tiangong-auto-research"), installed, {recursive: true});
+  const setup = await readFile(join(installed, "references", "setup.md"), "utf8");
+  const block = [...setup.matchAll(/```bash\n([\s\S]*?)```/g)]
+    .map(match => match[1]).find(code => /research setup upgrade/.test(code));
+  assert.ok(block, "An installed upgrade recipe must be executable");
+  const bin = join(upgradeFixture, "bin");
+  await mkdir(bin);
+  const trace = join(upgradeFixture, "calls.jsonl");
+  for (const command of ["node", "npx"]) {
+    const executable = join(bin, command);
+    await writeFile(executable, `#!${process.execPath}\nconst fs=require("node:fs");fs.appendFileSync(process.env.UPGRADE_RECIPE_TRACE,JSON.stringify({launcher:${JSON.stringify(command)},argv:process.argv.slice(2)})+"\\n");\n`);
+    await chmod(executable, 0o700);
+  }
+  const recipe = block.replaceAll("X.Y.Z", "0.0.62")
+    .replaceAll("<every-selected-current-license-id>", "synthetic-license");
+  const run = spawnSync("sh", ["-eu", "-c", recipe], {encoding: "utf8", cwd: upgradeFixture,
+    env: {...process.env, PATH: bin + delimiter + process.env.PATH,
+      AUTO_RESEARCH_CLI: join(installed, "scripts", "research_cli.mjs"), UPGRADE_RECIPE_TRACE: trace}});
+  assert.equal(run.status, 0, run.stderr);
+  const calls = (await readFile(trace, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].launcher, "npx", "An unsupported old locked CLI must not be asked to create its own upgrade candidate");
+  const argv = calls[0].argv;
+  assert.equal(argv[argv.indexOf("--package") + 1], "@tiangong-ai/cli@0.0.62");
+  for (const flag of ["--registry=https://registry.npmjs.org", "--@tiangong-ai:registry=https://registry.npmjs.org", "--strict-ssl=true"]) assert.ok(argv.includes(flag));
+  assert.deepEqual(argv.slice(argv.indexOf("--") + 1, argv.indexOf("--") + 5), ["tiangong-ai", "research", "setup", "upgrade"]);
+  assert.ok(argv.includes("--plan") && argv.includes("--confirm-upgrade"));
+} finally {
+  await rm(upgradeFixture, {recursive: true, force: true});
+}
+
 process.stdout.write("Auto Research routing contract tests passed\n");

@@ -144,6 +144,28 @@ own hash was recomputed. It evaluates central claims, outcomes, result classes,
 evidence composition, owner-input trust, recall, novelty, reproduction, and
 pivots. File existence alone is never success.
 
+## Figures and project-specific maps
+
+Visual-quality claims require actual image delivery and inspection of the exact
+rendered figure or page. File existence, render success, paths, dimensions, SVG
+text and a verbal description are not proof that a reviewer saw the image.
+Use the host's supported visual tools and the CLI's existing artifact/read
+records where available; report what was delivered and inspected without
+inventing receipt fields. Producer visual checks do not replace independent
+review. The clean configured reviewer must actually support the delivered image
+and retain the required other-family/session boundary. If delivery or capability
+is missing, keep visual quality unverified, state the text-only review scope,
+and obtain a supported capable route before claiming visual acceptance.
+
+For a map, use the project's approved brief/Policy and source requirements for
+boundary dataset/version, study extent, labels, projection and required insets.
+Keep source/license/version and relevant presentation choices traceable in the
+figure caption or existing reproducibility materials; check the actual rendered
+map against them. Do not import a national/geopolitical default from another
+project or add an inset merely to satisfy a remembered template. When a missing
+choice materially affects interpretation, request that focused project decision.
+Unavailable map bytes or metadata remain a gap, not a guessed verification.
+
 ## Four fresh independent final reviews
 
 Prepare and submit exactly one review for each role: `evidence`,

@@ -23,6 +23,74 @@ An existing project without a task contract remains **unassessed** in this
 dimension. Do not manufacture historical requirements, approvals or passing
 checks. Existing Policy/evidence safeguards still apply.
 
+## Turn existing evidence into the next decision
+
+At a material stage transition or blocker, tell the researcher what changed,
+which evidence supports or limits the current claim, what that means for the
+original question, and the next useful action. Derive this from existing task,
+assessment, review and budget outputs. Distinguish an operation that ran, a
+scientific check that passed, and a question actually answered. Avoid narrating
+unchanged polls, dumping status codes, creating another status ledger, or paying
+for a separate explanation call.
+
+Before another provider request, inspect the relevant already-fetched material:
+its schema, units, covered ranges, local windows and candidate dispositions.
+Use the existing read path for unpresented rows; a new provider fetch is not a
+pagination mechanism for a saved result. Read enough for the decision or claim,
+not an arbitrary universal number of pages. Record used evidence, exclusions
+with reasons, and pending access/read work in the existing assessment/atom/task
+records. A fetched or registered object is not automatically analyzed support.
+See [evidence-pipeline.md](evidence-pipeline.md) for the actual read/binding path.
+
+Closest literature should change a decision when warranted: compare the current
+claim, estimand, data, assumptions and validation against the closest supported
+work, then keep, narrow, revise or withdraw the proposed novelty/method claim.
+Missing an exact keyword match does not establish novelty. Carry source/atom
+references and consequential counterevidence into the existing assessment and
+research narrative, rather than accumulating a bibliography with no effect.
+
+An IO/schema canary proves only the operation it exercised. Choose the smallest
+predeclared scientific pilot that can distinguish the proposed explanation or
+method from a plausible alternative or failure mode. Interpret its failures,
+nulls and inconclusive outcomes in terms of what can be claimed and what test
+would resolve the uncertainty. Preserve units, independent clusters, fair
+baselines and outcome-blind restrictions; do not select a new design after
+seeing results and label it predeclared. Change frozen assumptions only through
+the supported approval/recovery path. See [scientific-design.md](scientific-design.md).
+
+For a core variable or compatibility detector, connect its intended construct to
+required fields, lawful sources and the representation actually used. On small
+synthetic or authorized development records, contrast equivalent representations,
+changed physical values/units or study boundaries, missing fields and parse
+failures. A keyword-presence detector must not be described as value compatibility;
+either test the relevant values or lower its claim to screening with scientific
+status unresolved. Diagnose an all-zero or constant result as possible input,
+projection, extraction or detector failure before treating it as a domain finding
+or high confidence. Compare summary/full representations of the same development
+records when available; richer text need not produce a positive result. API batch
+size is not a scientific sample-size rationale; purposeful bounded sampling still
+needs a justified, bounded claim. Keep required real-record canaries and
+frozen-evidence gates in place; the synthetic contrasts qualify the development
+method only.
+
+## Repair findings before paying for another opinion
+
+For each actionable finding, identify the affected artifact/claim and the legal
+repair within the current task and frozen contracts. Reuse unaffected evidence
+and calculations. Existing explicit authorization covers the same ordinary
+in-scope repair; do not ask again merely because a review requested it. A new
+scope, design, cost or state-changing recovery operation still needs its
+applicable authorization and supported CLI path.
+
+Batch related corrections, inspect the changed output, then obtain the fresh
+bound reviews invalidated by that revision. The CLI decides which bindings and
+publication-generation reviews became stale. Re-reviewing identical failed
+bytes is not repair, and an unchanged failed receipt is not approval. On a
+transport/execution failure, first inspect the retained output and diagnostic;
+use bounded supported recovery after its cause is addressed. If no permitted
+repair can resolve the finding, preserve the limitation or request the specific
+needed decision instead of cycling reviewers.
+
 ## Record a small original-task checklist
 
 After initializing a new project and before its first scientific review or

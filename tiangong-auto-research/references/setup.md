@@ -268,7 +268,7 @@ generated files byte-for-byte and removes only that recovery directory. A
 changed, symlinked, or ambiguous recovery directory blocks cleanup and is never
 overwritten or deleted automatically.
 
-After the immutable plan exists, resolve every command through the bundled
+After the immutable plan exists, resolve every ordinary command through the bundled
 Skill helper. During a partial installation it uses the reviewed plan version;
 after apply creates the runtime lock it requires the matching locked version.
 Set `AUTO_RESEARCH_CLI` to the absolute path of this selected Skill, not a
@@ -339,27 +339,49 @@ subscription change; setup never switches profiles silently.
 
 ## Update without version drift
 
-`update --check` is read-only. The currently installed generation stays pinned:
+Separate the installed CLI's supported commands from release availability.
+The locked resolver deliberately keeps selecting the old CLI; a new document
+or successful metadata query does not add commands to that installation.
+Inspect its help once. With support available, `research setup update --check`
+is a local catalog comparison; `--candidate-version X.Y.Z` checks one explicitly
+selected exact stable release. An unavailable query means unknown, not no update.
+Do not select `latest`, infer a candidate, or rewrite the runtime lock.
+
+When an upgrade-capable exact candidate has been reviewed and authorized, invoke
+that candidate to plan the transition. In a regular host, use a reviewed Node.js
+24/npx environment:
 
 ```bash
-node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/research-workspace -- \
-  research setup update --check \
+REVIEWED_UPGRADE_CLI_VERSION=X.Y.Z # replace with the reviewed exact stable release
+npx --yes --registry=https://registry.npmjs.org \
+  --@tiangong-ai:registry=https://registry.npmjs.org --strict-ssl=true \
+  --package "@tiangong-ai/cli@$REVIEWED_UPGRADE_CLI_VERSION" -- tiangong-ai \
+  research setup upgrade --plan --confirm-upgrade \
   --workspace /absolute/path/to/research-workspace --json
 ```
 
-An upgrade is a new immutable plan, never an in-place floating update. Review
-new licenses and pins, then apply the newly generated plan:
+A sandboxed IDE retains its approved Node/adapter and reviewer transport;
+unsupported candidate invocation requires a reviewed compatible path, not an
+ambient-runtime or permission bypass. See [sandboxed-ide.md](sandboxed-ide.md).
 
-```bash
-node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/research-workspace -- \
-  research setup upgrade \
-  --plan --confirm-upgrade \
-  --accept-license <every-selected-current-license-id> \
-  --workspace /absolute/path/to/research-workspace --json
-```
+Planning leaves the active generation intact. Review the returned `planPath`,
+ownership/changes and license choices, then execute its exact `applyCommand`.
+The updater verifies prior-owned bytes, stages changed trees and reuses verified
+unchanged material. Owner modifications, linked targets and ambiguous ownership
+remain conflicts; do not delete or overwrite directories to make Doctor pass.
+Preserve models, pricing, custom launchers, credentials, evidence and budgets.
+Unchanged accepted choices carry forward; additional consent applies to actual
+new licenses, downloads, global writes or costs.
 
-The previous plan/state/report/config generation is archived under
-`.tiangong-research/setup-history/<plan-sha256>/` for audit and recovery.
+For an interrupted transition, inspect status and use the same candidate's
+returned apply/recovery command or `rollbackCommand`. Do not reconstruct the
+previous generation or repair a mixed plan/lock by hand. Ordinary research
+resumes only after coherent activation and the required readiness checks. If a
+paid check started but its result was lost, inspect the recorded attempt before
+requesting another; old readiness never certifies changed bytes. Return to the
+locked resolver after activation and start a new native session when routing
+instructions changed. Retained private recovery preimages are not public audit
+exports or permission to discard owner work.
 
 ## Run selected companion adapters
 

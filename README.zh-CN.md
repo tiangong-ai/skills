@@ -13,8 +13,8 @@ checkPaths:
   - README.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-08
-lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
+lastReviewedAt: 2026-09-10
+lastReviewedCommit: 741ae757974bd22b576b95de203dbe89d492ce20
 ---
 
 # 天工 AI Skills
@@ -193,7 +193,10 @@ Policy 兼容性检查和独立 reviewer smoke 都完全就绪，setup 才返回
 
 bootstrap 版本是新 workspace 的显式选择，不得使用 `latest`、tag 或 range。
 apply 创建 `runtime-lock.json` 后，已安装 orchestrator 的内置 resolver 会让
-所有 workspace 操作只运行该锁定版本。
+普通 workspace 操作只运行该锁定版本。若旧安装无法规划升级，必须显式调用已审阅且
+具备升级能力的精确候选版本，按其返回的 apply/recovery 命令操作，激活后再回到锁定
+resolver。已安装命令支持与发行元数据是两件事；元数据不可用不代表没有更新。详见
+已安装 Skill 的 setup reference。
 
 资料较多时，orchestrator 使用 CLI 的只读文件大小预检、角色覆盖预测、有界原子
 批量登记与显式科学评审执行。兼容的锁定 CLI 支持在分析前于同一项目修订获取结果，
@@ -202,6 +205,11 @@ apply 创建 `runtime-lock.json` 后，已安装 orchestrator 的内置 resolver
 审计保持关联，不增加固定付费评审轮次；流程闭环与任务完成分别汇报。详见
 `tiangong-auto-research/references/execution-assurance.md`。不修改冻结历史，也不为
 通过门禁而偷偷降低科学要求。
+
+已安装的 assurance reference 将已获取窗口、最近相关文献和有区分力的方法试验
+连接到具体研究决策与简短的研究者说明。评审意见先触发被允许的修复，再获得新绑定
+评审；地图约定来自当前项目，视觉结论需要图像实际送达具备看图能力的独立评审者。
+这些指导复用现有记录，不增加生命周期账本或自动付费的解释、复审轮次。
 
 兼容的锁定 CLI 还支持在原项目追加兑现预声明的待补科学对象，区分原始请求原文、
 解释与重建，并把计算验收绑定到实际原生计算回执。完整工件可经精确绑定的按需读取

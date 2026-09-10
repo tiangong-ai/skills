@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-08
-lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
+lastReviewedAt: 2026-09-10
+lastReviewedCommit: 741ae757974bd22b576b95de203dbe89d492ce20
 ---
 
 # Tiangong AI Skills
@@ -215,8 +215,12 @@ check, and independent reviewer smoke reaches complete readiness. Use explicit
 
 The bootstrap version is an explicit new-workspace choice, never `latest`, a
 tag, or a range. After apply creates `runtime-lock.json`, the installed
-orchestrator's bundled resolver runs exactly that locked version for all
-workspace operations.
+orchestrator's bundled resolver runs exactly that locked version for ordinary
+workspace operations. A reviewed upgrade-capable candidate is invoked explicitly
+when the old installation cannot plan its own upgrade; follow the candidate's
+returned apply/recovery commands and return to the activated lock. Installed
+command support and release metadata are separate, and unavailable metadata is
+not evidence that no update exists. See the installed setup reference.
 
 For acquisition-heavy work, the orchestrator uses the CLI's read-only artifact
 size and role-coverage forecasts, bounded atomic content batches, and explicit
@@ -229,6 +233,14 @@ and portable audit stay linked without extra fixed reviewer rounds. Workflow
 closure is reported separately from task completion. See
 `tiangong-auto-research/references/execution-assurance.md`; frozen history and
 scientific requirements are never silently rewritten to make a gate pass.
+
+The installed assurance reference connects already-fetched windows, closest
+literature and discriminative pilots to concrete research decisions and concise
+researcher explanations. Review findings lead to permitted repairs before a new
+bound review. Publication guidance keeps map conventions project-specific and
+visual claims conditional on actual image delivery to a capable independent
+reviewer. These instructions reuse existing records and do not add a lifecycle
+ledger or an automatic paid explanation/review round.
 
 Compatible runtimes also fulfill predeclared pending scientific objects in place,
 preserve original-request provenance, and bind computational acceptance to an
