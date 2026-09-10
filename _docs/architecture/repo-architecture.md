@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-08
-lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
+lastReviewedAt: 2026-09-10
+lastReviewedCommit: 741ae757974bd22b576b95de203dbe89d492ce20
 ---
 
 # Skills Repository Architecture
@@ -101,6 +101,14 @@ review/audit. Compatible runtimes may explicitly reopen discovery for new
 sources without changing project identity. The Skill reports task coverage
 separately from workflow/publication status and keeps all producer work native;
 it neither implements a second state machine nor adds fixed paid reviewer rounds.
+
+The assurance reference also links saved evidence reads, closest-work decisions,
+discriminative pilot interpretation and permitted review repairs to concise
+researcher explanations. Conditional publication guidance records project map
+conventions and distinguishes text-only access from actual image review. Setup
+recipes select a reviewed explicit candidate when the old locked CLI lacks
+upgrade support, then use the candidate's returned transition commands. The
+Skill adds no provider logic, receipt schema or second lifecycle record.
 
 The same reference guides original-request provenance, same-project fulfillment
 of explicitly pending model/environment/parameter slots, actual native calculation

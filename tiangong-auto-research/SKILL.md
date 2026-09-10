@@ -34,7 +34,9 @@ it has a position. It may proceed when null results, alternative explanations,
 and counterevidence remain testable. Refuse requests to fabricate, conceal, or
 misrepresent evidence.
 
-For an existing managed directory, use the bundled resolver for every CLI operation.
+For an existing managed directory, use the bundled resolver for ordinary CLI operations.
+An explicitly reviewed CLI upgrade uses the candidate entrypoint in
+[references/setup.md](references/setup.md), then returns to the activated lock.
 Resolve `AUTO_RESEARCH_CLI` from this loaded Skill's absolute directory; do not
 guess a global Skill path. The resolver accepts only the CLI package and exact
 stable version from the regular non-symlink runtime lock, or from the immutable
@@ -92,7 +94,8 @@ detailed stop and recovery rules.
 - Read [references/execution-assurance.md](references/execution-assurance.md)
   before original-task intake, pre-analysis evidence correction, scope changes,
   planned-object fulfillment, observed native calculations, packet-only artifact
-  reads, or completion reporting. Prefer supported same-project operations for
+  reads, evidence-to-design decisions, pilot interpretation, researcher-facing
+  explanations, reviewer-directed repair, or completion reporting. Prefer supported same-project operations for
   an unchanged study; preserve original/current task completion separately.
 - Read [references/evidence-pipeline.md](references/evidence-pipeline.md) before
   discovery, acquisition, evidence refresh, or an addendum.
