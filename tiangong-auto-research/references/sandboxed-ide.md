@@ -148,3 +148,21 @@ The actionable fail-closed codes are:
   or exact result no longer matches the signed request.
 
 Do not hide any of these codes behind a generic retry loop.
+
+## Host approval and task pauses
+
+An individual operation's approval rejection and an asynchronous task pause are
+different controls. For an operation rejection, report the rejected action and
+stated reason, then resolve that specific recipient/material or permission gap
+using existing authorization where applicable. A later task pause does not undo
+the evidence that the earlier gap was resolved, or reveal its own hidden cause.
+
+For a Codex task pause, inspect the notice and available findings. Continue only
+through the host's supported resume flow after reviewing whether the task can
+safely proceed; an ended task or a surface without resume cannot be resumed
+there. Preserve the packet, receipts and uncertainty about past requests. The
+CLI can correct its routing/attestation layer; repeated calls, larger budgets,
+provider switches or a fresh task are not documented cures for host monitoring.
+Do not infer a provider ban or disable controls. If findings are insufficient,
+report the specific observable limitation with sanitized context for upstream
+diagnosis. See [OpenAI's safety-monitoring guidance](https://learn.chatgpt.com/docs/agent-approvals-security#safety-monitoring-and-paused-tasks).

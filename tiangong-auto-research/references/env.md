@@ -203,10 +203,40 @@ yourself. Doctor attests the reviewer target, wrapper, internal adapter, OS, and
 architecture and invalidates the attestation after relevant drift.
 
 For Claude, the runtime does not copy an owner `settings.json`. It extracts only
-documented authentication values and a credential-free HTTPS base URL from the
+documented authentication values, model-mapping variables and a credential-free HTTPS base URL from the
 supported environment object; hooks, permissions, extra directories, and other
 settings are excluded. On macOS, credentials held in the system keychain stay
 in the keychain.
+
+### Reviewer recipient and authorization
+
+Before the first material-bearing review, use the locked CLI's
+`research reviewer status --workspace <absolute-path> --json`. Read native
+`runtime` or bridge `configuredReviewer`: CLI family, configured model alias,
+and `providerRouting.endpointOrigin` / `endpointSource` describe the configured
+recipient. Explicit process variables override the imported Claude settings env.
+Doctor also reports `reviewer-configured-routing`; a bridge's READY describes
+its transport. None of these proves the actual upstream provider/model.
+`identityVerification=unverified` and a null or missing endpoint remain unknown;
+older records without routing fields cannot establish historical destinations.
+Neither a Claude alias nor a `firstParty` auth label proves an official service.
+
+Describe the intended recipient and the particular packet/material scope using
+this evidence. Preserve deliberately configured custom providers, including
+CC Switch/GLM, and reuse applicable explicit user authorization. If an
+official-only description conflicts with an unverified gateway, explain that
+specific mismatch and resolve the intended recipient before sending; a vague
+request to "continue" does not settle it. Do not silently replace the gateway
+with an official endpoint or claim historical disclosure without request evidence.
+
+Reuse the inspected route while its runtime binding remains applicable; do not
+add a status/paid-smoke loop to every review. On runtime drift, inspect the new
+configured recipient and reconcile it with intent before the explicitly
+authorized refresh. Old CLI versions without this binding retain their limits;
+use the reviewed upgrade procedure when a binding is needed. Paths, credentials,
+URL queries and entire user settings files do not belong in the explanation.
+For approval rejection or a host pause, follow
+[sandboxed-ide.md](sandboxed-ide.md#host-approval-and-task-pauses).
 
 The current host application is the producer execution boundary. Discovery
 uses only the CLI's hash-bound one-shot broker command for admitted evidence;

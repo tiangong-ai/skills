@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-10
-lastReviewedCommit: 741ae757974bd22b576b95de203dbe89d492ce20
+lastReviewedCommit: a3608db
 ---
 
 # Skills Repository Architecture
@@ -58,6 +58,13 @@ credential, and setting, owner-only env input with empty disabled options, no
 interactive fallback after a declaration error, and complete-readiness gating.
 The Skill does not duplicate the closed YAML schema or parse configuration; the
 CLI-generated template and validator remain authoritative.
+
+The canonical Skill's environment reference distinguishes configured reviewer
+recipients, runtime readiness and unverified upstream identity. It preserves
+explicit custom-provider authorization and uses the CLI's routing binding rather
+than maintaining another authorization ledger. The sandboxed-IDE reference
+separates individual approval rejection from asynchronous host task pauses and
+routes recovery to the observed control layer without repeated paid retries.
 
 The canonical Skill also owns the native-host research-question gate. It runs
 before setup or tool use, pauses conclusion-presupposing or

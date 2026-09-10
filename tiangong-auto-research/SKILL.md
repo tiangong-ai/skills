@@ -88,7 +88,8 @@ detailed stop and recovery rules.
 - Read [references/external-skills.md](references/external-skills.md) before
   selecting a recommended external Skill, provider, license, or execution role.
 - Read [references/env.md](references/env.md) before configuring credentials,
-  agent authentication, provider checks, or wrappers.
+  agent authentication, provider checks, wrappers, or the first material-bearing
+  review; revisit its recipient guidance when routing or authorization conflicts.
 - Read [references/production-research.md](references/production-research.md)
   before production preflight, execution, recovery, or closure.
 - Read [references/execution-assurance.md](references/execution-assurance.md)
@@ -106,7 +107,8 @@ detailed stop and recovery rules.
   preparing or submitting discover, acquire, analyze, or synthesize stages.
 - Read [references/sandboxed-ide.md](references/sandboxed-ide.md) when the
   producer runs inside WorkBuddy, CodeBuddy, or another outer sandbox, or when
-  native reviewer isolation returns a nested-sandbox error.
+  native reviewer isolation returns a nested-sandbox error. Its host-pause
+  guidance also applies when an operation is rejected or a task is paused.
 - Read [references/publication-policy.md](references/publication-policy.md)
   before a top-journal project, Policy approval, final manuscript freeze,
   four-role publication review, or readiness closure.
