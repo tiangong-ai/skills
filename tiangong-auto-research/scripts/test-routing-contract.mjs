@@ -398,6 +398,9 @@ try {
     ["research", "project", "evidence", "acquisition", "revise"],
     ["research", "scientific", "fulfillment", "record"],
     ["research", "scientific", "fulfillment", "status"],
+    ["research", "scientific", "amendment", "plan"],
+    ["research", "scientific", "amendment", "apply"],
+    ["research", "scientific", "amendment", "status"],
     ["research", "project", "task", "run", "observe"],
     ["research", "project", "task", "run", "inspect"],
     ["research", "project", "stage", "artifacts"],
@@ -405,6 +408,16 @@ try {
   ]) assert.ok(commands.some((argv) => prefix.every((part, index) => argv[index] === part)), `Missing executable recipe: ${prefix.join(" ")}`);
   const approval = commands.find((argv) => argv.includes("scope") && argv.includes("approve"));
   assert.equal(approval[approval.indexOf("--proposal") + 1], approval[approval.indexOf("--confirm-change") + 1]);
+  const amendmentApply = commands.find(argv => argv[2] === "amendment" && argv[3] === "apply");
+  for (const flag of ["--plan", "--confirm", "--authorization-source"]) {
+    const index = amendmentApply.indexOf(flag);
+    assert.ok(index >= 0 && amendmentApply[index + 1] && !amendmentApply[index + 1].startsWith("--"),
+      `Amendment apply must carry an explicit ${flag} value`);
+  }
+  for (const operation of ["plan", "status"]) {
+    const readonly = commands.find(argv => argv[2] === "amendment" && argv[3] === operation);
+    assert.ok(!readonly.includes("--confirm"), "Read-only amendment inspection is not an approval mutation");
+  }
   const observation = commands.find(argv => argv.includes("run") && argv.includes("observe"));
   assert.ok(observation.includes("--confirm-execution"), "Ordinary calculation observation requires exact execution consent");
   const completeRead = commands.find(argv => argv.includes("stage") && argv.includes("read"));
