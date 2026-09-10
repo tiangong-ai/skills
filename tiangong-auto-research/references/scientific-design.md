@@ -268,7 +268,8 @@ packet-file digest. Do not interchange those two hash meanings.
 Never edit frozen bytes by hand. The CLI's bounded pre-analysis acquisition and
 task-scope revisions are described in
 [execution-assurance.md](execution-assurance.md); they do not rewrite the
-scientific design. Compatible runtimes separately support amendments explicitly approved by the owner of existing planned lifecycle declarations and model/parameter links
+scientific design. Compatible runtimes separately allow the owner to approve
+amendments to existing planned lifecycle declarations and model/parameter links
 before analysis or inference freeze, with immutable history and fresh affected
 reviews/checks. Substantive design changes still require a new generation.
 Explain and obtain exact authorization for changed task requirements; a generic
