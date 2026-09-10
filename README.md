@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-10
-lastReviewedCommit: 94e6b30499a621783aa9c2b62749cee03da011db
+lastReviewedCommit: caa42a572ea63019181533855fcd802ae47a1065
 ---
 
 # Tiangong AI Skills
@@ -227,6 +227,8 @@ size and role-coverage forecasts, bounded atomic content batches, and explicit
 prepared scientific-review execution. Recovery reuses verified discovery and
 downloaded artifacts. A compatible locked runtime can revise acquisition in the
 same project before analysis, explicitly reopening discovery only for new sources;
+a compatible runtime also allows the owner to approve pre-analysis amendments
+to planned lifecycle declarations and existing model/parameter links. Substantive
 design changes and later revisions retain the formal successor workflow. Original
 and currently approved task requirements, native check records, independent review
 and portable audit stay linked without extra fixed reviewer rounds. Workflow

@@ -166,7 +166,8 @@ a blocking gap into limitations to advance. Hash and structure checks still run
 at admission and trust boundaries; do not add a full-corpus check after each atom.
 
 Use the existing fork/new-generation route when analysis has started or when the
-question, Policy, design or evidence contract changes. A pre-feature snapshot
+question, Policy, substantive design or evidence contract changes. The bounded
+pre-analysis declaration amendment below is a separate supported path. A pre-feature snapshot
 without immutable acquisition records also uses that route; there is no automatic
 in-place migration. See [scientific-design.md](scientific-design.md).
 
@@ -192,10 +193,64 @@ node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research pr
 The command records exact operator confirmation, not authenticated human identity;
 the native host must honor the user's permission. Never put `approved: true` in
 a producer declaration. Task-scope approval does not change the question,
-Policy, design or evidence requirements. Changes to those contracts need their
-formal new-generation process. A task-scope change invalidates scientific
+Policy, design or evidence requirements. Substantive changes need their formal
+new-generation process; the bounded declaration amendment below has its own
+exact approval. A task-scope change invalidates scientific
 reviews that no longer cover it; inspect status before paying for any re-review.
 Withdrawn original requirements remain visible rather than becoming answered.
+
+## Amend an existing planned declaration before analysis
+
+When the exact locked CLI exposes `scientific amendment`, an idle project before
+analysis and inference freeze may amend a planned Policy rule's lifecycle declaration or links to existing
+model/parameter IDs. Keep the scientific question, claims, thresholds, model
+definitions, parameter values, evidence requirements and Policy content fixed.
+This is useful when an existing obligation lacks a binding that ordinary
+fulfillment cannot add. It is not a general design editor or a way to delay an
+unmet scientific requirement until after seeing results.
+
+Prepare the concrete change without a new provider request or permission to
+mutate the project:
+
+```bash
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research schema show scientific-amendment --json
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research scientific amendment plan PROJECT --input /absolute/path/amendment-input.json --workspace /absolute/path/to/workspace --json
+```
+
+Save the returned plan JSON unchanged as an external file. Show its exact
+before/after declarations, reason, parent bindings, preserved evidence,
+invalidated gates and `affectedTaskRequirementIds`. Obtain only a missing
+explicit decision on that concrete plan. Reuse existing approval of the same exact plan; a general instruction to
+continue or fix the project is not approval of a different design change.
+Retain the actual supplied confirmation text in a bounded UTF-8 file; do not
+write approval on the owner's behalf. Only after that exact approval:
+
+```bash
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research scientific amendment apply PROJECT --plan /absolute/path/amendment-plan.json --confirm REVIEWED_PLAN_SHA256 --authorization-source /absolute/path/owner-confirmation.txt --workspace /absolute/path/to/workspace --json
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research scientific amendment status PROJECT --workspace /absolute/path/to/workspace --json
+```
+
+The CLI retains the original design, an immutable new version, its exact changes
+and supplied authorization source. This records operator confirmation, not
+authenticated human identity. Planned rules remain planned; authorization does
+not establish scientific satisfaction. Reuse still-valid sources, artifacts,
+decompositions, atoms and prior fulfillment. Do not download or register them
+again merely because the declaration changed. Complete the pending scientific
+gates with the new version and staged history; old reviews cannot approve it.
+Inspect task status for the named affected requirements and reassess their checks
+against the amended declaration. Unrelated source checks and still-applicable
+calculations remain reusable. Selective invalidation follows the task
+requirements' explicit claim/coverage bindings; an unbound source-only check
+must not be presented as validation of the changed design.
+
+On a stale plan or changed Policy, inspect current state and prepare a new plan;
+never replace parent hashes in an old approved file. A changed plan needs its
+own concrete approval. After an interrupted apply, retry the same approved
+plan and source through the CLI's recovery path, then inspect status. Preserve
+unknown or conflicting stored files for supported recovery. Substantive changes
+and all post-analysis amendments retain the reviewed successor boundary. An
+older locked CLI without these commands follows the existing upgrade boundary,
+not manual edits to control files or a silent switch to `latest`.
 
 ## Fulfill only predeclared scientific slots
 

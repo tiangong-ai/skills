@@ -166,8 +166,11 @@ This list also exposes ordinary `planned` Policy rules with their exact due
 gate. A rule deferred to evidence-construct is not already discharged because
 research-design passed. Fulfillment discharges only the pending-object filing
 blocker; the unchanged Policy rule still needs independent scientific judgement.
-Resolve it in a reviewed successor before its deadline when different design
-content is required. Do not mark it satisfied with an invented
+For only an existing planned lifecycle declaration or model/parameter link,
+use the amendment path explicitly confirmed by the owner in
+[execution-assurance.md](execution-assurance.md) before analysis or inference
+freeze. Substantively different design content requires a reviewed successor
+before the deadline. Do not mark it satisfied with an invented
 assessment or wait until a frozen acquisition makes an avoidable gap costly.
 
 ## Three early scientific gates
@@ -265,7 +268,10 @@ packet-file digest. Do not interchange those two hash meanings.
 Never edit frozen bytes by hand. The CLI's bounded pre-analysis acquisition and
 task-scope revisions are described in
 [execution-assurance.md](execution-assurance.md); they do not rewrite the
-scientific design. An actual design change still requires a new generation.
+scientific design. Compatible runtimes separately allow the owner to approve
+amendments to existing planned lifecycle declarations and model/parameter links
+before analysis or inference freeze, with immutable history and fresh affected
+reviews/checks. Substantive design changes still require a new generation.
 Explain and obtain exact authorization for changed task requirements; a generic
 continue/fork instruction is not that authorization. A top-journal fork or
 addendum requires an approved Policy and scientific design whose `projectId`
