@@ -17,8 +17,8 @@ checkPaths:
   - scripts/**
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-10
-lastReviewedCommit: caa42a572ea63019181533855fcd802ae47a1065
+lastReviewedAt: 2026-09-11
+lastReviewedCommit: dd1ea71
 ---
 
 # Skills Development Runbook
@@ -162,7 +162,8 @@ language to pass in the clean container.
 
 Task-assurance recipe tests copy the Skill to an isolated directory and execute
 its single-command shell examples against a capture-only Node stand-in. Check
-resolver paths, argv and exact scope-hash confirmation there; this is not a
+resolver paths, argv, exact scope-hash confirmation and investigation/promotion
+approval arguments there; this is not a
 substitute for behavioral evaluation. Evaluate realistic recovery/completion
 decisions independently without supplying the expected answer, and run the
 corresponding protocol against the exact candidate CLI outside the repository.

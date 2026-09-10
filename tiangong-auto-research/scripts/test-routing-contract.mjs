@@ -348,7 +348,8 @@ try {
   const installed = join(recipeFixture, "installed-skill");
   await cp(join(skillsRoot, "tiangong-auto-research"), installed, { recursive: true });
   const referencePath = join(installed, "references", "execution-assurance.md");
-  const reference = await readFile(referencePath, "utf8");
+  const reference = await readFile(referencePath, "utf8") + "\n" +
+    await readFile(join(installed, "references", "bounded-investigation.md"), "utf8");
   for (const marker of ["requestProvenance", "verbatim", "interpreted", "reconstructed", "unrecorded", "nativeRunSha256", "unverified-execution", "on-demand", "no total context-length"]) {
     assert.ok(reference.includes(marker), `Installed task assurance must explain ${marker}`);
   }
@@ -390,6 +391,14 @@ try {
   }
   const commands = invocations.map((argv) => argv.slice(argv.indexOf("--") + 1));
   for (const prefix of [
+    ["research", "project", "investigation", "plan"],
+    ["research", "project", "investigation", "approve"],
+    ["research", "project", "investigation", "attempt"],
+    ["research", "project", "investigation", "select"],
+    ["research", "project", "investigation", "close"],
+    ["research", "project", "investigation", "status"],
+    ["research", "project", "investigation", "promotion", "plan"],
+    ["research", "project", "investigation", "promotion", "approve"],
     ["research", "project", "task", "define"],
     ["research", "project", "task", "status"],
     ["research", "project", "task", "scope", "propose"],
@@ -406,6 +415,17 @@ try {
     ["research", "project", "stage", "artifacts"],
     ["research", "project", "stage", "read"],
   ]) assert.ok(commands.some((argv) => prefix.every((part, index) => argv[index] === part)), `Missing executable recipe: ${prefix.join(" ")}`);
+  for (const command of commands.filter(argv => argv[2] === "investigation")) {
+    if (command.includes("approve")) {
+      for (const flag of ["--input", "--confirm", "--authorization-source"]) {
+        const index = command.indexOf(flag);
+        assert.ok(index >= 0 && command[index + 1] && !command[index + 1].startsWith("--"),
+          `Investigation approval must carry ${flag}`);
+      }
+    } else {
+      assert.ok(!command.includes("--confirm"), "Inspection and in-envelope trials do not request fresh approval");
+    }
+  }
   const approval = commands.find((argv) => argv.includes("scope") && argv.includes("approve"));
   assert.equal(approval[approval.indexOf("--proposal") + 1], approval[approval.indexOf("--confirm-change") + 1]);
   const amendmentApply = commands.find(argv => argv[2] === "amendment" && argv[3] === "apply");

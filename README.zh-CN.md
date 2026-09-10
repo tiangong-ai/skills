@@ -13,8 +13,8 @@ checkPaths:
   - README.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-10
-lastReviewedCommit: caa42a572ea63019181533855fcd802ae47a1065
+lastReviewedAt: 2026-09-11
+lastReviewedCommit: dd1ea71
 ---
 
 # 天工 AI Skills
@@ -206,6 +206,12 @@ CLI 还可在分析前，经用户批准精确计划，修订既有 planned 规�
 范围、原生宿主检查、独立评审和可移植审计保持关联，不增加固定付费评审轮次；流程闭环与任务完成分别汇报。详见
 `tiangong-auto-research/references/execution-assurance.md`。不修改冻结历史，也不为
 通过门禁而偷偷降低科学要求。
+
+需要多轮诊断计算时，兼容的锁定 CLI 可将有界 investigation 绑定到同一个计算
+要求。原生宿主在批准范围内试验配置，无需逐次确认，并从不可变历史和剩余额度恢复
+上下文；候选晋级仍需单独批准、冻结、重新认证 Canary 和现有科学评审。探索结果
+不能直接作为交付证据；中断且结果未知时保留未决状态。详见
+`tiangong-auto-research/references/bounded-investigation.md`。
 
 已安装的 assurance reference 将已获取窗口、最近相关文献和有区分力的方法试验
 连接到具体研究决策与简短的研究者说明。评审意见先触发被允许的修复，再获得新绑定

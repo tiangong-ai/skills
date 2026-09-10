@@ -13,8 +13,8 @@ checkPaths:
   - README.zh-CN.md
   - .claude-plugin/**
   - "*/SKILL.md"
-lastReviewedAt: 2026-09-10
-lastReviewedCommit: caa42a572ea63019181533855fcd802ae47a1065
+lastReviewedAt: 2026-09-11
+lastReviewedCommit: dd1ea71
 ---
 
 # Tiangong AI Skills
@@ -235,6 +235,14 @@ and portable audit stay linked without extra fixed reviewer rounds. Workflow
 closure is reported separately from task completion. See
 `tiangong-auto-research/references/execution-assurance.md`; frozen history and
 scientific requirements are never silently rewritten to make a gate pass.
+
+For repeated diagnostic calculations, a compatible locked CLI provides a bounded
+investigation tied to one computational requirement. The native host can test
+approved configurations without per-trial confirmation, inspect immutable
+history and remaining quotas, then request separate exact candidate promotion.
+Candidates remain exploratory until frozen and rerun as a fresh certification
+Canary with the existing scientific reviews. Interrupted unknown results remain
+unresolved. See `tiangong-auto-research/references/bounded-investigation.md`.
 
 The installed assurance reference connects already-fetched windows, closest
 literature and discriminative pilots to concrete research decisions and concise
