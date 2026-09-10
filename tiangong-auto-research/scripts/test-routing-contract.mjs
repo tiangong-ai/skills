@@ -349,7 +349,8 @@ try {
   await cp(join(skillsRoot, "tiangong-auto-research"), installed, { recursive: true });
   const referencePath = join(installed, "references", "execution-assurance.md");
   const reference = await readFile(referencePath, "utf8") + "\n" +
-    await readFile(join(installed, "references", "bounded-investigation.md"), "utf8");
+    await readFile(join(installed, "references", "bounded-investigation.md"), "utf8") + "\n" +
+    await readFile(join(installed, "references", "fulltext-access-preflight.md"), "utf8");
   for (const marker of ["requestProvenance", "verbatim", "interpreted", "reconstructed", "unrecorded", "nativeRunSha256", "unverified-execution", "on-demand", "no total context-length"]) {
     assert.ok(reference.includes(marker), `Installed task assurance must explain ${marker}`);
   }
@@ -391,6 +392,7 @@ try {
   }
   const commands = invocations.map((argv) => argv.slice(argv.indexOf("--") + 1));
   for (const prefix of [
+    ["research", "project", "access", "status"],
     ["research", "project", "investigation", "plan"],
     ["research", "project", "investigation", "approve"],
     ["research", "project", "investigation", "attempt"],
