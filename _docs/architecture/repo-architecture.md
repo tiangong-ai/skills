@@ -116,6 +116,14 @@ sources without changing project identity. The Skill reports task coverage
 separately from workflow/publication status and keeps all producer work native;
 it neither implements a second state machine nor adds fixed paid reviewer rounds.
 
+For compatible locked runtimes, the same reference separates read-only design
+amendment planning from exact operator confirmation and submission. It limits
+changes to existing planned lifecycle declarations and model/parameter links,
+retains actual confirmation-source provenance without claiming authenticated
+authorship, and reuses valid evidence and fulfillment while requiring the
+CLI-reported new scientific reviews. Substantive and post-analysis design
+changes remain successor work; the CLI owns version history and recovery.
+
 The assurance reference also links saved evidence reads, closest-work decisions,
 discriminative pilot interpretation and permitted review repairs to concise
 researcher explanations. Conditional publication guidance records project map
