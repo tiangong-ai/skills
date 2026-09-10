@@ -207,6 +207,12 @@ CLI 还可在分析前，经用户批准精确计划，修订既有 planned 规�
 `tiangong-auto-research/references/execution-assurance.md`。不修改冻结历史，也不为
 通过门禁而偷偷降低科学要求。
 
+当大量取材依赖机构订阅或其他授权全文时，orchestrator 先通过实际计划使用的
+路线检查少量相关文献，并复用仍适用的精确成功工件。它区分论文身份与可读正文、
+HTTP 成功和已下载二进制文件；合法 OA 资料已足够时不增加校园网络门槛，也不凭
+不明失败诊断 VPN 或订阅范围。详见已安装 Auto Research Skill 的
+`references/fulltext-access-preflight.md`。
+
 需要多轮诊断计算时，兼容的锁定 CLI 可将有界 investigation 绑定到同一个计算
 要求。原生宿主在批准范围内试验配置，无需逐次确认，并从不可变历史和剩余额度恢复
 上下文；候选晋级仍需单独批准、冻结、重新认证 Canary 和现有科学评审。探索结果

@@ -124,6 +124,13 @@ authorship, and reuses valid evidence and fulfillment while requiring the
 CLI-reported new scientific reviews. Substantive and post-analysis design
 changes remain successor work; the CLI owns version history and recovery.
 
+`references/fulltext-access-preflight.md` is conditional acquisition guidance
+for a small representative check of materially necessary authorized full text.
+It uses existing exact route/receipt/artifact and handoff channels, distinguishes
+browser access from another transport, and reuses still-applicable content. It
+adds no network diagnostics, entitlement classifier, VPN/login mutation or global
+setup gate; machine validation and durable access state remain CLI-owned.
+
 `references/bounded-investigation.md` adds a conditional path for multiple native
 trials on one computational requirement. It consumes CLI-owned envelope,
 status, candidate and promotion schemas; it adds no executor or automatic loop.

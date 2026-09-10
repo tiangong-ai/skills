@@ -236,6 +236,14 @@ closure is reported separately from task completion. See
 `tiangong-auto-research/references/execution-assurance.md`; frozen history and
 scientific requirements are never silently rewritten to make a gate pass.
 
+Before large acquisition that depends on institutional or other authorized full
+text, the orchestrator checks a small relevant sample through the actual planned
+route and reuses applicable exact successes. It distinguishes article identity
+and readable content from HTTP success or a downloaded binary. Sufficient lawful
+OA evidence needs no campus-network gate; unknown failures do not diagnose VPN
+or subscription coverage. See `references/fulltext-access-preflight.md` inside
+the installed Auto Research Skill.
+
 For repeated diagnostic calculations, a compatible locked CLI provides a bounded
 investigation tied to one computational requirement. The native host can test
 approved configurations without per-trial confirmation, inspect immutable

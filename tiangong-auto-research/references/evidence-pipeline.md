@@ -188,6 +188,12 @@ node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- \
 
 ## 4. Audit acquisition before inference
 
+When required full text depends on institutional or other authorized access,
+read [full-text route preflight](fulltext-access-preflight.md) before large
+acquisition. Verify a few relevant materials through the actual planned route,
+reuse applicable successes and keep OA-sufficient work moving without a campus
+network requirement. This does not replace the coverage or access-handoff rules.
+
 After provisional admission, the native `acquire` stage assesses every source
 exactly once. Use selected external acquisition/document Skills or an explicitly
 authorized browser. Before a large transfer with a known size, use the offline
