@@ -91,16 +91,34 @@ launch a nested producer. The Markdown/plain-text manuscript must contain
 Abstract, Introduction, Methods (or Materials and Methods), Results,
 Discussion, Data availability, Code availability, and References/Bibliography.
 
+Before authoring the final materials, inspect the closed analysis identity and
+the installed CLI's authoritative schema through the locked resolver:
+
+```bash
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- \
+  research publication lineage PROJECT --workspace /absolute/path/to/workspace --json
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- \
+  research schema show publication-result-lineage --json
+```
+
+The lineage view verifies existing closed/reviewed core bindings and deliberately
+returns an empty `files` template. Preserve that source identity while producing
+the manuscript, assessment, figures, tables and source data. Record each actual
+file's raw-byte hash and its source `analysisSha256`; hash binary figures as
+bytes, not decoded text. Do not populate every parent with the
+latest hash after the fact. A B artifact does not become an A result by relabeling
+it. If the locked CLI lacks this view/schema, its older freeze does not establish
+this binding; follow the reviewed upgrade procedure when this assurance is needed.
+
 Create an owner-reviewed submission manifest outside `.tiangong-research`. It
 uses `schemaVersion: 1` and distinct absolute canonical paths. Required roles
 are `cover-letter`, `title-page`, `reporting-checklist`, `data-availability`,
 `code-availability`, and `source-data`; optional roles are
-`figure-table-index`, `extended-data`, and `supplementary-methods`:
+`figure-table-index`, `extended-data`, and `supplementary-methods`. The following
+is only the manifest's `files` array, not a complete manifest:
 
 ```json
-{
-  "schemaVersion": 1,
-  "files": [
+[
     { "role": "cover-letter", "path": "/absolute/path/cover-letter.md" },
     { "role": "title-page", "path": "/absolute/path/title-page.md" },
     {
@@ -116,9 +134,33 @@ are `cover-letter`, `title-page`, `reporting-checklist`, `data-availability`,
       "path": "/absolute/path/code-availability.md"
     },
     { "role": "source-data", "path": "/absolute/path/source-data.csv" }
-  ]
-}
+]
 ```
+
+The root manifest must also contain the completed nested `resultLineage` object,
+not the entire inspection response or an extra `analysisGenerationId` field,
+conforming to the CLI schema:
+its captured base identity and a prepared entry for `manuscript`, `assessment`,
+every submission role and each `supplement-N` in one-based supplied order. Use a
+deliberate unique supplement list so deduplication cannot obscure that order. Include
+actual material figures/tables and their source inputs as submission files or
+supplements; an index is an inventory, not those artifacts. Hash verification
+establishes the declared bindings and bytes, not scientific derivation or complete
+material coverage; the producer must supply that provenance for independent review.
+Unchanged administrative files and demonstrably unaffected materials may be
+reused with their provenance and applicability checked against the current
+analysis; do not claim they were recomputed or rerendered.
+Supply those extra files with `--supplements <absolute-json-file>` at freeze;
+that file contains the ordered array of absolute material paths used for the
+`supplement-N` entries. Do not omit the actual files after recording their hashes.
+
+If freeze/status reports stale analysis, report or review-packet bindings, repair
+the affected base research through supported CLI operations while retaining
+applicable evidence. Do not edit control-store files, swap only a manifest hash,
+or repeat publication reviews against the same stale base. A changed material
+requires its actual source lineage and a coherent refreeze. Historical generations
+without lineage remain limited evidence. Qualitative work keeps its honest
+non-computational metadata; do not invent an execution to fill these fields.
 
 Inspect the assessment schema, then freeze:
 
@@ -136,7 +178,7 @@ node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- \
 
 Freeze requires the configured native producer family and content-addresses the
 manuscript, assessment, supplements, submission files, approved Policy, final
-acquisition/content/inference snapshots, reproduced analysis, Claim-Evidence
+acquisition/content/inference snapshots, mode-bound analysis, Claim-Evidence
 Graph, reproducibility manifest, and base outputs. It validates every finding's
 exact graph topology to atoms, sources, design claims, and the analysis run; a
 graph with the right edge names but disconnected endpoints fails even if its

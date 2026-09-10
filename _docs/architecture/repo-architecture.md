@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-10
-lastReviewedCommit: a3608db
+lastReviewedCommit: 94e6b30499a621783aa9c2b62749cee03da011db
 ---
 
 # Skills Repository Architecture
@@ -65,6 +65,13 @@ explicit custom-provider authorization and uses the CLI's routing binding rather
 than maintaining another authorization ledger. The sandboxed-IDE reference
 separates individual approval rejection from asynchronous host task pauses and
 routes recovery to the observed control layer without repeated paid retries.
+
+Publication guidance preserves the closed analysis identity while material files
+are authored, then uses the CLI-owned result-lineage schema and freeze checks.
+It includes actual figures/tables and raw-byte hashes, preserves unaffected
+evidence/materials, and routes stale core bindings back to supported base recovery.
+The Skill does not relabel old scientific results, patch the control store or
+present a mechanical binding as proof of scientific fidelity.
 
 The canonical Skill also owns the native-host research-question gate. It runs
 before setup or tool use, pauses conclusion-presupposing or
