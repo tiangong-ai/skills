@@ -124,6 +124,14 @@ authorship, and reuses valid evidence and fulfillment while requiring the
 CLI-reported new scientific reviews. Substantive and post-analysis design
 changes remain successor work; the CLI owns version history and recovery.
 
+`references/bounded-investigation.md` adds a conditional path for multiple native
+trials on one computational requirement. It consumes CLI-owned envelope,
+status, candidate and promotion schemas; it adds no executor or automatic loop.
+One approved envelope covers its permitted trials. Candidate promotion, exact
+scientific freezing and fresh certification retain their separate boundaries,
+and unresolved observation cannot be silently retried or accepted. Existing
+independent review and task completion remain authoritative.
+
 The assurance reference also links saved evidence reads, closest-work decisions,
 discriminative pilot interpretation and permitted review repairs to concise
 researcher explanations. Conditional publication guidance records project map

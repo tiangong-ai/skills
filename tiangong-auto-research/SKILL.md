@@ -98,6 +98,9 @@ detailed stop and recovery rules.
   reads, evidence-to-design decisions, pilot interpretation, researcher-facing
   explanations, reviewer-directed repair, or completion reporting. Prefer supported same-project operations for
   an unchanged study; preserve original/current task completion separately.
+- Read [references/bounded-investigation.md](references/bounded-investigation.md)
+  for multiple diagnostic trials on one computational requirement, investigation
+  recovery, candidate selection or explicit promotion to a fresh Canary.
 - Read [references/evidence-pipeline.md](references/evidence-pipeline.md) before
   discovery, acquisition, evidence refresh, or an addendum.
 - Read [references/evidence-exhaustion.md](references/evidence-exhaustion.md)

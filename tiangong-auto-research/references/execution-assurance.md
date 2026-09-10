@@ -276,6 +276,11 @@ work still require the formal reviewed successor, not a fulfillment patch.
 
 ## Observe an actual native calculation
 
+For related diagnostic trials under one finite authorization, use
+[bounded investigation](bounded-investigation.md). Its candidates require
+explicit promotion, freezing and fresh certification; ordinary run observation
+does not substitute for those steps.
+
 The current native host authors and inspects an ordinary calculation for an
 existing computational requirement. When supported, invoke the observer once
 with the exact declared program and inputs, rather than merely reporting that a
