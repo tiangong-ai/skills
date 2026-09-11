@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-11
-lastReviewedCommit: 142b727
+lastReviewedCommit: 6b620e9
 ---
 
 # 天工 AI Skills
@@ -206,6 +206,10 @@ CLI 还可在分析前，经用户批准精确计划，修订既有 planned 规�
 范围、原生宿主检查、独立评审和可移植审计保持关联，不增加固定付费评审轮次；流程闭环与任务完成分别汇报。详见
 `tiangong-auto-research/references/execution-assurance.md`。不修改冻结历史，也不为
 通过门禁而偷偷降低科学要求。
+
+已安装的 orchestrator 负责普通研究的规划、资料处理与验证；继续研究时先恢复
+原始／当前要求、现行检查和未答项，再选择局部工作。它复用精确工件，尊重用户选择
+的独立工作流，不要求重复填写已接受目标，也不在每次继续时复制完整审计包。
 
 当大量取材依赖机构订阅或其他授权全文时，orchestrator 先通过实际计划使用的
 路线检查少量相关文献，并复用仍适用的精确成功工件。它区分论文身份与可读正文、

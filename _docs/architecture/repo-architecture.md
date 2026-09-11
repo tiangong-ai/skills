@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-11
-lastReviewedCommit: 142b727
+lastReviewedCommit: 6b620e9
 ---
 
 # Skills Repository Architecture
@@ -224,3 +224,10 @@ Markdown templates in `references/issue-reporting.md`. The WorkBuddy adapter
 uses that same route, including when setup is absent. Form labels and agent
 headings stay aligned; reporting gathers existing evidence without running
 research or implicitly submitting externally.
+
+The default Auto Research entry assigns operational responsibility to the native
+assistant and routes fresh-context continuation through existing task/check
+state. Compatible packets supply taskAcceptance and exact result artifacts;
+older packets can use task status. Explicit independent workflows retain their
+existing plan/index. Portable audit export is conditional on an actual handoff
+or audit need. Installed routing/restart facts do not attest host activation.

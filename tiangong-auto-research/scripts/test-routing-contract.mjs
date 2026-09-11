@@ -392,6 +392,9 @@ try {
   }
   const commands = invocations.map((argv) => argv.slice(argv.indexOf("--") + 1));
   for (const prefix of [
+    ["research", "status"],
+    ["research", "project", "scientific", "status"],
+    ["research", "publication", "status"],
     ["research", "project", "access", "status"],
     ["research", "project", "investigation", "plan"],
     ["research", "project", "investigation", "approve"],

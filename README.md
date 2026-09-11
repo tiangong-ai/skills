@@ -14,7 +14,7 @@ checkPaths:
   - .claude-plugin/**
   - "*/SKILL.md"
 lastReviewedAt: 2026-09-11
-lastReviewedCommit: 142b727
+lastReviewedCommit: 6b620e9
 ---
 
 # Tiangong AI Skills
@@ -235,6 +235,12 @@ and portable audit stay linked without extra fixed reviewer rounds. Workflow
 closure is reported separately from task completion. See
 `tiangong-auto-research/references/execution-assurance.md`; frozen history and
 scientific requirements are never silently rewritten to make a gate pass.
+
+The installed orchestrator owns ordinary research planning, evidence work and
+validation. On continuation it restores original/current obligations and current
+checks before selecting local work, reuses exact artifacts and honors independent
+workflow overrides. Valid prior goals need no repeated contract, and routine
+continuation does not create another complete audit bundle.
 
 Before large acquisition that depends on institutional or other authorized full
 text, the orchestrator checks a small relevant sample through the actual planned

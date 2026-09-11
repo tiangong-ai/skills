@@ -23,6 +23,57 @@ An existing project without a task contract remains **unassessed** in this
 dimension. Do not manufacture historical requirements, approvals or passing
 checks. Existing Policy/evidence safeguards still apply.
 
+## Recover the task before choosing local work
+
+Honor an explicit independent-workflow override before invoking the CLI; use
+its existing plan and artifact entry as described below. Otherwise, after context
+inspection has resolved the selected workspace, recover the known
+project's original/current requirements, authorized changes, valid checks and
+unanswered obligations. Use the current native packet's `taskAcceptance` and its
+`inputs/task-acceptance.json` when available; `taskContract` alone is only the
+definition. Older compatible packets can use existing task status. When the
+project is not known, use the normal authoritative-project listing, not a scan
+of historical workspaces; ask only if multiple plausible targets remain.
+
+```bash
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research status --workspace /absolute/path/to/workspace --json
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research project task status PROJECT --workspace /absolute/path/to/workspace --json
+```
+
+Use scientific/publication status only when those surfaces apply to this project:
+
+```bash
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research project scientific status PROJECT --workspace /absolute/path/to/workspace --json
+node "$AUTO_RESEARCH_CLI" --workspace /absolute/path/to/workspace -- research publication status PROJECT --workspace /absolute/path/to/workspace --json
+```
+
+Choose the most consequential feasible, authorized missing answer or dependency.
+Explain briefly which original requirement the local action advances, the
+relevant existing result/limitation, and the check or stop condition. Read the
+exact referenced artifacts needed for that decision, including failed checks;
+reuse unchanged context and results rather than rescanning the corpus each turn.
+`recorded` is a native check, not independent approval. Reuse valid checks for
+their exact requirement versions and keep original-only obligations visible; a
+narrower approved scope does not itself answer or erase them. Stale checks need
+revalidation.
+Record actual outcomes through the existing allowed stage/acceptance boundary.
+
+A recent reviewer suggestion is evidence for repair, not authority to replace
+the original question. Separate necessary corrections from a proposed change
+of scope. Ordinary authorized technical work proceeds without asking the user
+to manage it. A missing permission blocks its dependent work, not unrelated
+permitted work, while explicit pauses and CLI/handoff gates remain binding.
+Do not turn incomplete data into an automatic new thesis about impossibility.
+
+If the owner explicitly moved to an independent workflow, use its existing
+active plan/backlog and artifact index as the single mapping. Do not reactivate
+a retired CLI, create a parallel state ledger, or treat those notes as CLI
+certification. Link current manuscript, inputs, code, results and reviews through
+existing exact locators; export a new complete bundle only for an actual handoff
+or audit need. A missing UI Goal update is not scientific completion and does
+not authorize internal-state edits; report that UI limitation while continuing
+otherwise permitted work. Never promise background execution without a mechanism.
+
 ## Turn existing evidence into the next decision
 
 At a material stage transition or blocker, tell the researcher what changed,
