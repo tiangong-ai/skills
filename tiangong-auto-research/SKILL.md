@@ -13,6 +13,22 @@ that reporting workflow. Reporting does not require a valid research workspace,
 setup, or scientific-question approval. Return the report without entering the
 research workflow unless the user also requests research execution.
 
+## Own the accepted research task
+
+The user supplies goals, material scope preferences and necessary permissions;
+the native assistant owns operationalization, planning, evidence work, technical
+choices, checks, integration and an honest completion judgment. Preserve an
+accepted goal through the existing task intake; do not ask the user to author
+its JSON or repeat the same contract. No goal yet means no invented task facts.
+
+On “continue”, a new session or context recovery, first follow
+[task recovery](references/execution-assurance.md#recover-the-task-before-choosing-local-work)
+before choosing another local experiment. An unchanged valid accepted question does
+not need repeated approval; apply the question gate to a new substantive request
+or new biased constraint. Project instructions installed on disk are not proof
+that an already-running host loaded them; honor reported restart/compatibility
+requirements and user overrides.
+
 ## Gate the research question before acting
 
 Before any CLI, browser, search, database, or file operation, inspect the
@@ -93,7 +109,7 @@ detailed stop and recovery rules.
 - Read [references/production-research.md](references/production-research.md)
   before production preflight, execution, recovery, or closure.
 - Read [references/execution-assurance.md](references/execution-assurance.md)
-  before original-task intake, pre-analysis evidence correction, scope changes,
+  before original-task intake, fresh-session continuation, pre-analysis evidence correction, scope changes,
   planned-object fulfillment, observed native calculations, packet-only artifact
   reads, evidence-to-design decisions, pilot interpretation, researcher-facing
   explanations, reviewer-directed repair, or completion reporting. Prefer supported same-project operations for

@@ -377,10 +377,12 @@ default status/run path excludes superseded, archived, and abandoned projects;
 `research status --all` is the audit view. Archive complete/stale history and
 abandon unfinished history with an explicit reason.
 
-At a milestone, use `research project audit export` followed by
+When a portable handoff or audit is needed, use `research project audit export` followed by
 `research project audit verify`. The portable bundle includes exact formal
 evidence/artifact bytes and project review objects while excluding credentials,
-host-specific paths, active native state, capsules, and unrelated projects.
+host-specific paths, active native state, capsules, and unrelated projects. Reuse
+existing exact bundles or artifact links when suitable; normal continuation or a
+cosmetic revision does not require another complete delivery copy.
 
 When the next material step cannot be performed autonomously, use one of two
 durable states rather than another retry:
