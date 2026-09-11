@@ -236,6 +236,12 @@ closure is reported separately from task completion. See
 `tiangong-auto-research/references/execution-assurance.md`; frozen history and
 scientific requirements are never silently rewritten to make a gate pass.
 
+The installed orchestrator owns ordinary research planning, evidence work and
+validation. On continuation it restores original/current obligations and current
+checks before selecting local work, reuses exact artifacts and honors independent
+workflow overrides. Valid prior goals need no repeated contract, and routine
+continuation does not create another complete audit bundle.
+
 Before large acquisition that depends on institutional or other authorized full
 text, the orchestrator checks a small relevant sample through the actual planned
 route and reuses applicable exact successes. It distinguishes article identity
