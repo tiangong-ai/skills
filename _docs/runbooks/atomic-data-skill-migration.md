@@ -17,8 +17,8 @@ checkPaths:
   - "*-search/**"
   - "*-download/**"
   - tiangong-auto-research/**
-lastReviewedAt: 2026-09-08
-lastReviewedCommit: 76dc843048909a54fd8a304686b75ce8f5fa15a4
+lastReviewedAt: 2026-09-12
+lastReviewedCommit: c5f8fe3ff43313f69b8deb4d970261c4013c5310
 ---
 
 # 原子数据 Skill 迁移实施计划

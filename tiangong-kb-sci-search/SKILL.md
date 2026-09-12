@@ -25,7 +25,7 @@ service failure; do not try to bypass it.
 ## Direct-search prerequisites
 
 - The standalone wrapper defaults to its separately tested CLI version
-  `0.0.30`. This is not the Auto Research workspace runtime. Managed research
+  `0.0.62`. This is not the Auto Research workspace runtime. Managed research
   resolves its exact version from the immutable setup plan or
   `runtime-lock.json` and must use the broker.
   Set `TIANGONG_AI_CLI_BIN` to one exact executable path, or
@@ -54,7 +54,7 @@ export TIANGONG_SCI_APIKEY='owner-authorized key'
 The wrapper invokes the pinned CLI equivalent of:
 
 ```bash
-npx --yes @tiangong-ai/cli@0.0.30 research search \
+npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai research search \
   --query <query> --sources sci --json
 ```
 
