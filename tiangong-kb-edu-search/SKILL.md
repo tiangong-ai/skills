@@ -11,15 +11,16 @@ intentionally single-source: always search `edu`, never `all`, `course`, or
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
+- The wrapper defaults to the exact reviewed entrypoint
+  `npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
-  override the CLI entrypoint.
-- Set the authentication environment variables expected by `tiangong-ai`.
+  override the CLI entrypoint intentionally.
+- Set `TIANGONG_EDU_APIKEY` or `TIANGONG_AI_APIKEY`. Credentials are never
+  accepted in wrapper JSON, request files, URLs, or CLI arguments.
 - When `request_file` / `input_file` is provided, the wrapper loads `.env` from
   that file's directory by default. `env_file` can point to a different dotenv
-  file. Loaded dotenv values only fill unset environment variables; explicit
-  JSON fields such as `api_key`, `edu_api_key`, and `api_base_url` are passed as
-  CLI flags and take precedence.
+  file. It must be an owner-only regular non-symlink file (`chmod 600`), and
+  only documented Tiangong variables are loaded. Existing process variables win.
 - Optionally set `TIANGONG_AI_API_BASE_URL`; the CLI accepts a Supabase project
   root, `/functions/v1`, or `/rest/v1` and derives Functions URLs.
 
@@ -37,7 +38,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@0.0.19 education search --query <query> --sources edu --json
+npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai education search --query <query> --sources edu --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
@@ -87,6 +88,5 @@ forward them through the CLI `--input` path. The same payload can also be put in
   fields for `edu_search`.
 - `sources`: optional compatibility field; only `edu` or `default` is accepted.
 - `dry_run`: true to return the exact request plan with masked credentials.
-- `api_base_url`, `api_key`, `edu_api_key`.
-- `edu_url`, `region`, `timeout`.
+- `api_base_url`, `edu_url`, `region`, `timeout` as non-secret routing values.
 - `top_k`, `ext_k`: only used in query mode.

@@ -11,16 +11,16 @@ multi-source preset.
 
 ## Prerequisites
 
-- The wrapper defaults to `npx @tiangong-ai/cli@0.0.19`; users do not need a
+- The wrapper defaults to the exact reviewed entrypoint
+  `npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai`; users do not need a
   preinstalled CLI. Set `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to
-  override the CLI entrypoint. Native ESG search requires
-  `@tiangong-ai/cli@0.0.19` or later.
-- Set `TIANGONG_ESG_APIKEY` or `TIANGONG_AI_APIKEY`. The explicit JSON field
-  `esg_api_key` takes precedence over `api_key`, and both take precedence over
-  environment credentials.
+  override the CLI entrypoint intentionally.
+- Set `TIANGONG_ESG_APIKEY` or `TIANGONG_AI_APIKEY`. Credentials are never
+  accepted in wrapper JSON, request files, URLs, or CLI arguments.
 - When `request_file` / `input_file` is provided, the wrapper loads `.env` from
   that file's directory by default. `env_file` can point to a different dotenv
-  file. Loaded dotenv values only fill unset environment variables.
+  file. It must be an owner-only regular non-symlink file (`chmod 600`), and
+  only documented Tiangong variables are loaded. Existing process variables win.
 - Optionally set `TIANGONG_ESG_SEARCH_URL`. The CLI otherwise derives the
   `esg_search` endpoint from `TIANGONG_RESEARCH_API_BASE_URL`,
   `TIANGONG_AI_SEARCH_API_BASE_URL`, or `TIANGONG_AI_API_BASE_URL`. The wrapper
@@ -40,7 +40,7 @@ For normal searches, pass a query:
 The script calls:
 
 ```bash
-npx @tiangong-ai/cli@0.0.19 research search --sources esg --query <query> --json
+npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai research search --sources esg --query <query> --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
@@ -99,5 +99,5 @@ them through the CLI `--input` path:
   `topK`, `extK`: optional inline raw payload fields for `esg_search`.
 - `sources`: optional compatibility field; only `esg` or `default` is accepted.
 - `dry_run`: return the exact request plan with masked credentials.
-- `api_base_url`, `api_key`, `esg_api_key`, `esg_url`, `region`, `timeout`.
+- `api_base_url`, `esg_url`, `region`, `timeout` as non-secret routing values.
 - `top_k`, `ext_k`: only used in query mode.

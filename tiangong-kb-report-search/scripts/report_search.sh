@@ -7,14 +7,14 @@ umask 077
 
 JSON_INPUT="${1:-}"
 OUTPUT_FILE="${2:-}"
-STANDALONE_TESTED_CLI_VERSION="0.0.30"
+STANDALONE_TESTED_CLI_VERSION="0.0.62"
 CLI_COMMAND=()
 if [ -n "${TIANGONG_AI_CLI:-}" ]; then
     read -r -a CLI_COMMAND <<< "$TIANGONG_AI_CLI"
 elif [ -n "${TIANGONG_AI_CLI_BIN:-}" ]; then
     CLI_COMMAND=("$TIANGONG_AI_CLI_BIN")
 else
-    CLI_COMMAND=(npx --yes "@tiangong-ai/cli@$STANDALONE_TESTED_CLI_VERSION")
+    CLI_COMMAND=(npx --yes --package "@tiangong-ai/cli@$STANDALONE_TESTED_CLI_VERSION" -- tiangong-ai)
 fi
 
 if [ -z "$JSON_INPUT" ]; then

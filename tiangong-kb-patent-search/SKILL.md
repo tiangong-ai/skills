@@ -17,7 +17,7 @@ The standalone wrapper never reads the workspace broker credential store.
 ## Prerequisites
 
 - The standalone wrapper defaults to its separately tested CLI version
-  `0.0.30`; this is not the Auto Research workspace runtime. Set
+  `0.0.62`; this is not the Auto Research workspace runtime. Set
   `TIANGONG_AI_CLI` or `TIANGONG_AI_CLI_BIN` only to intentionally override the
   standalone entrypoint.
 - Set `TIANGONG_PATENT_APIKEY` or the common fallback
@@ -50,7 +50,7 @@ then emits a non-secret audit event.
 The script calls:
 
 ```bash
-npx --yes @tiangong-ai/cli@0.0.30 research search --query <query> --sources patent --json
+npx --yes --package "@tiangong-ai/cli@0.0.62" -- tiangong-ai research search --query <query> --sources patent --json
 ```
 
 For exact edge-function payloads, provide `request_file` or `input_file`:
